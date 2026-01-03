@@ -65,7 +65,7 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   if (mem_busy) {
     // A memory request is ongoing, waiting for response from memory
     // In current design, memory always responds in 1 cycle
-    if (mem_latency_cnt >= ICACHE_LATENCY) {
+    if (mem_latency_cnt >= ICACHE_MISS_LATENCY) {
       icache.io.in.mem_resp_valid = true;
     } else {
       icache.io.in.mem_resp_valid = false;
