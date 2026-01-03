@@ -10,9 +10,9 @@
 // no actual icache, just a simple simulation
 #include "./include/icache_module.h"
 #include "mmu_io.h"
-#include <queue>
 #include <MMU.h>
 #include <SimCpu.h>
+#include <queue>
 
 ICache icache;
 extern SimCpu cpu;
@@ -31,16 +31,19 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   }
 #ifdef USE_TRUE_ICACHE
   // register to keep track of whether memory is busy
-  static bool mem_busy = false; 
+  static bool mem_busy = false;
+  static int mem_latency_cnt = 0;
   // register to keep track of the vaddr being handled by icache
   static uint32_t current_vaddr_reg; // the vaddr being processed by icache
-  static bool     valid_reg; // whether current_vaddr_reg is valid
+  static bool valid_reg;             // whether current_vaddr_reg is valid
 
   // deal with "refetch" signal
   if (in->refetch) {
     // clear the icache state
     icache.set_refetch();
     valid_reg = false;
+    mem_busy = false;
+    mem_latency_cnt = 0;
   }
 
   // set input for 1st pipeline stage (IFU)
@@ -55,16 +58,18 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
 
   // set input for 2nd pipeline stage (MMU)
   icache.io.in.ppn = mmu_resp.ptag;
-  icache.io.in.ppn_valid = mmu_resp.valid &&
-                          !in->refetch &&
-                          !mmu_resp.miss;
+  icache.io.in.ppn_valid = mmu_resp.valid && !in->refetch && !mmu_resp.miss;
   icache.io.in.page_fault = mmu_resp.excp;
 
   // set input for 2nd pipeline stage (Memory)
   if (mem_busy) {
     // A memory request is ongoing, waiting for response from memory
     // In current design, memory always responds in 1 cycle
-    icache.io.in.mem_resp_valid = true;
+    if (mem_latency_cnt >= ICACHE_LATENCY) {
+      icache.io.in.mem_resp_valid = true;
+    } else {
+      icache.io.in.mem_resp_valid = false;
+    }
     bool mem_resp_valid = icache.io.in.mem_resp_valid;
     bool mem_resp_ready = icache.io.out.mem_resp_ready;
     if (mem_resp_valid) {
@@ -88,8 +93,8 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   cpu.mmu.io.in.mmu_ifu_resp.ready = true; // ready to receive resp
   if (icache.io.out.ifu_req_ready && icache.io.in.ifu_req_valid) {
     // case1: ICache 支持新的请求，故而可以将新的 IFU 请求发送给 MMU
-    cpu.mmu.io.in.mmu_ifu_req.valid = icache.io.out.ifu_req_ready && 
-                                  in->icache_read_valid;
+    cpu.mmu.io.in.mmu_ifu_req.valid =
+        icache.io.out.ifu_req_ready && in->icache_read_valid;
     cpu.mmu.io.in.mmu_ifu_req.vtag = in->fetch_address >> 12;
   } else if (!icache.io.out.ifu_req_ready) {
     // case 2: ICache 不支持新的请求，需要重发（replay），具体有两种可能：
@@ -97,7 +102,9 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
     //  - 上一个 mmu_ifu_req 请求返回了 miss
     cpu.mmu.io.in.mmu_ifu_req.valid = true; // replay request
     if (!valid_reg) {
-      cout << "[icache_top] ERROR: valid_reg is false when replaying mmu_ifu_req" << endl;
+      cout
+          << "[icache_top] ERROR: valid_reg is false when replaying mmu_ifu_req"
+          << endl;
       cout << "[icache_top] sim_time: " << dec << sim_time << endl;
       exit(1);
     }
@@ -108,10 +115,10 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   }
 
   if (in->run_comb_only) {
-    // Only run combinational logic, do not update registers. This is 
+    // Only run combinational logic, do not update registers. This is
     // used for BPU module, which needs to know if icache is ready
     out->icache_read_ready = icache.io.out.ifu_req_ready;
-    return ;
+    return;
   }
 
   //
@@ -121,12 +128,17 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   icache.seq();
 
   // sequential logic for memory (mem_busy)
+  if (mem_busy) {
+    mem_latency_cnt++;
+  }
   bool mem_req_ready = !mem_busy;
   bool mem_req_valid = icache.io.out.mem_req_valid;
   if (mem_req_ready && mem_req_valid) {
-    // send request to memory 
+    // send request to memory
     mem_busy = true;
-  } 
+    mem_latency_cnt = 0;
+    cpu.ctx.perf.icache_miss_num++;
+  }
   bool mem_resp_valid = icache.io.in.mem_resp_valid;
   bool mem_resp_ready = icache.io.out.mem_resp_ready;
   if (mem_resp_valid && mem_resp_ready) {
@@ -141,16 +153,19 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   bool miss = icache.io.out.miss;
   if (ifu_resp_valid && ifu_resp_ready) {
     out->icache_read_complete = true;
-    // in current design, miss is useless and always false when ifu_resp is valid
+    // in current design, miss is useless and always false when ifu_resp is
+    // valid
     if (miss) {
-      cout << "[icache_top] WARNING: miss is true when ifu_resp is valid" << endl;
+      cout << "[icache_top] WARNING: miss is true when ifu_resp is valid"
+           << endl;
       cout << "[icache_top] sim_time: " << dec << sim_time << endl;
       exit(1);
     }
     // keep index within a cacheline
     out->fetch_pc = current_vaddr_reg;
     uint32_t mask = ICACHE_LINE_SIZE - 1; // work for ICACHE_LINE_SIZE==2^k
-    int base_idx = (current_vaddr_reg & mask) / 4; // index of the instruction in the cacheline
+    int base_idx = (current_vaddr_reg & mask) /
+                   4; // index of the instruction in the cacheline
     for (int i = 0; i < FETCH_WIDTH; i++) {
       if (base_idx + i >= ICACHE_LINE_SIZE / 4) {
         // throw the instruction that exceeds the cacheline
@@ -159,7 +174,9 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
         out->inst_valid[i] = false;
         continue;
       }
-      out->fetch_group[i] = icache.io.out.ifu_page_fault ?  INST_NOP : icache.io.out.rd_data[i+base_idx];
+      out->fetch_group[i] = icache.io.out.ifu_page_fault
+                                ? INST_NOP
+                                : icache.io.out.rd_data[i + base_idx];
       out->page_fault_inst[i] = icache.io.out.ifu_page_fault;
       out->inst_valid[i] = true;
     }
@@ -177,6 +194,7 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
     // only push when ifu_req is sent to icache
     current_vaddr_reg = in->fetch_address;
     valid_reg = true;
+    cpu.ctx.perf.icache_access_num++;
   } else if (ifu_resp_valid && ifu_resp_ready) {
     valid_reg = false; // clear the valid_reg when ifu_resp is sent to ifu
   }

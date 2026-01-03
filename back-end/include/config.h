@@ -36,7 +36,9 @@ using namespace std;
 #define VIRTUAL_MEMORY_LENGTH (1024 * 1024 * 1024)  // 4B
 #define PHYSICAL_MEMORY_LENGTH (1024 * 1024 * 1024) // 4B
 
-#define MAX_SIM_TIME 100000000000
+#define ICACHE_LATENCY 100
+
+#define MAX_SIM_TIME 10000000
 
 #define FETCH_WIDTH 4
 #define COMMIT_WIDTH 4
@@ -236,6 +238,9 @@ public:
   uint64_t cache_access_num = 0;
   uint64_t cache_miss_num = 0;
 
+  uint64_t icache_access_num = 0;
+  uint64_t icache_miss_num = 0;
+
   uint64_t cond_br_num = 0;
   uint64_t jalr_br_num = 0;
   uint64_t ret_br_num = 0;
@@ -268,6 +273,8 @@ public:
     // cache
     cache_access_num = 0;
     cache_miss_num = 0;
+    icache_access_num = 0;
+    icache_miss_num = 0;
 
     // bpu
     cond_br_num = 0;
@@ -295,6 +302,7 @@ public:
            (double)commit_num / cycle);
     printf("\n");
     perf_print_cache();
+    perf_print_icache();
     perf_print_branch();
   }
 
@@ -307,6 +315,18 @@ public:
     printf("\033[1;32mcache hit      : %ld\033[0m\n",
            cache_access_num - cache_miss_num);
     printf("\033[1;32mcache miss     : %ld\033[0m\n", cache_miss_num);
+    printf("\n");
+  }
+
+  void perf_print_icache() {
+    printf("\033[1;32m*********ICACHE COUNTER***********\033[0m\n");
+
+    printf("\033[1;32micache accuracy : %f\033[0m\n",
+           1 - icache_miss_num / (double)icache_access_num);
+    printf("\033[1;32micache access   : %ld\033[0m\n", icache_access_num);
+    printf("\033[1;32micache hit      : %ld\033[0m\n",
+           icache_access_num - icache_miss_num);
+    printf("\033[1;32micache miss     : %ld\033[0m\n", icache_miss_num);
     printf("\n");
   }
 

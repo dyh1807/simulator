@@ -222,6 +222,8 @@ int main(int argc, char *argv[]) {
     cout << "\033[1;31m------------------------------\033[0m" << endl;
     cout << "\033[1;31mTIME OUT!!!!QAQ\033[0m" << endl;
     cout << "\033[1;31m------------------------------\033[0m" << endl;
+    cpu.ctx.perf.perf_print();
+    cout << "\033[1;31m------------------------------\033[0m" << endl;
     exit(1);
   }
 
