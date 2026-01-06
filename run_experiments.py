@@ -6,7 +6,7 @@ import sys
 config_path = "back-end/include/config.h"
 latencies = [1, 20, 50, 100]
 images = [
-    "./baremetal/memory",
+    "./baremetal/linux.bin",
     "./baremetal/new_coremark/coremark.bin",
     "./baremetal/new_dhrystone/dhrystone.bin"
 ]
@@ -88,4 +88,4 @@ for image in images:
             print(f"{image:<40} | {lat:<10} | {'Failed':<12} | {'N/A':<10} | {'N/A':<12} | {'N/A':<10} | {'N/A':<10} | {'N/A':<10}")
 
 # Reset to default
-set_latency(50)
+set_latency(100)
