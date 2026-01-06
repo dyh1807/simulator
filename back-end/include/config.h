@@ -41,7 +41,7 @@ using namespace std;
 #endif
 
 #ifndef MAX_COMMIT_INST
-#define MAX_COMMIT_INST 5000000
+#define MAX_COMMIT_INST 150000000
 #endif
 
 #define MAX_SIM_TIME 1000000000
