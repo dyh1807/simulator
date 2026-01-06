@@ -210,6 +210,9 @@ int main(int argc, char *argv[]) {
 
     if (cpu.ctx.sim_end)
       break;
+    
+    if (cpu.ctx.perf.commit_num >= MAX_COMMIT_INST)
+      break;
   }
 
   if (sim_time != MAX_SIM_TIME) {

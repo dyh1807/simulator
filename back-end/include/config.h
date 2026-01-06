@@ -36,9 +36,15 @@ using namespace std;
 #define VIRTUAL_MEMORY_LENGTH (1024 * 1024 * 1024)  // 4B
 #define PHYSICAL_MEMORY_LENGTH (1024 * 1024 * 1024) // 4B
 
+#ifndef ICACHE_MISS_LATENCY
 #define ICACHE_MISS_LATENCY 100
+#endif
 
-#define MAX_SIM_TIME 200000000
+#ifndef MAX_COMMIT_INST
+#define MAX_COMMIT_INST 5000000
+#endif
+
+#define MAX_SIM_TIME 1000000000
 
 #define FETCH_WIDTH 4
 #define COMMIT_WIDTH 4
