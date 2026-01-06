@@ -18,7 +18,6 @@ ICache icache;
 extern SimCpu cpu;
 
 extern uint32_t *p_memory;
-extern Back_Top back;
 bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t satp, uint32_t type,
            bool *mstatus, bool *sstatus, int privilege, uint32_t *p_memory);
 
@@ -203,26 +202,36 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
   // able to fetch instructions within 1 cycle
   out->icache_read_complete = true;
   out->icache_read_ready = true;
+  out->fetch_pc = in->fetch_address;
   // when BPU sends a valid read request
   if (in->icache_read_valid) {
     // read instructions from pmem
     bool mstatus[32], sstatus[32];
 
-    cvt_number_to_bit_unsigned(mstatus, back.csr.CSR_RegFile[number_mstatus],
-                               32);
+    cvt_number_to_bit_unsigned(mstatus, cpu.back.out.mstatus, 32);
 
-    cvt_number_to_bit_unsigned(sstatus, back.csr.CSR_RegFile[number_sstatus],
-                               32);
+    cvt_number_to_bit_unsigned(sstatus, cpu.back.out.sstatus, 32);
 
     for (int i = 0; i < FETCH_WIDTH; i++) {
       uint32_t v_addr = in->fetch_address + (i * 4);
       uint32_t p_addr;
-      if ((back.csr.CSR_RegFile[number_satp] & 0x80000000) &&
-          back.csr.privilege != 3) {
+      // avoid crossing cacheline fetch
+      if (v_addr / ICACHE_LINE_SIZE != (in->fetch_address) / ICACHE_LINE_SIZE) {
+        // crossing cache line
+        out->fetch_group[i] = INST_NOP;
+        out->page_fault_inst[i] = false;
+        out->inst_valid[i] = false;
+        continue;
+      }
+      out->inst_valid[i] = true;
+
+      //
+      // fetch instructions not crossing cache line
+      if ((cpu.back.out.satp & 0x80000000) && cpu.back.out.privilege != 3) {
 
         out->page_fault_inst[i] =
-            !va2pa(p_addr, v_addr, back.csr.CSR_RegFile[number_satp], 0,
-                   mstatus, sstatus, back.csr.privilege, p_memory);
+            !va2pa(p_addr, v_addr, cpu.back.out.satp, 0, mstatus, sstatus,
+                   cpu.back.out.privilege, p_memory);
         if (out->page_fault_inst[i]) {
           out->fetch_group[i] = INST_NOP;
         } else {
@@ -238,6 +247,9 @@ void icache_top(struct icache_in *in, struct icache_out *out) {
         printf("[icache] instruction : %x\n", out->fetch_group[i]);
       }
     }
+  } else {
+    out->fetch_pc = 0; // Set default value when not valid
   }
+
 #endif
 }
