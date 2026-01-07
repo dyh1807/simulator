@@ -5,7 +5,9 @@ import time
 import multiprocessing
 import sys
 
-latencies = [0, 1, 20, 50, 100]
+# Configurations
+latencies = [1, 20, 50, 100]
+line_sizes = [32, 64]
 # Add your configurable images here
 images = [
     "./baremetal/linux.bin",
@@ -13,35 +15,66 @@ images = [
     "./baremetal/new_dhrystone/dhrystone.bin"
 ]
 target_inst = 150000000
+
+# Generate configurations
+# Format: (latency, line_size, use_true_icache)
+# Note: Latency 0 represents ideal icache (no USE_TRUE_ICACHE), where latency is irrelevant
+configs = []
+
+# Ideal ICache (Simple Model) - Latency irrelevant, but we track line size
+for size in line_sizes:
+    configs.append((0, size, False))
+
+# True ICache - Latency and line size relevant
+for lat in latencies:
+    for size in line_sizes:
+        configs.append((lat, size, True))
+
 binaries = []
+
+def get_binary_name(lat, size, use_true):
+    type_str = "true" if use_true else "ideal"
+    return f"sim_{type_str}_lat_{lat}_ls_{size}"
 
 def compile_binaries():
     print("Compiling binaries...")
-    for lat in latencies:
+    for lat, size, use_true in configs:
         # Clean build to ensure flags are applied
         subprocess.run(["make", "clean"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Original flags from Makefile: -O3 -march=native -funroll-loops -mtune=native --std=c++2a
-        cxx_flags = f"-O3 -march=native -funroll-loops -mtune=native --std=c++2a -DICACHE_MISS_LATENCY={lat} -DMAX_COMMIT_INST={target_inst}"
+        cxx_flags = f"-O3 -march=native -funroll-loops -mtune=native --std=c++2a -DMAX_COMMIT_INST={target_inst}"
+        cxx_flags += f" -DICACHE_LINE_SIZE={size}"
         
-        subprocess.run(["make", "-j", f"CXXFLAGS={cxx_flags}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        if use_true:
+            cxx_flags += f" -DUSE_TRUE_ICACHE -DICACHE_MISS_LATENCY={lat}"
+        else:
+            # For ideal cache, latency macro isn't used, but we can define it or leave it default
+            pass
+            
+        try:
+            subprocess.run(["make", "-j", f"CXXFLAGS={cxx_flags}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Compilation failed for config ({lat}, {size}, {use_true})")
+            print(e.stderr)
+            sys.exit(1)
         
-        binary_name = f"sim_lat_{lat}"
+        binary_name = get_binary_name(lat, size, use_true)
         subprocess.run(["mv", "a.out", binary_name], check=True)
         binaries.append(binary_name)
         print(f"Compiled {binary_name}")
 
 def run_simulation(task):
-    binary, image = task
-    latency = int(binary.split("_")[-1])
+    binary, image, config = task
+    lat, size, use_true = config
     img_name = os.path.basename(image)
     
     try:
         # Check if binary and image exist
         if not os.path.exists(binary):
-            return {"latency": latency, "image": img_name, "error": f"Binary {binary} not found"}
+            return {"config": config, "image": img_name, "error": f"Binary {binary} not found"}
         if not os.path.exists(image):
-            return {"latency": latency, "image": img_name, "error": f"Image {image} not found"}
+            return {"config": config, "image": img_name, "error": f"Image {image} not found"}
 
         # Run command: ./binary ./image
         start_time = time.time()
@@ -49,12 +82,12 @@ def run_simulation(task):
         end_time = time.time()
         
         if result.returncode != 0 and result.returncode != 1:
-             return {"latency": latency, "image": img_name, "error": f"RC {result.returncode}, Stderr: {result.stderr[:200]}"}
+             return {"config": config, "image": img_name, "error": f"RC {result.returncode}, Stderr: {result.stderr[:200]}"}
 
         output = result.stdout
         
         metrics = {}
-        metrics["latency"] = latency
+        metrics["config"] = config
         metrics["image"] = img_name
         metrics["elapsed"] = end_time - start_time
         
@@ -88,13 +121,15 @@ def run_simulation(task):
             
         return metrics
     except Exception as e:
-        return {"latency": latency, "image": img_name, "error": str(e)}
+        return {"config": config, "image": img_name, "error": str(e)}
 
 def format_row(r):
     img_name = r.get('image', 'N/A')
-    latency = r.get('latency', 'N/A')
+    lat, size, use_true = r.get('config', (0, 0, False))
+    type_str = "True" if use_true else "Ideal"
+    
     if "error" in r:
-        return f"{img_name:<15} | {latency:<5} | Error: {r['error']}"
+        return f"{img_name:<15} | {type_str:<6} | {size:<4} | {lat:<5} | Error: {r['error']}"
     else:
         inst_num = r.get('inst_num', 'N/A')
         cycles = r.get('cycles', 'N/A')
@@ -110,7 +145,7 @@ def format_row(r):
         bpu_acc_str = f"{bpu_acc:.6f}" if isinstance(bpu_acc, float) else str(bpu_acc)
         elapsed_str = f"{elapsed:.2f}"
         
-        return f"{img_name:<15} | {latency:<5} | {inst_num:<10} | {cycles:<10} | {ipc_str:<8} | {access:<10} | {miss:<8} | {icache_acc_str:<10} | {bpu_acc_str:<8} | {elapsed_str:<7}"
+        return f"{img_name:<15} | {type_str:<6} | {size:<4} | {lat:<5} | {inst_num:<10} | {cycles:<10} | {ipc_str:<8} | {access:<10} | {miss:<8} | {icache_acc_str:<10} | {bpu_acc_str:<8} | {elapsed_str:<7}"
 
 def print_progress(completed, total, length=40):
     percent = completed / total
@@ -123,9 +158,13 @@ def main():
     compile_binaries()
     
     tasks = []
+    # Map binary to config
+    binary_map = {get_binary_name(lat, size, use_true): (lat, size, use_true) for lat, size, use_true in configs}
+    
     for binary in binaries:
+        config = binary_map[binary]
         for image in images:
-            tasks.append((binary, image))
+            tasks.append((binary, image, config))
             
     total_tasks = len(tasks)
     print(f"\nRunning {total_tasks} simulations in parallel...")
@@ -134,7 +173,7 @@ def main():
     results = []
     
     # Print header first
-    header = f"{'Image':<15} | {'Lat':<5} | {'Inst Num':<10} | {'Cycles':<10} | {'IPC':<8} | {'Access':<10} | {'Miss':<8} | {'ICache Acc':<10} | {'BPU Acc':<8} | {'Time(s)':<7}"
+    header = f"{'Image':<15} | {'Type':<6} | {'Size':<4} | {'Lat':<5} | {'Inst Num':<10} | {'Cycles':<10} | {'IPC':<8} | {'Access':<10} | {'Miss':<8} | {'ICache Acc':<10} | {'BPU Acc':<8} | {'Time(s)':<7}"
     print("\n" + "="*len(header))
     print(header)
     print("-" * len(header))
@@ -145,7 +184,7 @@ def main():
         results.append(result)
         
         # Clear progress bar line
-        sys.stdout.write('\r' + ' ' * 80 + '\r')
+        sys.stdout.write('\r' + ' ' * 100 + '\r')
         
         # Print result row
         print(format_row(result))
@@ -158,9 +197,15 @@ def main():
     print() # Newline after progress bar
     print("="*len(header))
     
-    # Optional: Reprint sorted table summary
+    # Reprint sorted table summary
     print("\nSorted Summary:")
-    results.sort(key=lambda x: (x.get("image", ""), x.get("latency", 0)))
+    # Sort order: Image (index 0) -> Type (config[2]) -> Size (config[1]) -> Latency (config[0])
+    results.sort(key=lambda x: (
+        x.get("image", ""), 
+        x.get("config", (0,0,False))[2], # use_true (False/Ideal first)
+        x.get("config", (0,0,False))[1], # line_size
+        x.get("config", (0,0,False))[0]  # latency
+    ))
     print("="*len(header))
     print(header)
     print("-" * len(header))
