@@ -58,7 +58,7 @@ $(BUILD_DIR)/%.o: %.cpp
 # to ensure specific flags are applied correctly without complex conditional logic.
 
 MEM_DIR=./baremetal
-IMG=./baremetal/memory
+IMG=./baremetal/linux.bin
 
 cov: 
 	$(CXX) $(CXXINCLUDE) $(SRCS) $(LIBS) -O0 --coverage -o $(TARGET)

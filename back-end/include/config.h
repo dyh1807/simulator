@@ -65,7 +65,7 @@ using namespace std;
 #define ALU_NUM 2
 #define BRU_NUM 2
 
-#define LOG_START 200000
+#define LOG_START 0
 // #define LOG_ENABLE
 
 #ifndef LOG_ENABLE
@@ -77,8 +77,8 @@ using namespace std;
 #else
 #define DEBUG (1 && (sim_time >= 0))
 #define LOG (1 && (sim_time >= LOG_START))
-#define MEM_LOG (1 && (sim_time >= LOG_START))
-#define DCACHE_LOG (1 && (sim_time >= LOG_START))
+#define MEM_LOG (0 && (sim_time >= LOG_START))
+#define DCACHE_LOG (0 && (sim_time >= LOG_START))
 #define MMU_LOG (0 && (sim_time >= LOG_START))
 #endif
 
