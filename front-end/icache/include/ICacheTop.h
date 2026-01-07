@@ -7,15 +7,24 @@
 
 // Abstract Base Class for ICache Top-level Logic
 class ICacheTop {
+protected:
+  struct icache_in *in = nullptr;
+  struct icache_out *out = nullptr;
+
 public:
-  virtual void comb(struct icache_in *in, struct icache_out *out) = 0;
-  virtual void seq(struct icache_in *in) = 0;
+  void setIO(struct icache_in *in_ptr, struct icache_out *out_ptr) {
+    in = in_ptr;
+    out = out_ptr;
+  }
+
+  virtual void comb() = 0;
+  virtual void seq() = 0;
 
   // Template method for execution step
-  virtual void step(struct icache_in *in, struct icache_out *out) {
-    comb(in, out);
+  virtual void step() {
+    comb();
     if (!in->run_comb_only) {
-      seq(in);
+      seq();
     }
   }
 
@@ -34,15 +43,15 @@ private:
 
 public:
   TrueICacheTop(ICache &hw);
-  void comb(struct icache_in *in, struct icache_out *out) override;
-  void seq(struct icache_in *in) override;
+  void comb() override;
+  void seq() override;
 };
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
 class SimpleICacheTop : public ICacheTop {
 public:
-  void comb(struct icache_in *in, struct icache_out *out) override;
-  void seq(struct icache_in *in) override;
+  void comb() override;
+  void seq() override;
 };
 
 // Factory function to get the singleton instance

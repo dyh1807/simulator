@@ -25,7 +25,7 @@ bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t satp, uint32_t type,
 
 TrueICacheTop::TrueICacheTop(ICache &hw) : icache_hw(hw) {}
 
-void TrueICacheTop::comb(struct icache_in *in, struct icache_out *out) {
+void TrueICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache] reset\n");
     icache_hw.reset();
@@ -144,7 +144,7 @@ void TrueICacheTop::comb(struct icache_in *in, struct icache_out *out) {
   }
 }
 
-void TrueICacheTop::seq(struct icache_in *in) {
+void TrueICacheTop::seq() {
   if (in->reset)
     return;
 
@@ -181,7 +181,7 @@ void TrueICacheTop::seq(struct icache_in *in) {
 
 // --- SimpleICacheTop Implementation ---
 
-void SimpleICacheTop::comb(struct icache_in *in, struct icache_out *out) {
+void SimpleICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache] reset\n");
     out->icache_read_ready = true;
@@ -234,7 +234,7 @@ void SimpleICacheTop::comb(struct icache_in *in, struct icache_out *out) {
   }
 }
 
-void SimpleICacheTop::seq(struct icache_in *in) {
+void SimpleICacheTop::seq() {
   // No sequential logic
 }
 
