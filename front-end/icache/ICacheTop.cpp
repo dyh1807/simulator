@@ -133,6 +133,11 @@ void TrueICacheTop::comb() {
                                 : icache_hw.io.out.rd_data[i + base_idx];
       out->page_fault_inst[i] = icache_hw.io.out.ifu_page_fault;
       out->inst_valid[i] = true;
+      if (DEBUG_PRINT) {
+        printf("[icache] vaddr: %x\n", (base_idx + i) * 4 + current_vaddr_reg -
+                                           (current_vaddr_reg & mask));
+        printf("[icache] instruction : %x\n", out->fetch_group[i]);
+      }
     }
   } else {
     out->icache_read_complete = false;

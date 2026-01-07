@@ -53,7 +53,7 @@ struct ICache_in_t {
   // Input from memory
   bool mem_req_ready;
   bool mem_resp_valid;
-  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4]; // Data from memory (32 bytes)
+  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4]; // Data from memory (Cache line)
 };
 
 struct ICache_out_t {
@@ -115,14 +115,17 @@ public:
 private:
   /*
    * Cache parameters
+   *
+   * offset_bits + index_bits + tag_bits = 32
+   * for current design, tag_bits = 20
    */
-  static uint32_t const offset_bits = 5;           // 32 bytes per cache line
-  static uint32_t const index_bits = 7;            // 128 sets in the cache
+  static uint32_t const offset_bits =
+      __builtin_ctz(ICACHE_LINE_SIZE); // log2(ICACHE_LINE_SIZE)
+  static uint32_t const index_bits = 12 - offset_bits;
   static uint32_t const set_num = 1 << index_bits; // Total number of cache sets
   static uint32_t const word_num =
       1 << (offset_bits - 2); // Number of words per cache line (8 words, since
                               // each word is 4 bytes)
-  static uint32_t const line_size = 1 << offset_bits;
   static uint32_t const way_cnt = 8; // 8-way set associative cache
   uint32_t cache_data[set_num][way_cnt][word_num]; // Cache data storage
   uint32_t cache_tag[set_num][way_cnt];            // Cache tags
