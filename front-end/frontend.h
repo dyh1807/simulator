@@ -6,9 +6,12 @@
 #define PMEM_OFFSET RESET_PC
 
 /* Whether to use true icache model */
-// #define USE_TRUE_ICACHE
+#ifndef USE_IDEAL_ICACHE
+
 #ifndef USE_TRUE_ICACHE
-#define USE_TRUE_ICACHE
+#define USE_TRUE_ICACHE // use true icache model by default
+#endif
+
 #endif
 
 #ifndef ICACHE_LINE_SIZE

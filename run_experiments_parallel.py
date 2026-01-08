@@ -47,10 +47,10 @@ def compile_binaries():
         cxx_flags += f" -DICACHE_LINE_SIZE={size}"
         
         if use_true:
-            cxx_flags += f" -DUSE_TRUE_ICACHE -DICACHE_MISS_LATENCY={lat}"
+            cxx_flags += f" -DICACHE_MISS_LATENCY={lat}"
         else:
-            # For ideal cache, latency macro isn't used, but we can define it or leave it default
-            pass
+            # Disable default true icache
+            cxx_flags += f" -DUSE_IDEAL_ICACHE"
             
         try:
             subprocess.run(["make", "-j", f"CXXFLAGS={cxx_flags}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, text=True)
