@@ -6,7 +6,7 @@ import multiprocessing
 import sys
 
 # Configurations
-latencies = [1, 20, 50, 100]
+latencies = [0, 20, 50, 100]
 line_sizes = [32, 64]
 # Add your configurable images here
 images = [

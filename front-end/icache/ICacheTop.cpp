@@ -3,7 +3,7 @@
 #include "../frontend.h"
 #include "RISCV.h"
 #include "TOP.h"
-#include "config.h"
+#include "config.h" // For SimContext
 #include "cvt.h"
 #include "include/icache_module.h"
 #include "mmu_io.h"
@@ -20,6 +20,18 @@ extern ICache icache; // Defined in icache.cpp
 // Forward declaration if not available in headers
 bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t satp, uint32_t type,
            bool *mstatus, bool *sstatus, int privilege, uint32_t *p_memory);
+
+// --- ICacheTop Implementation ---
+
+void ICacheTop::syncPerf() {
+  if (ctx) {
+    ctx->perf.icache_access_num += access_delta;
+    ctx->perf.icache_miss_num += miss_delta;
+  }
+  // Reset deltas
+  access_delta = 0;
+  miss_delta = 0;
+}
 
 // --- TrueICacheTop Implementation ---
 
@@ -133,11 +145,6 @@ void TrueICacheTop::comb() {
                                 : icache_hw.io.out.rd_data[i + base_idx];
       out->page_fault_inst[i] = icache_hw.io.out.ifu_page_fault;
       out->inst_valid[i] = true;
-      if (DEBUG_PRINT) {
-        printf("[icache] vaddr: %x\n", (base_idx + i) * 4 + current_vaddr_reg -
-                                           (current_vaddr_reg & mask));
-        printf("[icache] instruction : %x\n", out->fetch_group[i]);
-      }
     }
   } else {
     out->icache_read_complete = false;
@@ -163,7 +170,7 @@ void TrueICacheTop::seq() {
   if (mem_req_ready && mem_req_valid) {
     mem_busy = true;
     mem_latency_cnt = 0;
-    cpu.ctx.perf.icache_miss_num++;
+    miss_delta++; // Use local delta
   }
   bool mem_resp_valid = icache_hw.io.in.mem_resp_valid;
   bool mem_resp_ready = icache_hw.io.out.mem_resp_ready;
@@ -178,7 +185,7 @@ void TrueICacheTop::seq() {
   if (icache_hw.io.in.ifu_req_valid && icache_hw.io.out.ifu_req_ready) {
     current_vaddr_reg = in->fetch_address;
     valid_reg = true;
-    cpu.ctx.perf.icache_access_num++;
+    access_delta++; // Use local delta
   } else if (ifu_resp_valid && ifu_resp_ready) {
     valid_reg = false;
   }
