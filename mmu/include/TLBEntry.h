@@ -69,24 +69,21 @@ public:
     return (vpn1 << 10) | vpn0; // 组合 VPN[1] 和 VPN[0]
   }
   // 检查是否发生页错误
-  bool is_page_fault(uint8_t op_type, uint32_t mstatus,
-    uint32_t sstatus, uint32_t privilege) const;
+  bool is_page_fault(uint8_t op_type, uint32_t mstatus, uint32_t sstatus,
+                     uint32_t privilege) const;
   // 设置 TLB 条目
   void set_valid_pte(pte_t pte, uint32_t asid_in, uint32_t vpn1_in,
-    uint32_t vpn0_in, bool is_megapage_in);
+                     uint32_t vpn0_in, bool is_megapage_in);
 
   // for debug
   void log_entry() const;
 
   friend bool operator==(const TLBEntry &a, const TLBEntry &b) {
-    return std::tie(
-      a.vpn1, a.vpn0, a.ppn1, a.ppn0, a.asid,
-      a.megapage, a.dirty, a.accessed, a.global,
-      a.user, a.execute, a.write, a.read, a.pte_valid
-    ) == std::tie(
-      b.vpn1, b.vpn0, b.ppn1, b.ppn0, b.asid,
-      b.megapage, b.dirty, b.accessed, b.global,
-      b.user, b.execute, b.write, b.read, b.pte_valid
-    );
+    return std::tie(a.vpn1, a.vpn0, a.ppn1, a.ppn0, a.asid, a.megapage, a.dirty,
+                    a.accessed, a.global, a.user, a.execute, a.write, a.read,
+                    a.pte_valid) ==
+           std::tie(b.vpn1, b.vpn0, b.ppn1, b.ppn0, b.asid, b.megapage, b.dirty,
+                    b.accessed, b.global, b.user, b.execute, b.write, b.read,
+                    b.pte_valid);
   }
 };

@@ -8,7 +8,7 @@ extern TLB_to_PTW tlb2ptw;
 extern PTW_to_TLB ptw2tlb;
 extern uint32_t *p_memory;
 
-uint32_t pte_mem_count = 0; // 统计PTW访问内存（Cache miss）的页表项次数
+uint32_t pte_mem_count = 0;       // 统计PTW访问内存（Cache miss）的页表项次数
 const int PTW_EMU_MEM_CYCLES = 0; // 模拟访问内存的周期数
 
 PTW::PTW(TLB_to_PTW *tlb2ptw_ptr, PTW_to_TLB *ptw2tlb_ptr,
@@ -111,7 +111,7 @@ void PTW::comb() {
     ptw_state_next = MEM_1; // memory not responded yet
     // 模拟访问内存的延迟，用变量记录 cycle
     if (ptw_mem_access_cycles < PTW_EMU_MEM_CYCLES) {
-      ptw_state_next = MEM_1; // 继续保持在 MEM_1 状态，等待内存访问完成
+      ptw_state_next = MEM_1;  // 继续保持在 MEM_1 状态，等待内存访问完成
       ptw_mem_access_cycles++; // 模拟内存访问延迟
     } else {
       // 访问内存，加载一级页表项
@@ -215,7 +215,7 @@ void PTW::comb() {
     ptw_state_next = MEM_2; // memory not responded yet
     // 模拟访问内存的延迟，用变量记录 cycle
     if (ptw_mem_access_cycles < PTW_EMU_MEM_CYCLES) {
-      ptw_state_next = MEM_2; // 继续保持在 MEM_2 状态，等待内存访问完成
+      ptw_state_next = MEM_2;  // 继续保持在 MEM_2 状态，等待内存访问完成
       ptw_mem_access_cycles++; // 模拟内存访问延迟
     } else {
       // 访问内存，加载二级页表项
