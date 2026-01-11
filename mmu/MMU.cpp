@@ -13,11 +13,18 @@ using namespace mmu_n;
  * MMU Inner Module connections
  */
 MMU::MMU()
-    : io{}, tlb2ptw{}, ptw2tlb{}, tlb(&ptw2tlb, // PTW to TLB interface
-                                      &io.in.mmu_ifu_req, // IFU Port Signals
-                                      io.in.mmu_lsu_req,  // LSU Port Signals
-                                      &io.in.tlb_flush,   // TLB Flush Signal
-                                      &io.in.state.satp),
+    : io{}, tlb2ptw{}, ptw2tlb{},
+      ifu_dummy_req{}, lsu_dummy_req{},
+      i_tlb(ITLB_SIZE, DEST_ITLB, &ptw2tlb, // PTW to TLB interface
+            &io.in.mmu_ifu_req,  // IFU Port Signals (Real)
+            lsu_dummy_req,       // LSU Port Signals (Dummy)
+            &io.in.tlb_flush,    // TLB Flush Signal
+            &io.in.state.satp),
+      d_tlb(DTLB_SIZE, DEST_DTLB, &ptw2tlb, // PTW to TLB interface
+            &ifu_dummy_req,      // IFU Port Signals (Dummy)
+            io.in.mmu_lsu_req,   // LSU Port Signals (Real)
+            &io.in.tlb_flush,    // TLB Flush Signal
+            &io.in.state.satp),
       ptw(&tlb2ptw,                // TLB to PTW interface
           &ptw2tlb,                // PTW to TLB interface
           &io.out.mmu_dcache_req,  // dcache_req master
@@ -41,7 +48,8 @@ void MMU::reset() {
   io.in.state.privilege = M_MODE; // 默认特权级别为 M_MODE
 
   // reset TLB
-  tlb.reset();
+  i_tlb.reset();
+  d_tlb.reset();
   ptw.reset();
 
   // reset top-level registers
@@ -89,29 +97,29 @@ void MMU::comb_frontend() {
   /*
    * Sv32 mode 下需要查询 TLB
    */
-  tlb.comb_frontend(); // lookup TLB for IFU request
+  i_tlb.comb_frontend(); // lookup TLB for IFU request
 
   io.out.mmu_ifu_req.ready = true; // always ready to accept IFU req
   // set response
-  if (tlb.ifu_io.out.hit) {
-    TLBEntry entry = tlb.ifu_io.out.entry;
+  if (i_tlb.ifu_io.out.hit) {
+    TLBEntry entry = i_tlb.ifu_io.out.entry;
     // check page fault
     bool page_fault =
         entry.is_page_fault(OP_FETCH, io.in.state.mstatus, io.in.state.sstatus,
                             io.in.state.privilege);
     // TLB 命中
-    uint32_t ptag = tlb.ifu_io.out.entry.get_ppn();
+    uint32_t ptag = i_tlb.ifu_io.out.entry.get_ppn();
     if (entry.megapage) {
       uint32_t vpn0 = io.in.mmu_ifu_req.vtag & 0x3FF;
       ptag = (ptag & 0xFFFFFC00) | vpn0;
     }
-    comb_set_resp(resp_ifu_r_1, tlb.ifu_io.out.valid,
+    comb_set_resp(resp_ifu_r_1, i_tlb.ifu_io.out.valid,
                   false, // hit
                   page_fault, ptag);
     tlb2ptw_frontend = {}; // no miss for arbiter
   } else if (io.in.mmu_ifu_req.valid) {
     // TLB 未命中
-    comb_set_resp(resp_ifu_r_1, tlb.ifu_io.out.valid,
+    comb_set_resp(resp_ifu_r_1, i_tlb.ifu_io.out.valid,
                   true,  // miss
                   false, // no page fault
                   0      // ptag
@@ -165,30 +173,30 @@ void MMU::comb_backend() {
   /*
    * Sv32 mode 下需要查询 TLB
    */
-  tlb.comb_backend(); // lookup TLB for LSU requests
+  d_tlb.comb_backend(); // lookup TLB for LSU requests
 
   for (int i = 0; i < MAX_LSU_REQ_NUM; i++) {
     io.out.mmu_lsu_req[i].ready = true; // always ready for LSU req
     // set response
-    if (tlb.lsu_io[i].out.hit) {
-      TLBEntry entry = tlb.lsu_io[i].out.entry;
+    if (d_tlb.lsu_io[i].out.hit) {
+      TLBEntry entry = d_tlb.lsu_io[i].out.entry;
       // check page fault
       bool page_fault =
           entry.is_page_fault(io.in.mmu_lsu_req[i].op_type, io.in.state.mstatus,
                               io.in.state.sstatus, io.in.state.privilege);
       // TLB 命中
-      uint32_t ptag = tlb.lsu_io[i].out.entry.get_ppn();
+      uint32_t ptag = d_tlb.lsu_io[i].out.entry.get_ppn();
       if (entry.megapage) {
         uint32_t vpn0 = io.in.mmu_lsu_req[i].vtag & 0x3FF;
         ptag = (ptag & 0xFFFFFC00) | vpn0;
       }
-      comb_set_resp(resp_lsu_r_1[i], tlb.lsu_io[i].out.valid,
+      comb_set_resp(resp_lsu_r_1[i], d_tlb.lsu_io[i].out.valid,
                     false, // hit
                     page_fault, ptag);
       tlb2ptw_backend[i] = {}; // no miss for arbiter
     } else if (io.in.mmu_lsu_req[i].valid) {
       // TLB 未命中
-      comb_set_resp(resp_lsu_r_1[i], tlb.lsu_io[i].out.valid,
+      comb_set_resp(resp_lsu_r_1[i], d_tlb.lsu_io[i].out.valid,
                     true,  // miss
                     false, // no page fault
                     0      // ptag
@@ -235,10 +243,12 @@ void MMU::comb_arbiter() {
  * PTW <-> TLB
  */
 void MMU::comb_ptw() {
+#ifndef CONFIG_CACHE
   // 模拟 PTW 与 DCache 的交互
-  // ptw.in.dcache_req->ready = true;  // always ready to accept dcache req
-  // ptw.in.dcache_resp->valid = true; // always valid dcache resp
-  // ptw.in.dcache_resp->miss = true;  // always miss for now
+  ptw.in.dcache_req->ready = true;  // always ready to accept dcache req
+  ptw.in.dcache_resp->valid = true; // always valid dcache resp
+  ptw.in.dcache_resp->miss = true;  // always miss for now
+#endif
 
   // arbiter between multiple PTW requests
   comb_arbiter();
@@ -247,13 +257,17 @@ void MMU::comb_ptw() {
   ptw.comb();
 
   // update tlb plru tree
-  tlb.comb_arbiter();
+  i_tlb.comb_arbiter();
+  d_tlb.comb_arbiter();
   // TLB deal with PTW feedback signals
-  tlb.comb_write();
+  i_tlb.comb_write();
+  d_tlb.comb_write();
   // process flush request from back-end
-  tlb.comb_flush();
+  i_tlb.comb_flush();
+  d_tlb.comb_flush();
   // replacement policy update
-  tlb.comb_replacement();
+  i_tlb.comb_replacement();
+  d_tlb.comb_replacement();
 }
 
 void MMU::seq() {
@@ -267,6 +281,7 @@ void MMU::seq() {
   /*
    * Sequential update of inner modules
    */
-  tlb.seq();
+  i_tlb.seq();
+  d_tlb.seq();
   ptw.seq();
 }

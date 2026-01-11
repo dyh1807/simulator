@@ -2,11 +2,25 @@
 #include <cstring>
 #include <iostream>
 
-TLB::TLB(PTW_to_TLB *ptw2tlb_ptr, mmu_req_master_t *ifu_req_ptr,
-         mmu_req_master_t *lsu_req_ptr, tlb_flush_t *tlb_flush_ptr,
-         satp_t *satp_ptr)
-    : entries{}, valid_next{}, wr_index(0) {
+TLB::TLB(int size, mmu_n::TLB_DEST type, PTW_to_TLB *ptw2tlb_ptr,
+         mmu_req_master_t *ifu_req_ptr, mmu_req_master_t *lsu_req_ptr,
+         tlb_flush_t *tlb_flush_ptr, satp_t *satp_ptr)
+    : tlb_size(size), tlb_type(type), wr_index(0) {
+
+  // Dynamic allocation
+  entries = new TLBEntry[tlb_size];
+  valid_next = new bool[tlb_size];
+
+  for (int i = 0; i < tlb_size; ++i) {
+    entries[i] = {};
+    valid_next[i] = false;
+  }
+
 #ifdef TLB_PLRU
+  plru_tree_size = tlb_size - 1;
+  plru_tree_depth = __builtin_ctz(tlb_size);
+  plru_tree = new reg1_t[plru_tree_size];
+  plru_tree_next = new wire1_t[plru_tree_size];
   plru_reset();
 #endif
 
@@ -22,8 +36,17 @@ TLB::TLB(PTW_to_TLB *ptw2tlb_ptr, mmu_req_master_t *ifu_req_ptr,
   satp = satp_ptr;
 }
 
+TLB::~TLB() {
+  delete[] entries;
+  delete[] valid_next;
+#ifdef TLB_PLRU
+  delete[] plru_tree;
+  delete[] plru_tree_next;
+#endif
+}
+
 void TLB::reset() {
-  for (int i = 0; i < TLB_SIZE; ++i) {
+  for (int i = 0; i < tlb_size; ++i) {
     entries[i] = {}; // set to zero
     valid_next[i] = false;
   }
@@ -51,14 +74,16 @@ void TLB::comb_backend() {
 }
 
 void TLB::comb_write() {
-  write_io.wr.write_valid = ptw_in->write_valid;
+  bool is_my_write = ptw_in->write_valid && (ptw_in->dest_id == tlb_type);
+
+  write_io.wr.write_valid = is_my_write;
   write_io.wr.entry = ptw_in->entry;
 
-  if (ptw_in->write_valid) {
+  if (is_my_write) {
 #ifdef TLB_RANDOM
     // 随机策略：优先选择无效条目
     bool found_invalid = false;
-    for (int i = 0; i < TLB_SIZE; ++i) {
+    for (int i = 0; i < tlb_size; ++i) {
       if (!entries[i].pte_valid) {
         wr_index = i;
         found_invalid = true;
@@ -66,8 +91,8 @@ void TLB::comb_write() {
       }
     }
     if (!found_invalid) {
-      // wr_index = rand() % TLB_SIZE;
-      wr_index = (wr_index + 1) % TLB_SIZE; // 伪随机，循环覆盖
+      // wr_index = rand() % tlb_size;
+      wr_index = (wr_index + 1) % tlb_size; // 伪随机，循环覆盖
     }
 #endif
 
@@ -81,7 +106,7 @@ void TLB::comb_write() {
 
 void TLB::comb_flush() {
   // 默认保持当前状态
-  for (int i = 0; i < TLB_SIZE; ++i) {
+  for (int i = 0; i < tlb_size; ++i) {
     valid_next[i] = entries[i].pte_valid;
   }
 
@@ -94,7 +119,7 @@ void TLB::comb_flush() {
   uint32_t flush_vpn0 = flush_vpn & 0x3FF;
   uint32_t flush_asid = write_io.flush->flush_asid;
 
-  for (int i = 0; i < TLB_SIZE; ++i) {
+  for (int i = 0; i < tlb_size; ++i) {
     if (entries[i].pte_valid) {
       bool asid_match = flush_asid == 0 || entries[i].asid == flush_asid;
       bool vpn1_match = entries[i].vpn1 == flush_vpn1;
@@ -179,7 +204,7 @@ void TLB::lookup(tlb_read_port_t &io_r) {
   int hit_index = -1;
   int hit_count = 0;
 
-  for (int i = 0; i < TLB_SIZE; ++i) {
+  for (int i = 0; i < tlb_size; ++i) {
     if (entries[i].pte_valid && entries[i].vpn1 == vpn1 &&
         entries[i].asid == satp->asid) {
       if (entries[i].megapage || entries[i].vpn0 == vpn0) {
@@ -200,7 +225,7 @@ void TLB::lookup(tlb_read_port_t &io_r) {
     cout << "  Hit count: " << hit_count << endl;
     cout << "  Matched entries:" << endl;
 
-    for (int i = 0; i < TLB_SIZE; ++i) {
+    for (int i = 0; i < tlb_size; ++i) {
       if (entries[i].pte_valid && entries[i].vpn1 == vpn1 &&
           entries[i].asid == satp->asid) {
         if (entries[i].megapage || entries[i].vpn0 == vpn0) {
@@ -226,7 +251,7 @@ void TLB::seq() {
    * 时序逻辑：应用 flush 的有效性更新
    */
   if (write_io.flush->flush_valid) {
-    for (int i = 0; i < TLB_SIZE; ++i) {
+    for (int i = 0; i < tlb_size; ++i) {
       entries[i].pte_valid = valid_next[i];
     }
   }
@@ -235,7 +260,7 @@ void TLB::seq() {
    * 时序逻辑：应用 PTW 回填
    */
   if (write_io.wr.write_valid) {
-    if (wr_index < 0 || wr_index >= TLB_SIZE) {
+    if (wr_index < 0 || wr_index >= tlb_size) {
       cerr << "TLB: Invalid write index: " << wr_index << endl;
       exit(1);
     }
@@ -243,15 +268,15 @@ void TLB::seq() {
     // 检查是否覆盖有效条目
     if (entries[wr_index].pte_valid) {
       int valid_count = 0;
-      for (int i = 0; i < TLB_SIZE; ++i) {
+      for (int i = 0; i < tlb_size; ++i) {
         if (entries[i].pte_valid)
           valid_count++;
       }
-      // if (valid_count != TLB_SIZE) {
-      if (valid_count != TLB_SIZE && !write_io.flush->flush_valid) {
+      // if (valid_count != tlb_size) {
+      if (valid_count != tlb_size && !write_io.flush->flush_valid) {
         cout << "[TLB::seq] Warning: Overwriting valid TLB entry at index "
              << wr_index << " at cycle " << sim_time
-             << ", valid_count = " << valid_count << ", TLB_SIZE = " << TLB_SIZE
+             << ", valid_count = " << valid_count << ", tlb_size = " << tlb_size
              << endl;
         show_valid_entries();
       }
@@ -278,8 +303,8 @@ void TLB::seq() {
 #ifdef TLB_PLRU
 
 void TLB::plru_reset() {
-  memset(plru_tree, 0, sizeof(plru_tree));
-  memset(plru_tree_next, 0, sizeof(plru_tree_next));
+  memset(plru_tree, 0, plru_tree_size * sizeof(reg1_t));
+  memset(plru_tree_next, 0, plru_tree_size * sizeof(wire1_t));
   plru_update_req.update_valid = false;
   plru_update_req.update_index = 0;
 }
@@ -289,7 +314,7 @@ void TLB::plru_reset() {
  */
 void TLB::plru_comb_update() {
   // 默认保持当前状态
-  memcpy(plru_tree_next, plru_tree, sizeof(plru_tree));
+  memcpy(plru_tree_next, plru_tree, plru_tree_size * sizeof(reg1_t));
 
   // 如果有访问命中或写入，更新树状态
   if (plru_update_req.update_valid) {
@@ -301,7 +326,7 @@ void TLB::plru_comb_update() {
  * 时序逻辑：应用 PLRU 树状态更新
  */
 void TLB::plru_seq_update() {
-  memcpy(plru_tree, plru_tree_next, sizeof(plru_tree));
+  memcpy(plru_tree, plru_tree_next, plru_tree_size * sizeof(reg1_t));
 }
 
 /*
@@ -309,7 +334,7 @@ void TLB::plru_seq_update() {
  */
 int TLB::plru_get_victim() const {
   // 优先选择无效条目
-  for (int i = 0; i < TLB_SIZE; ++i) {
+  for (int i = 0; i < tlb_size; ++i) {
     if (!entries[i].pte_valid) {
       return i;
     }
@@ -318,7 +343,7 @@ int TLB::plru_get_victim() const {
   // 使用 PLRU 算法
   int node = 0;
 
-  for (int level = 0; level < PLRU_TREE_DEPTH; ++level) {
+  for (int level = 0; level < plru_tree_depth; ++level) {
     if (plru_tree[node]) {
       node = 2 * node + 2; // 右子树
     } else {
@@ -326,9 +351,9 @@ int TLB::plru_get_victim() const {
     }
   }
 
-  int victim_index = node - (TLB_SIZE - 1);
+  int victim_index = node - (tlb_size - 1);
 
-  if (victim_index < 0 || victim_index >= TLB_SIZE) {
+  if (victim_index < 0 || victim_index >= tlb_size) {
     cerr << "TLB PLRU plru_get_victim(): Invalid victim index calculated: "
          << victim_index << endl;
     exit(1);
@@ -341,13 +366,13 @@ int TLB::plru_get_victim() const {
  * 计算访问某个条目后的树状态
  */
 void TLB::plru_calc_update(int index, bool tree_state[]) {
-  if (index < 0 || index >= TLB_SIZE) {
+  if (index < 0 || index >= tlb_size) {
     cerr << "TLB PLRU plru_calc_update(): Invalid index for update: " << index
          << endl;
     exit(1);
   }
 
-  int leaf = index + (TLB_SIZE - 1);
+  int leaf = index + (tlb_size - 1);
   int current = leaf;
 
   while (current > 0) {

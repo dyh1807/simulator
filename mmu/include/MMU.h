@@ -29,7 +29,8 @@ private:
   /*
    * Internal Modules
    */
-  TLB tlb;
+  TLB i_tlb;
+  TLB d_tlb;
   PTW ptw;
   PTW_to_TLB ptw2tlb; // PTW 到 TLB 的接口
   TLB_to_PTW tlb2ptw; // TLB 到 PTW 的接口
@@ -38,6 +39,10 @@ private:
   // wire candidates for arbiter
   TLB_to_PTW tlb2ptw_frontend;
   TLB_to_PTW tlb2ptw_backend[MAX_LSU_REQ_NUM];
+
+  // Dummy signals for unused ports
+  mmu_req_master_t ifu_dummy_req;
+  mmu_req_master_t lsu_dummy_req[MAX_LSU_REQ_NUM];
 
   /*
    * MMU Top-Level Registers

@@ -46,6 +46,14 @@ enum SATP_MODE {
   MODE_SV32 = 1  // Sv32 mode
 };
 
+enum TLB_DEST {
+  DEST_ITLB = 0,
+  DEST_DTLB = 1
+};
+
+#define ITLB_SIZE 32
+#define DTLB_SIZE 32
+
 } // namespace mmu_n
 
 /*
@@ -56,6 +64,7 @@ enum SATP_MODE {
 struct PTW_to_TLB {
   bool write_valid; // PTW 命中，需要写入 MMU // 设计时，保证下一拍写入
   TLBEntry entry;   // 准备填入的 TLB 条目
+  mmu_n::TLB_DEST dest_id; // 目标 TLB ID
 };
 
 struct TLB_to_PTW {

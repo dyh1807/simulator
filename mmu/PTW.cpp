@@ -3,6 +3,7 @@
 
 using namespace std;
 using namespace ptw_n;
+using namespace mmu_n;
 
 extern TLB_to_PTW tlb2ptw;
 extern PTW_to_TLB ptw2tlb;
@@ -89,12 +90,14 @@ void PTW::comb() {
             out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1,
                                              vpn0, is_megapage);
             out.ptw2tlb->write_valid = true;
+            out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
           } else if (is_megapage) {
             ptw_state_next = IDLE;
             // refill tlb
             out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1,
                                              vpn0, is_megapage);
             out.ptw2tlb->write_valid = true;
+            out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
           } else {
             ptw_state_next = CACHE_2;
           }
@@ -129,12 +132,14 @@ void PTW::comb() {
         out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
                                          is_megapage);
         out.ptw2tlb->write_valid = true;
+        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
       } else if (is_megapage) {
         ptw_state_next = IDLE;
         // refill tlb
         out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
                                          is_megapage);
         out.ptw2tlb->write_valid = true;
+        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
       } else {
         ptw_state_next = CACHE_2;
       }
@@ -185,6 +190,7 @@ void PTW::comb() {
             out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1,
                                              vpn0, is_megapage);
             out.ptw2tlb->write_valid = true;
+            out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
           } else if (is_megapage) {
             ptw_state_next = IDLE;
             // refill tlb
@@ -200,6 +206,7 @@ void PTW::comb() {
             out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1,
                                              vpn0, is_megapage);
             out.ptw2tlb->write_valid = true;
+            out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
           }
           // cout << "[PTW::comb] CACHE_2 completed, ";
           // cout << "Since dcache has not been implemented yet, ";
@@ -232,6 +239,7 @@ void PTW::comb() {
         out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
                                          is_megapage);
         out.ptw2tlb->write_valid = true;
+        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
       } else if (is_megapage) {
         // should not happen, since megapage handled in level 1
         cout << "[PTW::comb] MEM_2 megapage refill phase: MEM_2 -> IDLE"
@@ -244,6 +252,7 @@ void PTW::comb() {
         out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
                                          is_megapage);
         out.ptw2tlb->write_valid = true;
+        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
       }
       ptw_mem_access_cycles = 0; // 重置内存访问周期计数器
       pte_mem_count++;           // 统计访问内存的页表项次数

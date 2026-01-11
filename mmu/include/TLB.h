@@ -7,7 +7,7 @@ using namespace std;
 
 // #define TLB_SIZE 128 // TLB 的大小
 // #define TLB_SIZE 4 // TLB 的大小
-#define TLB_SIZE 32 // TLB 的大小
+// #define TLB_SIZE 32 // TLB 的大小
 
 struct tlb_read_port_t {
   // input
@@ -36,13 +36,16 @@ struct tlb_write_port_t {
 
 class TLB {
 public:
-  TLB(PTW_to_TLB *ptw2tlb_ptr,
+  TLB(int size, mmu_n::TLB_DEST tlb_type,
+      PTW_to_TLB *ptw2tlb_ptr,
       // IFU Port Signals (Input+Output)
       mmu_req_master_t *ifu_req_ptr,
       // LSU Port Signals (Input+Output)
       mmu_req_master_t *lsu_req_ptr,
       // Other Signals
       tlb_flush_t *tlb_flush, satp_t *satp_ptr);
+  
+  ~TLB(); // Destructor to free memory
 
   void reset(); // 重置 TLB
   void comb_frontend();
@@ -67,7 +70,7 @@ public:
   satp_t *satp;
 
   void log_entry(int index) const {
-    if (index < 0 || index >= TLB_SIZE) {
+    if (index < 0 || index >= tlb_size) {
       cerr << "TLB: Invalid index for log_entry!" << endl;
       return;
     }
@@ -75,8 +78,10 @@ public:
   }
 
 private:
-  TLBEntry entries[TLB_SIZE];
-  bool valid_next[TLB_SIZE]; // 组合逻辑计算的下一个有效性
+  int tlb_size;
+  mmu_n::TLB_DEST tlb_type;
+  TLBEntry *entries;
+  bool *valid_next; // 组合逻辑计算的下一个有效性
   int wr_index;              // 组合逻辑计算的写入索引
 
   /*
@@ -90,11 +95,10 @@ private:
 
 #ifdef TLB_PLRU
   // 要求：TLB_SIZE 必须是 2 的幂次方
-  static constexpr int PLRU_TREE_SIZE = TLB_SIZE - 1;
-  static constexpr int PLRU_TREE_DEPTH =
-      __builtin_ctz(TLB_SIZE); // log2(TLB_SIZE)
-  reg1_t plru_tree[PLRU_TREE_SIZE];
-  wire1_t plru_tree_next[PLRU_TREE_SIZE]; // 组合逻辑计算的下一个状态
+  int plru_tree_size;
+  int plru_tree_depth;
+  reg1_t *plru_tree;
+  wire1_t *plru_tree_next; // 组合逻辑计算的下一个状态
 
   struct {
     bool update_valid; // 是否需要更新 PLRU 树
@@ -113,7 +117,7 @@ private:
    */
   void show_valid_entries() const {
     cout << "Valid TLB entries:\n ";
-    for (int i = 0; i < TLB_SIZE; ++i) {
+    for (int i = 0; i < tlb_size; ++i) {
       if (entries[i].pte_valid) {
         cout << "1"; // 有效条目
       } else {
