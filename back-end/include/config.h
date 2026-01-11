@@ -273,6 +273,12 @@ public:
   uint64_t isu_raw_stall[IQ_NUM];
   uint64_t isu_ready_num[IQ_NUM];
 
+  // MMU Counters
+  uint64_t itlb_access = 0;
+  uint64_t itlb_hit = 0;
+  uint64_t dtlb_access = 0;
+  uint64_t dtlb_hit = 0;
+
   void perf_reset() {
     cycle = 0;
     commit_num = 0;
@@ -281,6 +287,12 @@ public:
     cache_miss_num = 0;
     icache_access_num = 0;
     icache_miss_num = 0;
+
+    // mmu
+    itlb_access = 0;
+    itlb_hit = 0;
+    dtlb_access = 0;
+    dtlb_hit = 0;
 
     // bpu
     cond_br_num = 0;
@@ -309,6 +321,7 @@ public:
     printf("\n");
     perf_print_cache();
     perf_print_icache();
+    perf_print_tlb();
     perf_print_branch();
   }
 
@@ -333,6 +346,29 @@ public:
     printf("\033[1;32micache hit      : %ld\033[0m\n",
            icache_access_num - icache_miss_num);
     printf("\033[1;32micache miss     : %ld\033[0m\n", icache_miss_num);
+    printf("\n");
+  }
+
+  void perf_print_tlb() {
+    printf("\033[1;32m*********TLB COUNTER************\033[0m\n");
+
+    double itlb_hit_rate = (itlb_access > 0) ? (double)itlb_hit / itlb_access : 0.0;
+    double dtlb_hit_rate = (dtlb_access > 0) ? (double)dtlb_hit / dtlb_access : 0.0;
+    uint64_t total_access = itlb_access + dtlb_access;
+    uint64_t total_hit = itlb_hit + dtlb_hit;
+    double total_hit_rate = (total_access > 0) ? (double)total_hit / total_access : 0.0;
+
+    printf("\033[1;32mitlb access    : %ld\033[0m\n", itlb_access);
+    printf("\033[1;32mitlb hit       : %ld\033[0m\n", itlb_hit);
+    printf("\033[1;32mitlb hit rate  : %f\033[0m\n", itlb_hit_rate);
+
+    printf("\033[1;32mdtlb access    : %ld\033[0m\n", dtlb_access);
+    printf("\033[1;32mdtlb hit       : %ld\033[0m\n", dtlb_hit);
+    printf("\033[1;32mdtlb hit rate  : %f\033[0m\n", dtlb_hit_rate);
+
+    printf("\033[1;32mtotal access   : %ld\033[0m\n", total_access);
+    printf("\033[1;32mtotal hit      : %ld\033[0m\n", total_hit);
+    printf("\033[1;32mtotal hit rate : %f\033[0m\n", total_hit_rate);
     printf("\n");
   }
 

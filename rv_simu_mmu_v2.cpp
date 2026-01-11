@@ -91,6 +91,10 @@ void SimCpu::cycle() {
 
 #ifdef CONFIG_MMU
   mmu.seq();
+  ctx.perf.itlb_access = mmu.i_tlb.get_access_count();
+  ctx.perf.itlb_hit = mmu.i_tlb.get_hit_count();
+  ctx.perf.dtlb_access = mmu.d_tlb.get_access_count();
+  ctx.perf.dtlb_hit = mmu.d_tlb.get_hit_count();
 #endif
 
   if (ctx.sim_end)

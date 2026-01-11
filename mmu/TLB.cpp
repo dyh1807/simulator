@@ -5,7 +5,8 @@
 TLB::TLB(int size, mmu_n::TLB_DEST type, PTW_to_TLB *ptw2tlb_ptr,
          mmu_req_master_t *ifu_req_ptr, mmu_req_master_t *lsu_req_ptr,
          tlb_flush_t *tlb_flush_ptr, satp_t *satp_ptr)
-    : tlb_size(size), tlb_type(type), wr_index(0) {
+    : tlb_size(size), tlb_type(type), wr_index(0),
+      access_count(0), hit_count(0), cur_access_count(0), cur_hit_count(0) {
 
   // Dynamic allocation
   entries = new TLBEntry[tlb_size];
@@ -56,20 +57,39 @@ void TLB::reset() {
   global_arbitration.hit_index = 0;
   global_arbitration.hit_count = 0;
 
+  access_count = 0;
+  hit_count = 0;
+  cur_access_count = 0;
+  cur_hit_count = 0;
+
 #ifdef TLB_PLRU
   plru_reset();
 #endif
 }
 
 void TLB::comb_frontend() {
+  cur_access_count = 0;
+  cur_hit_count = 0;
   if (ifu_io.in->valid) {
     lookup(ifu_io);
+    cur_access_count++;
+    if (ifu_io.out.hit) {
+      cur_hit_count++;
+    }
   }
 }
 
 void TLB::comb_backend() {
+  cur_access_count = 0;
+  cur_hit_count = 0;
   for (int i = 0; i < MAX_LSU_REQ_NUM; ++i) {
     lookup(lsu_io[i]);
+    if (lsu_io[i].in->valid) {
+      cur_access_count++;
+      if (lsu_io[i].out.hit) {
+        cur_hit_count++;
+      }
+    }
   }
 }
 
@@ -247,6 +267,9 @@ void TLB::lookup(tlb_read_port_t &io_r) {
 }
 
 void TLB::seq() {
+  access_count += cur_access_count;
+  hit_count += cur_hit_count;
+
   /*
    * 时序逻辑：应用 flush 的有效性更新
    */

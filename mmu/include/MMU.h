@@ -25,12 +25,13 @@ public:
   // I/O Ports
   MMU_IO_t io;
 
-private:
   /*
-   * Internal Modules
+   * Internal Modules - Made public for perf access
    */
   TLB i_tlb;
   TLB d_tlb;
+
+private:
   PTW ptw;
   PTW_to_TLB ptw2tlb; // PTW 到 TLB 的接口
   TLB_to_PTW tlb2ptw; // TLB 到 PTW 的接口

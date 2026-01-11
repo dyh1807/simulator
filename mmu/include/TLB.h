@@ -69,6 +69,15 @@ public:
   // satp.asid, 9bits
   satp_t *satp;
 
+  // Performance Counters
+  uint64_t access_count;
+  uint64_t hit_count;
+  uint64_t cur_access_count;
+  uint64_t cur_hit_count;
+
+  uint64_t get_access_count() const { return access_count; }
+  uint64_t get_hit_count() const { return hit_count; }
+
   void log_entry(int index) const {
     if (index < 0 || index >= tlb_size) {
       cerr << "TLB: Invalid index for log_entry!" << endl;
