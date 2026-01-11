@@ -15,9 +15,19 @@ const int PTW_EMU_MEM_CYCLES = 0; // 模拟访问内存的周期数
 PTW::PTW(TLB_to_PTW *tlb2ptw_ptr, PTW_to_TLB *ptw2tlb_ptr,
          dcache_req_master_t *req_m, dcache_req_slave_t *req_s,
          dcache_resp_master_t *resp_m, dcache_resp_slave_t *resp_s,
+         ptw_mem_req_master_t *mem_req_m, ptw_mem_req_slave_t *mem_req_s,
+         ptw_mem_resp_master_t *mem_resp_m, ptw_mem_resp_slave_t *mem_resp_s,
          mmu_state_t *mmu_state_ptr)
-    : in{.tlb2ptw = tlb2ptw_ptr, .dcache_resp = resp_m, .dcache_req = req_s},
-      out{.ptw2tlb = ptw2tlb_ptr, .dcache_req = req_m, .dcache_resp = resp_s},
+    : in{.tlb2ptw = tlb2ptw_ptr,
+         .dcache_resp = resp_m,
+         .dcache_req = req_s,
+         .mem_resp = mem_resp_m,
+         .mem_req = mem_req_s},
+      out{.ptw2tlb = ptw2tlb_ptr,
+          .dcache_req = req_m,
+          .dcache_resp = resp_s,
+          .mem_req = mem_req_m,
+          .mem_resp = mem_resp_s},
       mmu_state{mmu_state_ptr}, pte1{}, pte2{} {
   // reset registers/wires
   ptw_state = ptw_state_next = IDLE;
@@ -35,7 +45,8 @@ void PTW::comb() {
   // out.ptw2tlb->write_valid = false;
   // out.ptw2tlb->entry = {};
   *out.ptw2tlb = {};
-  static int ptw_mem_access_cycles = 0; // 模拟内存访问周期
+  out.mem_req->valid = false;
+  out.mem_resp->ready = false;
 
   switch (ptw_state) {
   case IDLE:
@@ -112,39 +123,46 @@ void PTW::comb() {
   case MEM_1:
     // wait for memory response for first level page table entry
     ptw_state_next = MEM_1; // memory not responded yet
-    // 模拟访问内存的延迟，用变量记录 cycle
-    if (ptw_mem_access_cycles < PTW_EMU_MEM_CYCLES) {
-      ptw_state_next = MEM_1;  // 继续保持在 MEM_1 状态，等待内存访问完成
-      ptw_mem_access_cycles++; // 模拟内存访问延迟
-    } else {
-      // 访问内存，加载一级页表项
-      uint32_t pte1_addr =
-          ((mmu_state->satp.ppn & 0xFFFFF) << 10) | (vpn1 & 0x3FF);
-      uint32_t pte1_number =
-          p_memory[((mmu_state->satp.ppn & 0xFFFFF) << 10) |
-                   (vpn1 & 0x3FF)]; // 计算一级页表项的物理地址
-      pte1 = *reinterpret_cast<pte_t *>(&pte1_number);
-      // 根据是否 page fault 来决定下一个状态
-      bool is_megapage = false;
-      if (is_page_fault(pte1, op_type, true, &is_megapage)) {
-        ptw_state_next = IDLE;
-        // refill tlb
-        out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
-                                         is_megapage);
-        out.ptw2tlb->write_valid = true;
-        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
-      } else if (is_megapage) {
-        ptw_state_next = IDLE;
-        // refill tlb
-        out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
-                                         is_megapage);
-        out.ptw2tlb->write_valid = true;
-        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
-      } else {
-        ptw_state_next = CACHE_2;
+    out.mem_req->valid = false;
+    out.mem_resp->ready = false;
+    if (dcache_state == DCACHE_IDLE) {
+      out.mem_req->valid = true;
+      uint32_t ptag = mmu_state->satp.ppn & 0xFFFFF;
+      uint32_t vindex = (vpn1 & 0x3FF) << 2;
+      out.mem_req->paddr = (ptag << 12) | vindex;
+
+      bool read_req_hs = out.mem_req->valid && in.mem_req->ready;
+      if (read_req_hs) {
+        dcache_state_next = DCACHE_BUSY;
       }
-      ptw_mem_access_cycles = 0; // 重置内存访问周期计数器
-      pte_mem_count++;           // 统计访问内存的页表项次数
+    } else {
+      out.mem_resp->ready = true;
+      bool read_resp_hs = in.mem_resp->valid && out.mem_resp->ready;
+      if (read_resp_hs) {
+        dcache_state_next = DCACHE_IDLE;
+        uint32_t pte1_number = in.mem_resp->data;
+        pte1 = *reinterpret_cast<pte_t *>(&pte1_number);
+        // 根据是否 page fault 来决定下一个状态
+        bool is_megapage = false;
+        if (is_page_fault(pte1, op_type, true, &is_megapage)) {
+          ptw_state_next = IDLE;
+          // refill tlb
+          out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
+                                           is_megapage);
+          out.ptw2tlb->write_valid = true;
+          out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
+        } else if (is_megapage) {
+          ptw_state_next = IDLE;
+          // refill tlb
+          out.ptw2tlb->entry.set_valid_pte(pte1, mmu_state->satp.asid, vpn1, vpn0,
+                                           is_megapage);
+          out.ptw2tlb->write_valid = true;
+          out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
+        } else {
+          ptw_state_next = CACHE_2;
+        }
+        pte_mem_count++; // 统计访问内存的页表项次数
+      }
     }
     break;
 
@@ -218,44 +236,52 @@ void PTW::comb() {
     break;
 
   case MEM_2:
-    // wait for memory response for first level page table entry
+    // wait for memory response for second level page table entry
     ptw_state_next = MEM_2; // memory not responded yet
-    // 模拟访问内存的延迟，用变量记录 cycle
-    if (ptw_mem_access_cycles < PTW_EMU_MEM_CYCLES) {
-      ptw_state_next = MEM_2;  // 继续保持在 MEM_2 状态，等待内存访问完成
-      ptw_mem_access_cycles++; // 模拟内存访问延迟
-    } else {
-      // 访问内存，加载二级页表项
-      uint32_t pte2_ppn = (pte1.ppn1 << 10) | pte1.ppn0; // 20 bits 物理页号
-      uint32_t pte2_number =
-          p_memory[((pte2_ppn) & 0xFFFFF) << 10 |
-                   (vpn0 & 0x3FF)]; // 计算二级页表项的物理地址
-      pte2 = *reinterpret_cast<pte_t *>(&pte2_number);
-      // 根据是否 page fault 来决定下一个状态
-      bool is_megapage = false;
-      if (is_page_fault(pte2, op_type, false, &is_megapage)) {
-        ptw_state_next = IDLE;
-        // refill tlb
-        out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
-                                         is_megapage);
-        out.ptw2tlb->write_valid = true;
-        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
-      } else if (is_megapage) {
-        // should not happen, since megapage handled in level 1
-        cout << "[PTW::comb] MEM_2 megapage refill phase: MEM_2 -> IDLE"
-             << endl;
-        cout << "[PTW::comb] since megapage isn't expected here, ";
-        cout << "exit now." << endl;
-        exit(1);
-      } else {
-        ptw_state_next = IDLE; // normally refill TLB
-        out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
-                                         is_megapage);
-        out.ptw2tlb->write_valid = true;
-        out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
+    out.mem_req->valid = false;
+    out.mem_resp->ready = false;
+    if (dcache_state == DCACHE_IDLE) {
+      out.mem_req->valid = true;
+      uint32_t pte2_ppn = (pte1.ppn1 << 10) | pte1.ppn0;
+      uint32_t vindex = (vpn0 & 0x3FF) << 2;
+      out.mem_req->paddr = (((pte2_ppn) & 0xFFFFF) << 12) | vindex;
+
+      bool read_req_hs = out.mem_req->valid && in.mem_req->ready;
+      if (read_req_hs) {
+        dcache_state_next = DCACHE_BUSY;
       }
-      ptw_mem_access_cycles = 0; // 重置内存访问周期计数器
-      pte_mem_count++;           // 统计访问内存的页表项次数
+    } else {
+      out.mem_resp->ready = true;
+      bool read_resp_hs = in.mem_resp->valid && out.mem_resp->ready;
+      if (read_resp_hs) {
+        dcache_state_next = DCACHE_IDLE;
+        uint32_t pte2_number = in.mem_resp->data;
+        pte2 = *reinterpret_cast<pte_t *>(&pte2_number);
+        // 根据是否 page fault 来决定下一个状态
+        bool is_megapage = false;
+        if (is_page_fault(pte2, op_type, false, &is_megapage)) {
+          ptw_state_next = IDLE;
+          // refill tlb
+          out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
+                                           is_megapage);
+          out.ptw2tlb->write_valid = true;
+          out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
+        } else if (is_megapage) {
+          // should not happen, since megapage handled in level 1
+          cout << "[PTW::comb] MEM_2 megapage refill phase: MEM_2 -> IDLE"
+               << endl;
+          cout << "[PTW::comb] since megapage isn't expected here, ";
+          cout << "exit now." << endl;
+          exit(1);
+        } else {
+          ptw_state_next = IDLE; // normally refill TLB
+          out.ptw2tlb->entry.set_valid_pte(pte2, mmu_state->satp.asid, vpn1, vpn0,
+                                           is_megapage);
+          out.ptw2tlb->write_valid = true;
+          out.ptw2tlb->dest_id = (op_type == OP_FETCH) ? DEST_ITLB : DEST_DTLB;
+        }
+        pte_mem_count++; // 统计访问内存的页表项次数
+      }
     }
     break;
 

@@ -45,6 +45,20 @@ private:
   mmu_req_master_t ifu_dummy_req;
   mmu_req_master_t lsu_dummy_req[MAX_LSU_REQ_NUM];
 
+  // Main Memory interface wires for PTW
+  ptw_mem_req_slave_t mmu_mem_req_s;
+  ptw_mem_resp_master_t mmu_mem_resp_m;
+
+  // Memory Simulation Registers
+  struct {
+    uint32_t count;
+    bool busy;
+    uint32_t data;
+    uint32_t addr;
+  } mem_sim;
+
+  void comb_memory();
+
   /*
    * MMU Top-Level Registers
    */

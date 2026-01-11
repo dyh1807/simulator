@@ -149,6 +149,25 @@ struct dcache_resp_slave_t {
   bool ready; // 是否准备好接收响应
 };
 
+// main memory request & response interface (for PTW)
+struct ptw_mem_req_master_t {
+  bool valid;
+  uint32_t paddr;
+};
+
+struct ptw_mem_req_slave_t {
+  bool ready;
+};
+
+struct ptw_mem_resp_master_t {
+  bool valid;
+  uint32_t data;
+};
+
+struct ptw_mem_resp_slave_t {
+  bool ready;
+};
+
 struct MMU_in_t {
   /*
    * Frontend -> MMU
@@ -204,6 +223,12 @@ struct MMU_in_t {
   dcache_resp_master_t mmu_dcache_resp;
 
   /*
+   * Main Memory -> MMU (for PTW)
+   */
+  ptw_mem_req_slave_t mmu_mem_req;
+  ptw_mem_resp_master_t mmu_mem_resp;
+
+  /*
    * Backend -> MMU
    */
   mmu_state_t state;
@@ -228,6 +253,12 @@ struct MMU_out_t {
    */
   dcache_req_master_t mmu_dcache_req;
   dcache_resp_slave_t mmu_dcache_resp;
+
+  /*
+   * MMU -> Main Memory (for PTW)
+   */
+  ptw_mem_req_master_t mmu_mem_req;
+  ptw_mem_resp_slave_t mmu_mem_resp;
 };
 
 struct MMU_IO_t {

@@ -11,6 +11,9 @@ struct PTW_in {
   // from D-Cache
   dcache_resp_master_t *dcache_resp;
   dcache_req_slave_t *dcache_req;
+  // from Main Memory
+  ptw_mem_resp_master_t *mem_resp;
+  ptw_mem_req_slave_t *mem_req;
 };
 
 struct PTW_out {
@@ -19,6 +22,9 @@ struct PTW_out {
   // to D-Cache
   dcache_req_master_t *dcache_req;
   dcache_resp_slave_t *dcache_resp;
+  // to Main Memory
+  ptw_mem_req_master_t *mem_req;
+  ptw_mem_resp_slave_t *mem_resp;
 };
 
 enum PTW_DCache_state {
@@ -42,6 +48,8 @@ public:
   PTW(TLB_to_PTW *tlb2ptw_ptr, PTW_to_TLB *ptw2tlb_ptr,
       dcache_req_master_t *req_m, dcache_req_slave_t *req_s,
       dcache_resp_master_t *resp_m, dcache_resp_slave_t *resp_s,
+      ptw_mem_req_master_t *mem_req_m, ptw_mem_req_slave_t *mem_req_s,
+      ptw_mem_resp_master_t *mem_resp_m, ptw_mem_resp_slave_t *mem_resp_s,
       mmu_state_t *mmu_state_ptr);
   void reset(); // 初始化 PTW 状态
   void comb();  // 组合逻辑，处理 PTW 请求

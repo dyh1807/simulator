@@ -31,6 +31,10 @@ MMU::MMU()
           &io.in.mmu_dcache_req,   // dcache_req slave
           &io.in.mmu_dcache_resp,  // dcache_resp master
           &io.out.mmu_dcache_resp, // dcache_resp slave
+          &io.out.mmu_mem_req,     // mem_req master
+          &io.in.mmu_mem_req,      // mem_req slave
+          &io.in.mmu_mem_resp,     // mem_resp master
+          &io.out.mmu_mem_resp,    // mem_resp slave
           &io.in.state) {
   resp_ifu_r = &io.out.mmu_ifu_resp;
   resp_ifu_r_1 = {};
@@ -40,6 +44,7 @@ MMU::MMU()
   }
   // 初始化 MMU 状态
   io.in.state.privilege = M_MODE; // 默认特权级别为 M_MODE
+  mem_sim = {};
 }
 
 void MMU::reset() {
@@ -51,6 +56,9 @@ void MMU::reset() {
   i_tlb.reset();
   d_tlb.reset();
   ptw.reset();
+  mem_sim = {};
+  io.in.mmu_mem_req = {};
+  io.in.mmu_mem_resp = {};
 
   // reset top-level registers
   *resp_ifu_r = {};
@@ -238,6 +246,14 @@ void MMU::comb_arbiter() {
   }
 }
 
+extern uint32_t *p_memory;
+void MMU::comb_memory() {
+  // Drive memory slave signals
+  io.in.mmu_mem_req.ready = !mem_sim.busy;
+  io.in.mmu_mem_resp.valid = (mem_sim.busy && mem_sim.count >= PTW_MEM_LATENCY);
+  io.in.mmu_mem_resp.data = mem_sim.data;
+}
+
 /*
  * MMU combinational logic -- PTW interaction
  * PTW <-> TLB
@@ -252,6 +268,9 @@ void MMU::comb_ptw() {
 
   // arbiter between multiple PTW requests
   comb_arbiter();
+
+  // memory simulation logic
+  comb_memory();
 
   // pass PTW signals to PTW module
   ptw.comb();
@@ -278,6 +297,26 @@ void MMU::seq() {
   for (int i = 0; i < MAX_LSU_REQ_NUM; i++) {
     resp_lsu_r[i] = resp_lsu_r_1[i];
   }
+
+  // Memory Simulation Sequential Logic
+  if (!mem_sim.busy) {
+    if (io.out.mmu_mem_req.valid) {
+      mem_sim.busy = true;
+      mem_sim.count = 0;
+      mem_sim.addr = io.out.mmu_mem_req.paddr;
+      mem_sim.data = p_memory[mem_sim.addr >> 2];
+    }
+  } else {
+    if (mem_sim.count < PTW_MEM_LATENCY) {
+      mem_sim.count++;
+    } else {
+      // Wait for handshake
+      if (io.out.mmu_mem_resp.ready) {
+        mem_sim.busy = false;
+      }
+    }
+  }
+
   /*
    * Sequential update of inner modules
    */

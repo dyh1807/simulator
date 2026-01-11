@@ -40,6 +40,10 @@ using namespace std;
 #define ICACHE_MISS_LATENCY 100
 #endif
 
+#ifndef PTW_MEM_LATENCY
+#define PTW_MEM_LATENCY 100
+#endif
+
 #ifndef MAX_COMMIT_INST
 #define MAX_COMMIT_INST 150000000
 #endif
