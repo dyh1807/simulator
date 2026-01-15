@@ -7,3 +7,6 @@ compile_commands.json
 
 # Ignore build files
 /build
+
+# Ignore agent workflows
+.agent/
