@@ -1,882 +1,212 @@
 [
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/EXU/Cache.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/EXU/Cache.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/EXU/STQ.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/EXU/STQ.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/EXU/CSR.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/EXU/CSR.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/EXU/EXU.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/EXU/EXU.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/EXU/FU.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/EXU/FU.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/ROB.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/ROB.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/IDU.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/IDU.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/Rename.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/Rename.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/ISU.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/ISU.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/PRF.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/PRF.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/TOP.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/TOP.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./back-end/Dispatch.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/back-end/Dispatch.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/predecode_checker.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/predecode_checker.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/BPU/target_predictor/ras.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/BPU/target_predictor/ras.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/BPU/target_predictor/target_cache.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/BPU/target_predictor/target_cache.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/BPU/target_predictor/btb.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/BPU/target_predictor/btb.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/BPU/dir_predictor/demo_tage.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/BPU/dir_predictor/demo_tage.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/BPU/BPU_top.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/BPU/BPU_top.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/icache/icache_module.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/icache/icache_module.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/icache/icache.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/icache/icache.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/front_top.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/front_top.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/fifo/instruction_FIFO.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/fifo/instruction_FIFO.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/fifo/front2bank_FIFO.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/fifo/front2bank_FIFO.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/fifo/PTAB.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/fifo/PTAB.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./front-end/predecode.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/front-end/predecode.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./diff/diff.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/diff/diff.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./diff/ref.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/diff/ref.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./mmu/PTW.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/mmu/PTW.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./mmu/MMU.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/mmu/MMU.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./mmu/TLB.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/mmu/TLB.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./mmu/TLBEntry.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/mmu/TLBEntry.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/Dcache_Utils.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/Dcache_Utils.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/WriteBuffer.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/WriteBuffer.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/Arbiter.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/Arbiter.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/MSHR.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/MSHR.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/Memory.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/Memory.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/Dcache.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/Dcache.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./memory/WriteBack_Arbiter.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/memory/WriteBack_Arbiter.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./main.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/main.cpp"
-  },
-  {
-    "arguments": [
-      "/usr/bin/g++",
-      "-c",
-      "-I./include/",
-      "-I./back-end/include/",
-      "-I./back-end/EXU/include/",
-      "-I./back-end/tools/include/",
-      "-I./diff/include/",
-      "-I./front-end/",
-      "-I./mmu/include/",
-      "-I./memory/include/",
-      "./softfloat.a",
-      "-O3",
-      "-march=native",
-      "-funroll-loops",
-      "-mtune=native",
-      "./rv_simu_mmu_v2.cpp"
-    ],
-    "directory": "/home/tututu/qimeng/simulator",
-    "file": "/home/tututu/qimeng/simulator/rv_simu_mmu_v2.cpp"
-  }
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/Dispatch.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/Dispatch.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/Dispatch.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/EXU/CSR.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/CSR.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/CSR.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/EXU/Cache.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/Cache.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/Cache.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/EXU/EXU.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/EXU.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/EXU.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/EXU/FU.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/FU.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/FU.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/EXU/STQ.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/STQ.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/STQ.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/IDU.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/IDU.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/IDU.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/ISU.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/ISU.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/ISU.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/PRF.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/PRF.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/PRF.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/ROB.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/ROB.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/ROB.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/Rename.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/Rename.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/Rename.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/back-end/TOP.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/TOP.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/TOP.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/BPU/BPU_top.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/BPU_top.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/BPU_top.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/BPU/dir_predictor/demo_tage.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/dir_predictor/demo_tage.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/dir_predictor/demo_tage.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/BPU/target_predictor/btb.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/btb.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/btb.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/BPU/target_predictor/ras.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/ras.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/ras.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/BPU/target_predictor/target_cache.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/target_cache.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/BPU/target_predictor/target_cache.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/fifo/PTAB.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/PTAB.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/PTAB.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/fifo/front2bank_FIFO.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/front2bank_FIFO.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/front2bank_FIFO.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/fifo/instruction_FIFO.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/instruction_FIFO.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/fifo/instruction_FIFO.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/front_top.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/front_top.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/front_top.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/icache/ICacheTop.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/ICacheTop.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/ICacheTop.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/icache/icache.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/icache.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/icache.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/icache/icache_module.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/icache_module.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/icache/icache_module.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/predecode.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/predecode.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/predecode.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/front-end/predecode_checker.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/predecode_checker.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end/predecode_checker.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/diff/br_oracle.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/br_oracle.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/br_oracle.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/diff/diff.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/diff.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/diff.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/diff/ref.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/ref.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/ref.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/mmu/MMU.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/MMU.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/MMU.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/mmu/PTW.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/PTW.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/PTW.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/mmu/TLB.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/TLB.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/TLB.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/mmu/TLBEntry.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/TLBEntry.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/TLBEntry.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/Arbiter.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Arbiter.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Arbiter.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/Dcache.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Dcache.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Dcache.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/Dcache_Utils.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Dcache_Utils.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Dcache_Utils.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/MSHR.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/MSHR.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/MSHR.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/Memory.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Memory.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/Memory.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/WriteBack_Arbiter.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/WriteBack_Arbiter.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/WriteBack_Arbiter.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/memory/WriteBuffer.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/WriteBuffer.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/WriteBuffer.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/main.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/main.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/main.cpp"
+},
+{
+  "directory": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/build",
+  "command": "/usr/bin/g++  -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/EXU/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/back-end/tools/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/diff/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/front-end -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/mmu/include -I/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/memory/include -O3 -march=native -funroll-loops -mtune=native -std=gnu++2a -o CMakeFiles/a.out.dir/rv_simu_mmu_v2.cpp.o -c /nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/rv_simu_mmu_v2.cpp",
+  "file": "/nfs_global/S/daiyihao/project/qm-rocky/dev/icache_module-refactor/simulator/rv_simu_mmu_v2.cpp"
+}
 ]

@@ -2,6 +2,8 @@ a.out
 baremetal/memory
 baremetal/linux.bin
 .cache/*
+.vscode
+compile_commands.json
 
 # Ignore build files
 /build
