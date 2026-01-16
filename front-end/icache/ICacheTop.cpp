@@ -15,7 +15,10 @@
 // External dependencies
 extern SimCpu cpu;
 extern uint32_t *p_memory;
-extern ICache icache; // Defined in icache.cpp
+extern icache_module_n::ICache icache; // Defined in icache.cpp
+
+// Initialize static member
+bool ICacheTop::debug_enable = false;
 
 // Forward declaration if not available in headers
 bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t satp, uint32_t type,
@@ -35,23 +38,24 @@ void ICacheTop::syncPerf() {
 
 // --- TrueICacheTop Implementation ---
 
-TrueICacheTop::TrueICacheTop(ICache &hw) : icache_hw(hw) {}
+TrueICacheTop::TrueICacheTop(icache_module_n::ICache &hw) : icache_hw(hw) {}
 
 void TrueICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache] reset\n");
     icache_hw.reset();
     out->icache_read_ready = true;
+    mem_busy = false;
+    mem_latency_cnt = 0;
+    valid_reg = false;
     return;
   }
 
-  // deal with "refetch" signal (Async Reset behavior)
-  if (in->refetch) {
-    icache_hw.set_refetch();
-    valid_reg = false;
-    mem_busy = false;
-    mem_latency_cnt = 0;
-  }
+  // Pass refetch signal to HW
+  icache_hw.io.in.refetch = in->refetch;
+  
+  // Note: We DO NOT reset mem_busy or mem_latency_cnt here on refetch.
+  // The HW will handle DRAIN state.
 
   // set input for 1st pipeline stage (IFU)
   icache_hw.io.in.pc = in->fetch_address;
@@ -87,6 +91,7 @@ void TrueICacheTop::comb() {
     }
   } else {
     icache_hw.io.in.mem_req_ready = true;
+    icache_hw.io.in.mem_resp_valid = false;
   }
 
   icache_hw.comb();
@@ -98,21 +103,18 @@ void TrueICacheTop::comb() {
     cpu.mmu.io.in.mmu_ifu_req.valid =
         icache_hw.io.out.ifu_req_ready && in->icache_read_valid;
     cpu.mmu.io.in.mmu_ifu_req.vtag = in->fetch_address >> 12;
-  } else if (!icache_hw.io.out.ifu_req_ready) {
-    cpu.mmu.io.in.mmu_ifu_req.valid = true; // replay request
-    if (!valid_reg) {
-      std::cout
-          << "[icache_top] ERROR: valid_reg is false when replaying mmu_ifu_req"
-          << std::endl;
-      std::cout << "[icache_top] sim_time: " << std::dec << sim_time
-                << std::endl;
-      exit(1);
+    } else if (!icache_hw.io.out.ifu_req_ready) {
+      // Replay request using latched address (current_vaddr_reg)
+      // But ONLY if we have a valid request pending (valid_reg)
+      if (valid_reg) {
+        cpu.mmu.io.in.mmu_ifu_req.valid = true;
+        cpu.mmu.io.in.mmu_ifu_req.vtag = current_vaddr_reg >> 12;
+      } else {
+        cpu.mmu.io.in.mmu_ifu_req.valid = false;
+      }
+    } else {
+      cpu.mmu.io.in.mmu_ifu_req.valid = false;
     }
-    cpu.mmu.io.in.mmu_ifu_req.vtag = current_vaddr_reg >> 12;
-  } else {
-    cpu.mmu.io.in.mmu_ifu_req.valid = false;
-  }
-
   if (in->run_comb_only) {
     out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
     return;
@@ -123,30 +125,42 @@ void TrueICacheTop::comb() {
   bool miss = icache_hw.io.out.miss;
   if (ifu_resp_valid && ifu_resp_ready) {
     out->icache_read_complete = true;
-    if (miss) {
-      std::cout << "[icache_top] WARNING: miss is true when ifu_resp is valid"
-                << std::endl;
-      std::cout << "[icache_top] sim_time: " << std::dec << sim_time
-                << std::endl;
-      exit(1);
-    }
-    out->fetch_pc = current_vaddr_reg;
-    uint32_t mask = ICACHE_LINE_SIZE - 1;
-    int base_idx = (current_vaddr_reg & mask) / 4;
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      if (base_idx + i >= ICACHE_LINE_SIZE / 4) {
-        out->fetch_group[i] = INST_NOP;
-        out->page_fault_inst[i] = false;
-        out->inst_valid[i] = false;
-        continue;
-      }
-      out->fetch_group[i] = icache_hw.io.out.ifu_page_fault
-                                ? INST_NOP
-                                : icache_hw.io.out.rd_data[i + base_idx];
-      out->page_fault_inst[i] = icache_hw.io.out.ifu_page_fault;
-      out->inst_valid[i] = true;
-    }
-  } else {
+        if (miss) {
+          std::cout << "[icache_top] WARNING: miss is true when ifu_resp is valid"
+                    << std::endl;
+          std::cout << "[icache_top] sim_time: " << std::dec << sim_time
+                    << std::endl;
+          exit(1);
+        }
+        // Use current_vaddr_reg for response PC?
+        // Yes, because response matches the request we latched.
+        out->fetch_pc = current_vaddr_reg; 
+        
+            // DEBUG: Print fetched instructions
+            if (debug_enable) { // Optional: limit log volume
+               std::cout << "[ICacheTop] Complete PC: " << std::hex << current_vaddr_reg << std::dec << " Data: ";
+            }
+        
+            uint32_t mask = ICACHE_LINE_SIZE - 1;
+            int base_idx = (current_vaddr_reg & mask) / 4;
+            for (int i = 0; i < FETCH_WIDTH; i++) {
+              if (base_idx + i >= ICACHE_LINE_SIZE / 4) {
+                out->fetch_group[i] = INST_NOP;
+                out->page_fault_inst[i] = false;
+                out->inst_valid[i] = false;
+                continue;
+              }
+              out->fetch_group[i] = icache_hw.io.out.ifu_page_fault
+                                        ? INST_NOP
+                                        : icache_hw.io.out.rd_data[i + base_idx];
+              
+              if (debug_enable) std::cout << std::hex << out->fetch_group[i] << " ";
+        
+              out->page_fault_inst[i] = icache_hw.io.out.ifu_page_fault;
+              out->inst_valid[i] = true;
+            }
+            if (debug_enable) std::cout << std::dec << std::endl;    
+      } else {
     out->icache_read_complete = false;
     for (int i = 0; i < FETCH_WIDTH; i++) {
       out->fetch_group[i] = INST_NOP;
@@ -154,18 +168,26 @@ void TrueICacheTop::comb() {
       out->inst_valid[i] = false;
     }
   }
+  
+  out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
 }
 
 void TrueICacheTop::seq() {
   if (in->reset)
     return;
+    
+  // If refetch, clear valid_reg?
+  if (in->refetch) {
+      valid_reg = false;
+      // Do NOT clear mem_busy here.
+  }
 
   icache_hw.seq();
 
   if (mem_busy) {
     mem_latency_cnt++;
   }
-  bool mem_req_ready = !mem_busy;
+  bool mem_req_ready = !mem_busy; // Simplified model: memory is ready if not busy
   bool mem_req_valid = icache_hw.io.out.mem_req_valid;
   if (mem_req_ready && mem_req_valid) {
     mem_busy = true;
@@ -176,7 +198,6 @@ void TrueICacheTop::seq() {
   bool mem_resp_ready = icache_hw.io.out.mem_resp_ready;
   if (mem_resp_valid && mem_resp_ready) {
     mem_busy = false;
-    icache_hw.io.in.mem_resp_valid = false;
   }
 
   bool ifu_resp_valid = icache_hw.io.out.ifu_resp_valid;

@@ -31,19 +31,20 @@ enum ICacheState {
   IDLE,         // Idle state
   SWAP_IN,      // Swapping in state
   SWAP_IN_OKEY, // Swapping in successful
+  DRAIN         // Draining memory response after refetch
 };
 // AXI Memory Channel State
 enum AXIState {
   AXI_IDLE, // Idle state
   AXI_BUSY, // Busy state
 };
-}; // namespace icache_module_n
 
 struct ICache_in_t {
   // Input from the IFU (Instruction Fetch Unit)
   uint32_t pc;         // Program Counter
   bool ifu_req_valid;  // Fetch enable signal
   bool ifu_resp_ready; // actually always true in current design
+  bool refetch;        // Refetch signal from Top
 
   // Input from MMU (Memory Management Unit)
   uint32_t ppn;    // Physical Page Number
@@ -85,7 +86,6 @@ public:
   ICache();
 
   void reset();
-  void set_refetch();
   void comb();
   void comb_pipe1();
   void comb_pipe2();
@@ -143,6 +143,7 @@ private:
     uint32_t index_w;                // Index extracted from PC, index_bits bit
     // Registered data (between two pipeline stages)
     bool valid_r;
+    bool valid_next;
     uint32_t cache_set_data_r[way_cnt][word_num];
     uint32_t cache_set_tag_r[way_cnt];
     bool cache_set_valid_r[way_cnt];
@@ -186,5 +187,6 @@ private:
   uint32_t replace_idx_next;
   uint32_t ppn_r; // length = paddr_length(32/34) - 12 bits = 20/22 bits
 };
+}; // namespace icache_module_n
 
 #endif

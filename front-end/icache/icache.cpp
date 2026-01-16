@@ -4,7 +4,7 @@
 #include <SimCpu.h> // For cpu
 
 // Define global ICache instance
-ICache icache;
+icache_module_n::ICache icache;
 extern SimCpu cpu;
 
 void icache_top(struct icache_in *in, struct icache_out *out) {

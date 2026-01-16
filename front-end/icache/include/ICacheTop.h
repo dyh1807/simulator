@@ -18,7 +18,11 @@ protected:
   uint64_t access_delta = 0;
   uint64_t miss_delta = 0;
 
+  static bool debug_enable;
+
 public:
+  static void setDebug(bool enable) { debug_enable = enable; }
+
   void setIO(struct icache_in *in_ptr, struct icache_out *out_ptr) {
     in = in_ptr;
     out = out_ptr;
@@ -56,10 +60,10 @@ private:
   uint32_t current_vaddr_reg = 0;
   bool valid_reg = false;
 
-  ICache &icache_hw;
+  icache_module_n::ICache &icache_hw;
 
 public:
-  TrueICacheTop(ICache &hw);
+  TrueICacheTop(icache_module_n::ICache &hw);
   void comb() override;
   void seq() override;
 };

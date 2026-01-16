@@ -211,7 +211,10 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
       PTAB_top(&ptab_in, &ptab_out);
 
       // make sure inflight icache request is discarded
-      icache_in.reset = true;
+      // icache_in.reset = true;
+      icache_in.reset = false;
+      icache_in.refetch = true;
+      icache_in.icache_read_valid = false;
       icache_top(&icache_in, &icache_out);
 
       BPU_change_pc_reg(
