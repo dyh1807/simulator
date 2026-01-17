@@ -43,6 +43,7 @@ void sim_cycles(sim_ddr::SimDDR &ddr, int n) {
 void clear_master_signals(sim_ddr::SimDDR &ddr) {
   // AW channel (master -> slave)
   ddr.io.aw.awvalid = false;
+  ddr.io.aw.awid = 0;
   ddr.io.aw.awaddr = 0;
   ddr.io.aw.awlen = 0;
   ddr.io.aw.awsize = 2; // 4 bytes (32-bit)
@@ -59,6 +60,7 @@ void clear_master_signals(sim_ddr::SimDDR &ddr) {
 
   // AR channel (master -> slave)
   ddr.io.ar.arvalid = false;
+  ddr.io.ar.arid = 0;
   ddr.io.ar.araddr = 0;
   ddr.io.ar.arlen = 0;
   ddr.io.ar.arsize = 2; // 4 bytes
@@ -122,7 +124,7 @@ bool test_single_write(sim_ddr::SimDDR &ddr) {
 
   // Phase 3: Wait for B (write response)
   ddr.io.b.bready = true;
-  timeout = 20;
+  timeout = 200;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -184,7 +186,7 @@ bool test_single_read(sim_ddr::SimDDR &ddr) {
 
   // Phase 2: Wait for R (read data)
   ddr.io.r.rready = true;
-  timeout = 20;
+  timeout = 200;
   while (!ddr.io.r.rvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -269,7 +271,7 @@ bool test_burst_write(sim_ddr::SimDDR &ddr) {
   ddr.io.w.wlast = false;
 
   // Phase 3: Wait for B
-  timeout = 20;
+  timeout = 200;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -324,7 +326,7 @@ bool test_burst_read(sim_ddr::SimDDR &ddr) {
 
   // Phase 2: Receive 4 R beats
   for (int i = 0; i < 4; i++) {
-    timeout = 20;
+    timeout = 200;
     while (!ddr.io.r.rvalid && timeout > 0) {
       sim_cycle(ddr);
       timeout--;
@@ -393,7 +395,7 @@ bool test_partial_strobe(sim_ddr::SimDDR &ddr) {
   ddr.io.w.wlast = false;
 
   // Wait for B
-  timeout = 20;
+  timeout = 200;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -489,6 +491,226 @@ bool test_back_to_back(sim_ddr::SimDDR &ddr) {
   return true;
 }
 
+// Test 7: ID signal verification
+bool test_id_signals(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 7: ID Signal Verification ===\n");
+
+  clear_master_signals(ddr);
+
+  // Test write with specific ID
+  uint8_t test_awid = 0x5;
+  uint32_t test_addr = 0x7000;
+  uint32_t test_data = 0xABCD1234;
+
+  ddr.io.aw.awvalid = true;
+  ddr.io.aw.awid = test_awid;
+  ddr.io.aw.awaddr = test_addr;
+  ddr.io.aw.awlen = 0;
+
+  ddr.comb();
+  int timeout = 10;
+  while (!ddr.io.aw.awready && timeout > 0) {
+    ddr.seq();
+    sim_time++;
+    ddr.comb();
+    timeout--;
+  }
+  ddr.seq();
+  sim_time++;
+  ddr.io.aw.awvalid = false;
+
+  // Send W data
+  ddr.io.w.wvalid = true;
+  ddr.io.w.wdata = test_data;
+  ddr.io.w.wlast = true;
+
+  ddr.comb();
+  timeout = 10;
+  while (!ddr.io.w.wready && timeout > 0) {
+    ddr.seq();
+    sim_time++;
+    ddr.comb();
+    timeout--;
+  }
+  ddr.seq();
+  sim_time++;
+  ddr.io.w.wvalid = false;
+  ddr.io.w.wlast = false;
+
+  // Wait for B response and check bid
+  timeout = 200;
+  while (!ddr.io.b.bvalid && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+
+  if (ddr.io.b.bid != test_awid) {
+    printf("FAIL: Write bid mismatch: expected 0x%x, got 0x%x\n", test_awid,
+           ddr.io.b.bid);
+    return false;
+  }
+  sim_cycle(ddr);
+
+  // Test read with specific ID
+  uint8_t test_arid = 0xA;
+  p_memory[test_addr >> 2] = test_data;
+
+  ddr.io.ar.arvalid = true;
+  ddr.io.ar.arid = test_arid;
+  ddr.io.ar.araddr = test_addr;
+  ddr.io.ar.arlen = 0;
+
+  ddr.comb();
+  timeout = 10;
+  while (!ddr.io.ar.arready && timeout > 0) {
+    ddr.seq();
+    sim_time++;
+    ddr.comb();
+    timeout--;
+  }
+  ddr.seq();
+  sim_time++;
+  ddr.io.ar.arvalid = false;
+
+  // Wait for R data and check rid
+  timeout = 200;
+  while (!ddr.io.r.rvalid && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+
+  if (ddr.io.r.rid != test_arid) {
+    printf("FAIL: Read rid mismatch: expected 0x%x, got 0x%x\n", test_arid,
+           ddr.io.r.rid);
+    return false;
+  }
+  sim_cycle(ddr);
+
+  printf("PASS: ID signal test completed. bid=0x%x, rid=0x%x\n", test_awid,
+         test_arid);
+  return true;
+}
+
+// Test 8: Stress test - multiple sequential transactions
+bool test_stress_sequential(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 8: Stress Test (100 sequential transactions) ===\n");
+
+  clear_master_signals(ddr);
+
+  const int NUM_TRANSACTIONS = 100;
+  uint32_t base_addr = 0x10000;
+  int timeout;
+
+  // Phase 1: Write 100 values
+  for (int i = 0; i < NUM_TRANSACTIONS; i++) {
+    uint32_t addr = base_addr + (i * 4);
+    uint32_t data = 0xDEAD0000 | i;
+    uint8_t id = i & 0xF;
+
+    // AW phase
+    ddr.io.aw.awvalid = true;
+    ddr.io.aw.awid = id;
+    ddr.io.aw.awaddr = addr;
+    ddr.io.aw.awlen = 0;
+
+    ddr.comb();
+    timeout = 10;
+    while (!ddr.io.aw.awready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.aw.awvalid = false;
+
+    // W phase
+    ddr.io.w.wvalid = true;
+    ddr.io.w.wdata = data;
+    ddr.io.w.wlast = true;
+
+    ddr.comb();
+    timeout = 10;
+    while (!ddr.io.w.wready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.w.wvalid = false;
+    ddr.io.w.wlast = false;
+
+    // B phase
+    timeout = 200;
+    while (!ddr.io.b.bvalid && timeout > 0) {
+      sim_cycle(ddr);
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: Write %d B response timeout\n", i);
+      return false;
+    }
+    if (ddr.io.b.bid != id) {
+      printf("FAIL: Write %d bid mismatch\n", i);
+      return false;
+    }
+    sim_cycle(ddr);
+  }
+
+  // Phase 2: Read back and verify all 100 values
+  for (int i = 0; i < NUM_TRANSACTIONS; i++) {
+    uint32_t addr = base_addr + (i * 4);
+    uint32_t expected_data = 0xDEAD0000 | i;
+    uint8_t id = (i + 7) & 0xF; // Different ID pattern
+
+    // AR phase
+    ddr.io.ar.arvalid = true;
+    ddr.io.ar.arid = id;
+    ddr.io.ar.araddr = addr;
+    ddr.io.ar.arlen = 0;
+
+    ddr.comb();
+    timeout = 10;
+    while (!ddr.io.ar.arready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.ar.arvalid = false;
+
+    // R phase
+    timeout = 200;
+    while (!ddr.io.r.rvalid && timeout > 0) {
+      sim_cycle(ddr);
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: Read %d R data timeout\n", i);
+      return false;
+    }
+    if (ddr.io.r.rdata != expected_data) {
+      printf("FAIL: Read %d data mismatch: expected 0x%08x, got 0x%08x\n", i,
+             expected_data, ddr.io.r.rdata);
+      return false;
+    }
+    if (ddr.io.r.rid != id) {
+      printf("FAIL: Read %d rid mismatch: expected 0x%x, got 0x%x\n", i, id,
+             ddr.io.r.rid);
+      return false;
+    }
+    sim_cycle(ddr);
+  }
+
+  printf("PASS: Stress test completed (100 writes + 100 reads)\n");
+  return true;
+}
+
 // ============================================================================
 // Main Test Runner
 // ============================================================================
@@ -540,6 +762,18 @@ int main() {
   sim_cycles(ddr, 5);
 
   if (test_back_to_back(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_id_signals(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_stress_sequential(ddr))
     passed++;
   else
     failed++;

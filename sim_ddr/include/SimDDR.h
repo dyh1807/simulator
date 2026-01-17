@@ -21,7 +21,7 @@ namespace sim_ddr {
 // ============================================================================
 // SimDDR Configuration
 // ============================================================================
-constexpr uint32_t SIM_DDR_LATENCY = 2;     // Memory latency in cycles
+constexpr uint32_t SIM_DDR_LATENCY = 100;   // Memory latency in cycles
 constexpr uint32_t SIM_DDR_MAX_BURST = 256; // Max burst length (AXI4 limit)
 
 // ============================================================================
@@ -66,6 +66,7 @@ private:
   WriteState w_state_next;
 
   reg32_t w_addr;       // Latched write address
+  reg4_t w_id;          // Latched write transaction ID
   reg8_t w_len;         // Latched burst length - 1
   reg3_t w_size;        // Latched burst size
   reg2_t w_burst;       // Latched burst type
@@ -74,6 +75,7 @@ private:
 
   // Write channel next values
   reg32_t w_addr_next;
+  reg4_t w_id_next;
   reg8_t w_len_next;
   reg3_t w_size_next;
   reg2_t w_burst_next;
@@ -85,6 +87,7 @@ private:
   ReadState r_state_next;
 
   reg32_t r_addr;       // Latched read address
+  reg4_t r_id;          // Latched read transaction ID
   reg8_t r_len;         // Latched burst length - 1
   reg3_t r_size;        // Latched burst size
   reg2_t r_burst;       // Latched burst type
@@ -93,6 +96,7 @@ private:
 
   // Read channel next values
   reg32_t r_addr_next;
+  reg4_t r_id_next;
   reg8_t r_len_next;
   reg3_t r_size_next;
   reg2_t r_burst_next;

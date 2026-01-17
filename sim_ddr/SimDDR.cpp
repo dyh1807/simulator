@@ -25,6 +25,7 @@ void SimDDR::init() {
   w_state = WriteState::IDLE;
   w_state_next = WriteState::IDLE;
   w_addr = 0;
+  w_id = 0;
   w_len = 0;
   w_size = 0;
   w_burst = 0;
@@ -32,6 +33,7 @@ void SimDDR::init() {
   w_latency_cnt = 0;
 
   w_addr_next = 0;
+  w_id_next = 0;
   w_len_next = 0;
   w_size_next = 0;
   w_burst_next = 0;
@@ -42,6 +44,7 @@ void SimDDR::init() {
   r_state = ReadState::IDLE;
   r_state_next = ReadState::IDLE;
   r_addr = 0;
+  r_id = 0;
   r_len = 0;
   r_size = 0;
   r_burst = 0;
@@ -49,6 +52,7 @@ void SimDDR::init() {
   r_latency_cnt = 0;
 
   r_addr_next = 0;
+  r_id_next = 0;
   r_len_next = 0;
   r_size_next = 0;
   r_burst_next = 0;
@@ -59,9 +63,11 @@ void SimDDR::init() {
   io.aw.awready = false;
   io.w.wready = false;
   io.b.bvalid = false;
+  io.b.bid = 0;
   io.b.bresp = AXI_RESP_OKAY;
   io.ar.arready = false;
   io.r.rvalid = false;
+  io.r.rid = 0;
   io.r.rdata = 0;
   io.r.rresp = AXI_RESP_OKAY;
   io.r.rlast = false;
@@ -82,6 +88,7 @@ void SimDDR::comb_write_channel() {
   // Default: maintain current values
   w_state_next = w_state;
   w_addr_next = w_addr;
+  w_id_next = w_id;
   w_len_next = w_len;
   w_size_next = w_size;
   w_burst_next = w_burst;
@@ -92,6 +99,7 @@ void SimDDR::comb_write_channel() {
   io.aw.awready = false;
   io.w.wready = false;
   io.b.bvalid = false;
+  io.b.bid = w_id; // Return latched ID
   io.b.bresp = AXI_RESP_OKAY;
 
   switch (w_state) {
@@ -100,8 +108,9 @@ void SimDDR::comb_write_channel() {
     io.aw.awready = true;
 
     if (io.aw.awvalid && io.aw.awready) {
-      // Latch address and control signals
+      // Latch address, ID, and control signals
       w_addr_next = io.aw.awaddr;
+      w_id_next = io.aw.awid;
       w_len_next = io.aw.awlen;
       w_size_next = io.aw.awsize;
       w_burst_next = io.aw.awburst;
@@ -154,6 +163,7 @@ void SimDDR::comb_read_channel() {
   // Default: maintain current values
   r_state_next = r_state;
   r_addr_next = r_addr;
+  r_id_next = r_id;
   r_len_next = r_len;
   r_size_next = r_size;
   r_burst_next = r_burst;
@@ -163,6 +173,7 @@ void SimDDR::comb_read_channel() {
   // Default outputs
   io.ar.arready = false;
   io.r.rvalid = false;
+  io.r.rid = r_id; // Return latched ID
   io.r.rdata = 0;
   io.r.rresp = AXI_RESP_OKAY;
   io.r.rlast = false;
@@ -173,8 +184,9 @@ void SimDDR::comb_read_channel() {
     io.ar.arready = true;
 
     if (io.ar.arvalid && io.ar.arready) {
-      // Latch address and control signals
+      // Latch address, ID, and control signals
       r_addr_next = io.ar.araddr;
+      r_id_next = io.ar.arid;
       r_len_next = io.ar.arlen;
       r_size_next = io.ar.arsize;
       r_burst_next = io.ar.arburst;
@@ -233,6 +245,7 @@ void SimDDR::seq() {
   // Write channel state update
   w_state = w_state_next;
   w_addr = w_addr_next;
+  w_id = w_id_next;
   w_len = w_len_next;
   w_size = w_size_next;
   w_burst = w_burst_next;
@@ -242,6 +255,7 @@ void SimDDR::seq() {
   // Read channel state update
   r_state = r_state_next;
   r_addr = r_addr_next;
+  r_id = r_id_next;
   r_len = r_len_next;
   r_size = r_size_next;
   r_burst = r_burst_next;
