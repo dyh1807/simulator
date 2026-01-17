@@ -2,9 +2,8 @@
  * @file SimDDR.cpp
  * @brief SimDDR Implementation - DDR Memory Simulator with AXI4 Interface
  *
- * Implementation follows the simulator's comb/seq pattern:
- * - comb(): Combinational logic, calculates next state values
- * - seq(): Sequential logic, updates registers on clock edge
+ * Implementation with outstanding transaction support.
+ * Uses queues to track multiple in-flight read/write transactions.
  */
 
 #include "SimDDR.h"
@@ -21,43 +20,15 @@ namespace sim_ddr {
 // Initialization
 // ============================================================================
 void SimDDR::init() {
-  // Write channel initialization
-  w_state = WriteState::IDLE;
-  w_state_next = WriteState::IDLE;
-  w_addr = 0;
-  w_id = 0;
-  w_len = 0;
-  w_size = 0;
-  w_burst = 0;
-  w_beat_cnt = 0;
-  w_latency_cnt = 0;
+  // Clear write channel state
+  w_active = false;
+  w_current = {};
 
-  w_addr_next = 0;
-  w_id_next = 0;
-  w_len_next = 0;
-  w_size_next = 0;
-  w_burst_next = 0;
-  w_beat_cnt_next = 0;
-  w_latency_cnt_next = 0;
-
-  // Read channel initialization
-  r_state = ReadState::IDLE;
-  r_state_next = ReadState::IDLE;
-  r_addr = 0;
-  r_id = 0;
-  r_len = 0;
-  r_size = 0;
-  r_burst = 0;
-  r_beat_cnt = 0;
-  r_latency_cnt = 0;
-
-  r_addr_next = 0;
-  r_id_next = 0;
-  r_len_next = 0;
-  r_size_next = 0;
-  r_burst_next = 0;
-  r_beat_cnt_next = 0;
-  r_latency_cnt_next = 0;
+  // Clear queues
+  while (!w_resp_queue.empty())
+    w_resp_queue.pop();
+  while (!r_queue.empty())
+    r_queue.pop();
 
   // Initialize IO outputs
   io.aw.awready = false;
@@ -82,152 +53,68 @@ void SimDDR::comb() {
 }
 
 // ============================================================================
-// Combinational Logic - Write Channel
+// Combinational Logic - Write Channel (Outstanding Support)
 // ============================================================================
 void SimDDR::comb_write_channel() {
-  // Default: maintain current values
-  w_state_next = w_state;
-  w_addr_next = w_addr;
-  w_id_next = w_id;
-  w_len_next = w_len;
-  w_size_next = w_size;
-  w_burst_next = w_burst;
-  w_beat_cnt_next = w_beat_cnt;
-  w_latency_cnt_next = w_latency_cnt;
-
   // Default outputs
   io.aw.awready = false;
   io.w.wready = false;
   io.b.bvalid = false;
-  io.b.bid = w_id; // Return latched ID
+  io.b.bid = 0;
   io.b.bresp = AXI_RESP_OKAY;
 
-  switch (w_state) {
-  case WriteState::IDLE:
-    // Ready to accept new address
+  // --- AW Channel: Accept new write address if no active transaction ---
+  // (Can be enhanced to accept while processing W data, but keep simple for
+  // now)
+  if (!w_active) {
     io.aw.awready = true;
+  }
 
-    if (io.aw.awvalid && io.aw.awready) {
-      // Latch address, ID, and control signals
-      w_addr_next = io.aw.awaddr;
-      w_id_next = io.aw.awid;
-      w_len_next = io.aw.awlen;
-      w_size_next = io.aw.awsize;
-      w_burst_next = io.aw.awburst;
-      w_beat_cnt_next = 0;
-      w_state_next = WriteState::DATA;
-    }
-    break;
-
-  case WriteState::DATA:
-    // Ready to accept write data
+  // --- W Channel: Accept write data if active transaction ---
+  if (w_active && !w_current.data_done) {
     io.w.wready = true;
+  }
 
-    if (io.w.wvalid && io.w.wready) {
-      // Increment beat counter (write happens in seq())
-      w_beat_cnt_next = w_beat_cnt + 1;
-
-      if (io.w.wlast) {
-        // Last beat received, go to response phase
-        w_latency_cnt_next = 0;
-        w_state_next = WriteState::RESP;
-      }
-    }
-    break;
-
-  case WriteState::RESP:
-    // Send write response after latency
-    if (w_latency_cnt >= SIM_DDR_LATENCY) {
+  // --- B Channel: Send response if latency complete ---
+  if (!w_resp_queue.empty()) {
+    WriteRespPending &front =
+        const_cast<WriteRespPending &>(w_resp_queue.front());
+    if (front.latency_cnt >= SIM_DDR_LATENCY) {
       io.b.bvalid = true;
+      io.b.bid = front.id;
       io.b.bresp = AXI_RESP_OKAY;
-
-      if (io.b.bready) {
-        // Response accepted, return to idle
-        w_state_next = WriteState::IDLE;
-      }
-    } else {
-      w_latency_cnt_next = w_latency_cnt + 1;
     }
-    break;
-
-  default:
-    w_state_next = WriteState::IDLE;
-    break;
   }
 }
 
 // ============================================================================
-// Combinational Logic - Read Channel
+// Combinational Logic - Read Channel (Outstanding Support)
 // ============================================================================
 void SimDDR::comb_read_channel() {
-  // Default: maintain current values
-  r_state_next = r_state;
-  r_addr_next = r_addr;
-  r_id_next = r_id;
-  r_len_next = r_len;
-  r_size_next = r_size;
-  r_burst_next = r_burst;
-  r_beat_cnt_next = r_beat_cnt;
-  r_latency_cnt_next = r_latency_cnt;
-
   // Default outputs
   io.ar.arready = false;
   io.r.rvalid = false;
-  io.r.rid = r_id; // Return latched ID
+  io.r.rid = 0;
   io.r.rdata = 0;
   io.r.rresp = AXI_RESP_OKAY;
   io.r.rlast = false;
 
-  switch (r_state) {
-  case ReadState::IDLE:
-    // Ready to accept new address
+  // --- AR Channel: Accept new read address if queue not full ---
+  if (r_queue.size() < SIM_DDR_MAX_OUTSTANDING) {
     io.ar.arready = true;
+  }
 
-    if (io.ar.arvalid && io.ar.arready) {
-      // Latch address, ID, and control signals
-      r_addr_next = io.ar.araddr;
-      r_id_next = io.ar.arid;
-      r_len_next = io.ar.arlen;
-      r_size_next = io.ar.arsize;
-      r_burst_next = io.ar.arburst;
-      r_beat_cnt_next = 0;
-      r_latency_cnt_next = 0;
-      r_state_next = ReadState::LATENCY;
-    }
-    break;
-
-  case ReadState::LATENCY:
-    // Wait for memory latency
-    if (r_latency_cnt >= SIM_DDR_LATENCY) {
-      r_state_next = ReadState::DATA;
-    } else {
-      r_latency_cnt_next = r_latency_cnt + 1;
-    }
-    break;
-
-  case ReadState::DATA:
-    // Send read data
-    {
-      uint32_t current_addr = r_addr + (r_beat_cnt << r_size);
+  // --- R Channel: Send data from front transaction if in data phase ---
+  if (!r_queue.empty()) {
+    ReadTransaction &front = const_cast<ReadTransaction &>(r_queue.front());
+    if (front.in_data_phase) {
+      uint32_t current_addr = front.addr + (front.beat_cnt << front.size);
       io.r.rvalid = true;
+      io.r.rid = front.id;
       io.r.rdata = do_memory_read(current_addr);
       io.r.rresp = AXI_RESP_OKAY;
-      io.r.rlast = (r_beat_cnt == r_len);
-
-      if (io.r.rready) {
-        r_beat_cnt_next = r_beat_cnt + 1;
-
-        if (io.r.rlast) {
-          // Last beat sent, return to idle
-          r_state_next = ReadState::IDLE;
-        }
-      }
+      io.r.rlast = (front.beat_cnt == front.len);
     }
-    break;
-
-  default:
-    r_state_next = ReadState::IDLE;
-    break;
   }
 }
 
@@ -235,52 +122,103 @@ void SimDDR::comb_read_channel() {
 // Sequential Logic
 // ============================================================================
 void SimDDR::seq() {
-  // Perform memory write if W handshake occurred this cycle
-  // This happens BEFORE state update, using current cycle's signals
-  if (w_state == WriteState::DATA && io.w.wvalid && io.w.wready) {
-    uint32_t current_addr = w_addr + (w_beat_cnt << w_size);
-    do_memory_write(current_addr, io.w.wdata, io.w.wstrb);
+  // ========== Write Channel Sequential Logic ==========
+
+  // AW handshake: Start new write transaction
+  if (io.aw.awvalid && io.aw.awready) {
+    w_active = true;
+    w_current.addr = io.aw.awaddr;
+    w_current.id = io.aw.awid;
+    w_current.len = io.aw.awlen;
+    w_current.size = io.aw.awsize;
+    w_current.burst = io.aw.awburst;
+    w_current.beat_cnt = 0;
+    w_current.data_done = false;
   }
 
-  // Write channel state update
-  w_state = w_state_next;
-  w_addr = w_addr_next;
-  w_id = w_id_next;
-  w_len = w_len_next;
-  w_size = w_size_next;
-  w_burst = w_burst_next;
-  w_beat_cnt = w_beat_cnt_next;
-  w_latency_cnt = w_latency_cnt_next;
+  // W handshake: Process write data
+  if (io.w.wvalid && io.w.wready && w_active) {
+    uint32_t current_addr =
+        w_current.addr + (w_current.beat_cnt << w_current.size);
+    do_memory_write(current_addr, io.w.wdata, io.w.wstrb);
+    w_current.beat_cnt++;
 
-  // Read channel state update
-  r_state = r_state_next;
-  r_addr = r_addr_next;
-  r_id = r_id_next;
-  r_len = r_len_next;
-  r_size = r_size_next;
-  r_burst = r_burst_next;
-  r_beat_cnt = r_beat_cnt_next;
-  r_latency_cnt = r_latency_cnt_next;
+    if (io.w.wlast) {
+      // All data received, move to response queue
+      w_current.data_done = true;
+      WriteRespPending resp;
+      resp.id = w_current.id;
+      resp.latency_cnt = 0;
+      w_resp_queue.push(resp);
+      w_active = false;
+    }
+  }
+
+  // B handshake: Complete response
+  if (io.b.bvalid && io.b.bready) {
+    w_resp_queue.pop();
+  }
+
+  // Increment latency counters for pending responses
+  size_t resp_count = w_resp_queue.size();
+  std::queue<WriteRespPending> temp_queue;
+  while (!w_resp_queue.empty()) {
+    WriteRespPending resp = w_resp_queue.front();
+    w_resp_queue.pop();
+    resp.latency_cnt++;
+    temp_queue.push(resp);
+  }
+  w_resp_queue = temp_queue;
+
+  // ========== Read Channel Sequential Logic ==========
+
+  // AR handshake: Start new read transaction
+  if (io.ar.arvalid && io.ar.arready) {
+    ReadTransaction txn;
+    txn.addr = io.ar.araddr;
+    txn.id = io.ar.arid;
+    txn.len = io.ar.arlen;
+    txn.size = io.ar.arsize;
+    txn.burst = io.ar.arburst;
+    txn.beat_cnt = 0;
+    txn.latency_cnt = 0;
+    txn.in_data_phase = false;
+    r_queue.push(txn);
+  }
+
+  // R handshake: Advance data beat
+  if (io.r.rvalid && io.r.rready && !r_queue.empty()) {
+    ReadTransaction &front = const_cast<ReadTransaction &>(r_queue.front());
+    if (front.in_data_phase) {
+      front.beat_cnt++;
+      if (io.r.rlast) {
+        // Transaction complete
+        r_queue.pop();
+      }
+    }
+  }
+
+  // Update read queue: increment latency, transition to data phase
+  size_t read_count = r_queue.size();
+  std::queue<ReadTransaction> temp_r_queue;
+  while (!r_queue.empty()) {
+    ReadTransaction txn = r_queue.front();
+    r_queue.pop();
+
+    if (!txn.in_data_phase) {
+      txn.latency_cnt++;
+      if (txn.latency_cnt >= SIM_DDR_LATENCY) {
+        txn.in_data_phase = true;
+      }
+    }
+    temp_r_queue.push(txn);
+  }
+  r_queue = temp_r_queue;
 }
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-uint32_t SimDDR::calc_next_addr(uint32_t addr, uint8_t size, uint8_t burst) {
-  uint32_t bytes_per_beat = 1U << size;
-  switch (burst) {
-  case AXI_BURST_FIXED:
-    return addr; // Address stays the same
-  case AXI_BURST_INCR:
-    return addr + bytes_per_beat;
-  case AXI_BURST_WRAP:
-    // Simplified: treat as INCR
-    return addr + bytes_per_beat;
-  default:
-    return addr + bytes_per_beat;
-  }
-}
 
 void SimDDR::do_memory_write(uint32_t addr, uint32_t data, uint8_t wstrb) {
   // Convert byte address to word address
@@ -334,15 +272,9 @@ uint32_t SimDDR::do_memory_read(uint32_t addr) {
 // Debug
 // ============================================================================
 void SimDDR::print_state() {
-  const char *w_state_str[] = {"IDLE", "ADDR", "DATA", "RESP"};
-  const char *r_state_str[] = {"IDLE", "ADDR", "LATENCY", "DATA"};
-
-  printf("[SimDDR] Write: state=%s addr=0x%08x len=%d beat=%d latency=%d\n",
-         w_state_str[static_cast<int>(w_state)], w_addr, w_len, w_beat_cnt,
-         w_latency_cnt);
-  printf("[SimDDR] Read:  state=%s addr=0x%08x len=%d beat=%d latency=%d\n",
-         r_state_str[static_cast<int>(r_state)], r_addr, r_len, r_beat_cnt,
-         r_latency_cnt);
+  printf("[SimDDR] Write: active=%d resp_pending=%zu\n", w_active,
+         w_resp_queue.size());
+  printf("[SimDDR] Read: queue_size=%zu\n", r_queue.size());
 }
 
 } // namespace sim_ddr

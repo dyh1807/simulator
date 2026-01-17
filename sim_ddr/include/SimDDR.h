@@ -9,43 +9,60 @@
  * Features:
  * - 5 AXI4 channels (AW, W, B, AR, R)
  * - Configurable memory latency
+ * - Outstanding transaction support (multiple in-flight transactions)
  * - INCR burst mode support
  * - Uses external p_memory for storage (shared with main simulator)
  */
 
 #include "SimDDR_IO.h"
 #include <config.h>
+#include <cstdint>
+#include <queue>
 
 namespace sim_ddr {
 
 // ============================================================================
 // SimDDR Configuration
 // ============================================================================
-constexpr uint32_t SIM_DDR_LATENCY = 100;   // Memory latency in cycles
-constexpr uint32_t SIM_DDR_MAX_BURST = 256; // Max burst length (AXI4 limit)
+constexpr uint32_t SIM_DDR_LATENCY = 100;       // Memory latency in cycles
+constexpr uint32_t SIM_DDR_MAX_BURST = 256;     // Max burst length (AXI4 limit)
+constexpr uint32_t SIM_DDR_MAX_OUTSTANDING = 8; // Max outstanding transactions
 
 // ============================================================================
-// State Machine States
+// Transaction Structures for Outstanding Support
 // ============================================================================
 
-// Write Channel States
-enum class WriteState {
-  IDLE, // Waiting for AW valid
-  ADDR, // Address latched, waiting for W data
-  DATA, // Receiving W data beats
-  RESP, // Waiting latency, then sending B response
+// Write transaction (after AW handshake, waiting for W data or in latency)
+struct WriteTransaction {
+  uint32_t addr;
+  uint8_t id;
+  uint8_t len; // Burst length - 1
+  uint8_t size;
+  uint8_t burst;
+  uint8_t beat_cnt; // Current beat received
+  bool data_done;   // All W beats received
 };
 
-// Read Channel States
-enum class ReadState {
-  IDLE,    // Waiting for AR valid
-  ADDR,    // Address latched, waiting for latency
-  LATENCY, // Waiting for memory latency
-  DATA,    // Sending R data beats
+// Write response pending (in latency phase after W complete)
+struct WriteRespPending {
+  uint8_t id;
+  uint32_t latency_cnt;
+};
+
+// Read transaction (after AR handshake, in latency or sending data)
+struct ReadTransaction {
+  uint32_t addr;
+  uint8_t id;
+  uint8_t len; // Burst length - 1
+  uint8_t size;
+  uint8_t burst;
+  uint8_t beat_cnt; // Current beat sent
+  uint32_t latency_cnt;
+  bool in_data_phase; // True if latency done, sending data
 };
 
 // ============================================================================
-// SimDDR Class
+// SimDDR Class with Outstanding Transaction Support
 // ============================================================================
 class SimDDR {
 public:
@@ -61,54 +78,23 @@ public:
   void print_state();
 
 private:
-  // ========== Write Channel State ==========
-  WriteState w_state;
-  WriteState w_state_next;
+  // ========== Write Channel Queues ==========
+  // Active write transaction (receiving W data)
+  bool w_active;
+  WriteTransaction w_current;
 
-  reg32_t w_addr;       // Latched write address
-  reg4_t w_id;          // Latched write transaction ID
-  reg8_t w_len;         // Latched burst length - 1
-  reg3_t w_size;        // Latched burst size
-  reg2_t w_burst;       // Latched burst type
-  reg8_t w_beat_cnt;    // Current beat counter
-  reg8_t w_latency_cnt; // Latency counter
+  // Pending write responses (in latency)
+  std::queue<WriteRespPending> w_resp_queue;
 
-  // Write channel next values
-  reg32_t w_addr_next;
-  reg4_t w_id_next;
-  reg8_t w_len_next;
-  reg3_t w_size_next;
-  reg2_t w_burst_next;
-  reg8_t w_beat_cnt_next;
-  reg8_t w_latency_cnt_next;
-
-  // ========== Read Channel State ==========
-  ReadState r_state;
-  ReadState r_state_next;
-
-  reg32_t r_addr;       // Latched read address
-  reg4_t r_id;          // Latched read transaction ID
-  reg8_t r_len;         // Latched burst length - 1
-  reg3_t r_size;        // Latched burst size
-  reg2_t r_burst;       // Latched burst type
-  reg8_t r_beat_cnt;    // Current beat counter
-  reg8_t r_latency_cnt; // Latency counter
-
-  // Read channel next values
-  reg32_t r_addr_next;
-  reg4_t r_id_next;
-  reg8_t r_len_next;
-  reg3_t r_size_next;
-  reg2_t r_burst_next;
-  reg8_t r_beat_cnt_next;
-  reg8_t r_latency_cnt_next;
+  // ========== Read Channel Queue ==========
+  // Pending read transactions (in latency or sending data)
+  std::queue<ReadTransaction> r_queue;
 
   // ========== Combinational Logic Functions ==========
   void comb_write_channel();
   void comb_read_channel();
 
   // ========== Helper Functions ==========
-  uint32_t calc_next_addr(uint32_t addr, uint8_t size, uint8_t burst);
   void do_memory_write(uint32_t addr, uint32_t data, uint8_t wstrb);
   uint32_t do_memory_read(uint32_t addr);
 };

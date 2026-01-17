@@ -711,6 +711,92 @@ bool test_stress_sequential(sim_ddr::SimDDR &ddr) {
   return true;
 }
 
+// Test 9: Outstanding read transactions (multiple in-flight reads)
+bool test_outstanding_reads(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 9: Outstanding Read Transactions ===\n");
+
+  clear_master_signals(ddr);
+
+  const int NUM_OUTSTANDING = 4;
+  uint32_t base_addr = 0x20000;
+  uint32_t expected_data[NUM_OUTSTANDING];
+  uint8_t expected_id[NUM_OUTSTANDING];
+
+  // Pre-initialize memory with test data
+  for (int i = 0; i < NUM_OUTSTANDING; i++) {
+    expected_data[i] = 0xBEEF0000 | i;
+    expected_id[i] = i + 1;
+    p_memory[(base_addr >> 2) + i] = expected_data[i];
+  }
+
+  // Issue multiple AR requests back-to-back before waiting for R data
+  printf("  Issuing %d outstanding read requests...\n", NUM_OUTSTANDING);
+  for (int i = 0; i < NUM_OUTSTANDING; i++) {
+    ddr.io.ar.arvalid = true;
+    ddr.io.ar.arid = expected_id[i];
+    ddr.io.ar.araddr = base_addr + (i * 4);
+    ddr.io.ar.arlen = 0;
+    ddr.io.ar.arsize = 2;
+
+    ddr.comb();
+    int timeout = 10;
+    while (!ddr.io.ar.arready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: AR handshake timeout for request %d\n", i);
+      return false;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.ar.arvalid = false;
+
+    // Small gap between requests, but not waiting for response
+    sim_cycle(ddr);
+  }
+
+  printf("  All AR requests accepted. Waiting for R responses...\n");
+
+  // Now wait for all R responses (should come in order for this implementation)
+  for (int i = 0; i < NUM_OUTSTANDING; i++) {
+    int timeout = 200;
+    while (!ddr.io.r.rvalid && timeout > 0) {
+      sim_cycle(ddr);
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: R data timeout for response %d\n", i);
+      return false;
+    }
+
+    // Verify data and ID
+    if (ddr.io.r.rdata != expected_data[i]) {
+      printf("FAIL: Response %d data mismatch: expected 0x%08x, got 0x%08x\n",
+             i, expected_data[i], ddr.io.r.rdata);
+      return false;
+    }
+    if (ddr.io.r.rid != expected_id[i]) {
+      printf("FAIL: Response %d rid mismatch: expected 0x%x, got 0x%x\n", i,
+             expected_id[i], ddr.io.r.rid);
+      return false;
+    }
+    if (!ddr.io.r.rlast) {
+      printf("FAIL: Response %d rlast should be true for single-beat\n", i);
+      return false;
+    }
+
+    // Complete handshake
+    sim_cycle(ddr);
+  }
+
+  printf("PASS: Outstanding reads test completed (%d in-flight)\n",
+         NUM_OUTSTANDING);
+  return true;
+}
+
 // ============================================================================
 // Main Test Runner
 // ============================================================================
@@ -774,6 +860,12 @@ int main() {
   sim_cycles(ddr, 5);
 
   if (test_stress_sequential(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_outstanding_reads(ddr))
     passed++;
   else
     failed++;
