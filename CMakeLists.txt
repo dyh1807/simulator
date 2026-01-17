@@ -37,6 +37,8 @@ file(GLOB_RECURSE FRONTEND_SOURCES "${CMAKE_SOURCE_DIR}/front-end/*.cpp")
 file(GLOB_RECURSE DIFF_SOURCES "${CMAKE_SOURCE_DIR}/diff/*.cpp")
 file(GLOB_RECURSE MMU_SOURCES "${CMAKE_SOURCE_DIR}/mmu/*.cpp")
 file(GLOB_RECURSE MEMORY_SOURCES "${CMAKE_SOURCE_DIR}/memory/*.cpp")
+# Note: sim_ddr sources are NOT included in main executable (will be integrated later)
+# file(GLOB_RECURSE SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
 
 # Combine all sources (matching Makefile: main.cpp and rv_simu_mmu_v2.cpp)
 set(SOURCES 
@@ -59,6 +61,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/front-end/
     ${CMAKE_SOURCE_DIR}/mmu/include/
     ${CMAKE_SOURCE_DIR}/memory/include/
+    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
 )
 
 # Create executable
@@ -92,6 +95,27 @@ add_custom_target(linux
     DEPENDS ${EXECUTABLE_NAME}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running the simulator with memory image: ${LINUX_IMAGE_PATH}"
+)
+
+# ============================================================================
+# SimDDR Test Target (standalone test executable)
+# ============================================================================
+add_executable(sim_ddr_test EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR.cpp
+    ${CMAKE_SOURCE_DIR}/sim_ddr/sim_ddr_test.cpp
+)
+
+target_compile_options(sim_ddr_test PRIVATE
+    -O2
+    -march=native
+)
+
+# sim_ddr_test run target
+add_custom_target(run_sim_ddr_test
+    COMMAND ${CMAKE_BINARY_DIR}/sim_ddr_test
+    DEPENDS sim_ddr_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running SimDDR AXI4 test suite"
 )
 
 # Add clean target (custom target that removes build artifacts)
