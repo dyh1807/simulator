@@ -1,7 +1,7 @@
 #pragma once
 /**
- * @file AXI_Interleaving_IO.h
- * @brief AXI-Interleaving Upstream Interface Definitions
+ * @file AXI_Interconnect_IO.h
+ * @brief AXI-Interconnect Upstream Interface Definitions
  *
  * Simplified master interfaces for icache/dcache/mmu:
  * - Single-beat wide data (up to 256-bit = 8 x 32-bit words)
@@ -12,7 +12,7 @@
 #include <config.h>
 #include <cstdint>
 
-namespace axi_interleaving {
+namespace axi_interconnect {
 
 // ============================================================================
 // Configuration
@@ -100,10 +100,10 @@ struct WriteMasterPort_t {
 };
 
 // ============================================================================
-// AXI-Interleaving Combined IO
+// AXI-Interconnect Combined IO
 // ============================================================================
 
-struct AXI_Interleaving_IO_t {
+struct AXI_Interconnect_IO_t {
   // Upstream: Read Masters (3 ports)
   ReadMasterPort_t read_masters[NUM_READ_MASTERS];
 
@@ -114,4 +114,4 @@ struct AXI_Interleaving_IO_t {
   // (Use SimDDR_IO_t from sim_ddr module)
 };
 
-} // namespace axi_interleaving
+} // namespace axi_interconnect

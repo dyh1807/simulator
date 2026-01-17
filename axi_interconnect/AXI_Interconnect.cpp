@@ -1,22 +1,22 @@
 /**
- * @file AXI_Interleaving.cpp
- * @brief AXI-Interleaving Layer Implementation
+ * @file AXI_Interconnect.cpp
+ * @brief AXI-Interconnect Layer Implementation
  *
  * AXI Protocol Compliance:
  * - AR/AW valid signals are latched until ready handshake
  * - Upstream req_valid can be deasserted without affecting AXI valid
  */
 
-#include "AXI_Interleaving.h"
+#include "AXI_Interconnect.h"
 #include <algorithm>
 #include <cstdio>
 
-namespace axi_interleaving {
+namespace axi_interconnect {
 
 // ============================================================================
 // Initialization
 // ============================================================================
-void AXI_Interleaving::init() {
+void AXI_Interconnect::init() {
   r_arb_rr_idx = 0;
   r_current_master = -1;
   r_pending.clear();
@@ -80,7 +80,7 @@ void AXI_Interleaving::init() {
 // ============================================================================
 // Combinational Logic
 // ============================================================================
-void AXI_Interleaving::comb() {
+void AXI_Interconnect::comb() {
   comb_read_arbiter();
   comb_read_response();
   comb_write_request();
@@ -90,7 +90,7 @@ void AXI_Interleaving::comb() {
 // ============================================================================
 // Read Arbiter with Latched AR (AXI Compliant)
 // ============================================================================
-void AXI_Interleaving::comb_read_arbiter() {
+void AXI_Interconnect::comb_read_arbiter() {
   // Default: don't accept new requests
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     read_ports[i].req.ready = false;
@@ -131,7 +131,7 @@ void AXI_Interleaving::comb_read_arbiter() {
   }
 }
 
-void AXI_Interleaving::comb_read_response() {
+void AXI_Interconnect::comb_read_response() {
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     read_ports[i].resp.valid = false;
   }
@@ -151,7 +151,7 @@ void AXI_Interleaving::comb_read_response() {
 // ============================================================================
 // Write Request with Latched AW (AXI Compliant)
 // ============================================================================
-void AXI_Interleaving::comb_write_request() {
+void AXI_Interconnect::comb_write_request() {
   write_port.req.ready = false;
   axi_io.w.wvalid = false;
 
@@ -181,7 +181,7 @@ void AXI_Interleaving::comb_write_request() {
   }
 }
 
-void AXI_Interleaving::comb_write_response() {
+void AXI_Interconnect::comb_write_response() {
   write_port.resp.valid = false;
   axi_io.b.bready = true;
 
@@ -195,7 +195,7 @@ void AXI_Interleaving::comb_write_response() {
 // ============================================================================
 // Sequential Logic
 // ============================================================================
-void AXI_Interleaving::seq() {
+void AXI_Interconnect::seq() {
   // ========== AR Channel with Latch ==========
 
   // If new AR request and NOT immediately ready, latch it
@@ -305,10 +305,10 @@ void AXI_Interleaving::seq() {
 // ============================================================================
 // Helpers
 // ============================================================================
-uint8_t AXI_Interleaving::calc_burst_len(uint8_t total_size) {
+uint8_t AXI_Interconnect::calc_burst_len(uint8_t total_size) {
   uint8_t bytes = total_size + 1;
   uint8_t beats = (bytes + 3) / 4;
   return beats > 0 ? beats - 1 : 0;
 }
 
-} // namespace axi_interleaving
+} // namespace axi_interconnect

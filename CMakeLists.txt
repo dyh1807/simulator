@@ -119,22 +119,22 @@ add_custom_target(run_sim_ddr_test
 )
 
 # ============================================================================
-# AXI-Interleaving Test Target
+# AXI-Interconnect Test Target
 # ============================================================================
-add_executable(axi_interleaving_test EXCLUDE_FROM_ALL
+add_executable(axi_interconnect_test EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR.cpp
-    ${CMAKE_SOURCE_DIR}/axi_interleaving/AXI_Interleaving.cpp
-    ${CMAKE_SOURCE_DIR}/axi_interleaving/axi_interleaving_test.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/axi_interconnect_test.cpp
 )
 
-target_include_directories(axi_interleaving_test PRIVATE
+target_include_directories(axi_interconnect_test PRIVATE
     ${CMAKE_SOURCE_DIR}/back-end/include/
     ${CMAKE_SOURCE_DIR}/front-end/
     ${CMAKE_SOURCE_DIR}/sim_ddr/include/
-    ${CMAKE_SOURCE_DIR}/axi_interleaving/include/
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
 
-target_compile_options(axi_interleaving_test PRIVATE
+target_compile_options(axi_interconnect_test PRIVATE
     -O2
     -march=native
 )

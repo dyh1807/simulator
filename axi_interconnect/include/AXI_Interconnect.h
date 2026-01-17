@@ -1,7 +1,7 @@
 #pragma once
 /**
- * @file AXI_Interleaving.h
- * @brief AXI-Interleaving Layer
+ * @file AXI_Interconnect.h
+ * @brief AXI-Interconnect Layer
  *
  * Converts simplified master interfaces (single-beat, wide data) to
  * AXI4 protocol (multi-beat bursts) for connection to SimDDR.
@@ -11,13 +11,13 @@
  * - Upstream req_valid can be deasserted without affecting AXI valid
  */
 
-#include "AXI_Interleaving_IO.h"
+#include "AXI_Interconnect_IO.h"
 #include "SimDDR_IO.h"
 #include <config.h>
 #include <queue>
 #include <vector>
 
-namespace axi_interleaving {
+namespace axi_interconnect {
 
 // ============================================================================
 // Latched AR/AW Requests (for AXI compliance)
@@ -70,10 +70,10 @@ struct WritePendingTxn {
 };
 
 // ============================================================================
-// AXI_Interleaving Class
+// AXI_Interconnect Class
 // ============================================================================
 
-class AXI_Interleaving {
+class AXI_Interconnect {
 public:
   void init();
   void comb();
@@ -113,4 +113,4 @@ private:
   uint8_t calc_burst_len(uint8_t total_size);
 };
 
-} // namespace axi_interleaving
+} // namespace axi_interconnect

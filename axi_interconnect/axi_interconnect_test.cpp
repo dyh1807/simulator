@@ -1,9 +1,9 @@
 /**
- * @file axi_interleaving_test.cpp
- * @brief Test harness for AXI_Interleaving layer
+ * @file axi_interconnect_test.cpp
+ * @brief Test harness for AXI_Interconnect layer
  */
 
-#include "AXI_Interleaving.h"
+#include "AXI_Interconnect.h"
 #include "SimDDR.h"
 #include <cstdio>
 #include <cstdlib>
@@ -39,8 +39,8 @@ void clear_ddr_inputs(sim_ddr::SimDDR &ddr) {
 }
 
 // Clear Upstream Inputs (from masters)
-void clear_upstream_inputs(axi_interleaving::AXI_Interleaving &intlv) {
-  for (int i = 0; i < axi_interleaving::NUM_READ_MASTERS; i++) {
+void clear_upstream_inputs(axi_interconnect::AXI_Interconnect &intlv) {
+  for (int i = 0; i < axi_interconnect::NUM_READ_MASTERS; i++) {
     intlv.read_ports[i].req.valid = false;
     intlv.read_ports[i].req.addr = 0;
     intlv.read_ports[i].req.total_size = 0;
@@ -56,7 +56,7 @@ void clear_upstream_inputs(axi_interleaving::AXI_Interleaving &intlv) {
   intlv.write_port.resp.ready = false;
 }
 
-void sim_cycle(axi_interleaving::AXI_Interleaving &intlv,
+void sim_cycle(axi_interconnect::AXI_Interconnect &intlv,
                sim_ddr::SimDDR &ddr) {
   // Run interleaver comb first to generate AXI master signals
   intlv.comb();
@@ -107,7 +107,7 @@ void sim_cycle(axi_interleaving::AXI_Interleaving &intlv,
 }
 
 // Test 1: Simple 4-byte read
-bool test_simple_read(axi_interleaving::AXI_Interleaving &intlv,
+bool test_simple_read(axi_interconnect::AXI_Interconnect &intlv,
                       sim_ddr::SimDDR &ddr) {
   printf("=== Test 1: Simple Read (4B) ===\n");
 
@@ -153,7 +153,7 @@ bool test_simple_read(axi_interleaving::AXI_Interleaving &intlv,
 
 // Test 2: AXI Valid Latching - verify valid stays asserted after req_valid
 // drops
-bool test_valid_latching(axi_interleaving::AXI_Interleaving &intlv,
+bool test_valid_latching(axi_interconnect::AXI_Interconnect &intlv,
                          sim_ddr::SimDDR &ddr) {
   printf("=== Test 2: AXI Valid Latching (using mocked AXI slave) ===\n");
 
@@ -223,13 +223,13 @@ bool test_valid_latching(axi_interleaving::AXI_Interleaving &intlv,
 
 int main() {
   printf("====================================\n");
-  printf("AXI-Interleaving Test Suite\n");
+  printf("AXI-Interconnect Test Suite\n");
   printf("====================================\n\n");
 
   p_memory = new uint32_t[TEST_MEM_SIZE];
   memset(p_memory, 0, TEST_MEM_SIZE * sizeof(uint32_t));
 
-  axi_interleaving::AXI_Interleaving intlv;
+  axi_interconnect::AXI_Interconnect intlv;
   sim_ddr::SimDDR ddr;
 
   intlv.init();
