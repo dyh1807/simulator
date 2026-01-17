@@ -118,6 +118,27 @@ add_custom_target(run_sim_ddr_test
     COMMENT "Running SimDDR AXI4 test suite"
 )
 
+# ============================================================================
+# AXI-Interleaving Test Target
+# ============================================================================
+add_executable(axi_interleaving_test EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interleaving/AXI_Interleaving.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interleaving/axi_interleaving_test.cpp
+)
+
+target_include_directories(axi_interleaving_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/back-end/include/
+    ${CMAKE_SOURCE_DIR}/front-end/
+    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/axi_interleaving/include/
+)
+
+target_compile_options(axi_interleaving_test PRIVATE
+    -O2
+    -march=native
+)
+
 # Add clean target (custom target that removes build artifacts)
 add_custom_target(clean_all
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}
