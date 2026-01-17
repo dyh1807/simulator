@@ -10,6 +10,7 @@
  * - 5 AXI4 channels (AW, W, B, AR, R)
  * - Configurable memory latency
  * - Outstanding transaction support (multiple in-flight transactions)
+ * - Read data interleaving (can switch between transactions mid-burst)
  * - INCR burst mode support
  * - Uses external p_memory for storage (shared with main simulator)
  */
@@ -18,6 +19,7 @@
 #include <config.h>
 #include <cstdint>
 #include <queue>
+#include <vector>
 
 namespace sim_ddr {
 
@@ -59,10 +61,11 @@ struct ReadTransaction {
   uint8_t beat_cnt; // Current beat sent
   uint32_t latency_cnt;
   bool in_data_phase; // True if latency done, sending data
+  bool complete;      // True when all beats sent and rlast accepted
 };
 
 // ============================================================================
-// SimDDR Class with Outstanding Transaction Support
+// SimDDR Class with Outstanding + Interleaving Support
 // ============================================================================
 class SimDDR {
 public:
@@ -78,7 +81,7 @@ public:
   void print_state();
 
 private:
-  // ========== Write Channel Queues ==========
+  // ========== Write Channel ==========
   // Active write transaction (receiving W data)
   bool w_active;
   WriteTransaction w_current;
@@ -86,9 +89,15 @@ private:
   // Pending write responses (in latency)
   std::queue<WriteRespPending> w_resp_queue;
 
-  // ========== Read Channel Queue ==========
-  // Pending read transactions (in latency or sending data)
-  std::queue<ReadTransaction> r_queue;
+  // ========== Read Channel with Interleaving ==========
+  // Vector allows access to any transaction for interleaving
+  std::vector<ReadTransaction> r_transactions;
+
+  // Round-robin index for fair interleaving
+  size_t r_rr_index;
+
+  // Currently selected transaction index for this cycle (-1 if none)
+  int r_selected_idx;
 
   // ========== Combinational Logic Functions ==========
   void comb_write_channel();
@@ -97,6 +106,9 @@ private:
   // ========== Helper Functions ==========
   void do_memory_write(uint32_t addr, uint32_t data, uint8_t wstrb);
   uint32_t do_memory_read(uint32_t addr);
+
+  // Find next ready transaction using round-robin
+  int find_next_ready_transaction();
 };
 
 } // namespace sim_ddr

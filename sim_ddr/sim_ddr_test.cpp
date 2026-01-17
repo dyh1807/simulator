@@ -797,6 +797,117 @@ bool test_outstanding_reads(sim_ddr::SimDDR &ddr) {
   return true;
 }
 
+// Test 10: Read interleaving verification (burst reads that interleave)
+bool test_interleaving(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 10: Read Interleaving ===\n");
+
+  clear_master_signals(ddr);
+
+  // Issue 2 burst reads of 4 beats each
+  const int NUM_READS = 2;
+  const int BEATS_PER_READ = 4;
+  uint32_t base_addrs[NUM_READS] = {0x30000, 0x30100};
+  uint8_t ids[NUM_READS] = {0x1, 0x2};
+
+  // Pre-initialize memory
+  for (int r = 0; r < NUM_READS; r++) {
+    for (int b = 0; b < BEATS_PER_READ; b++) {
+      p_memory[(base_addrs[r] >> 2) + b] = (ids[r] << 24) | (b << 16) | 0xDA7A;
+    }
+  }
+
+  // Issue both AR requests back-to-back
+  printf("  Issuing %d burst read requests (len=%d each)...\n", NUM_READS,
+         BEATS_PER_READ);
+
+  for (int r = 0; r < NUM_READS; r++) {
+    ddr.io.ar.arvalid = true;
+    ddr.io.ar.arid = ids[r];
+    ddr.io.ar.araddr = base_addrs[r];
+    ddr.io.ar.arlen = BEATS_PER_READ - 1; // len = beats - 1
+    ddr.io.ar.arsize = 2;
+
+    ddr.comb();
+    int timeout = 10;
+    while (!ddr.io.ar.arready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.ar.arvalid = false;
+    sim_cycle(ddr);
+  }
+
+  printf("  Waiting for R responses (total %d beats)...\n",
+         NUM_READS * BEATS_PER_READ);
+
+  // Receive all beats, tracking which IDs we see
+  int beats_received[NUM_READS] = {0, 0};
+  int total_beats = NUM_READS * BEATS_PER_READ;
+  int interleave_switches = 0;
+  uint8_t last_id = 0;
+
+  for (int beat = 0; beat < total_beats; beat++) {
+    int timeout = 200;
+    while (!ddr.io.r.rvalid && timeout > 0) {
+      sim_cycle(ddr);
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: R data timeout at beat %d\n", beat);
+      return false;
+    }
+
+    // Identify which read this beat belongs to
+    uint8_t rid = ddr.io.r.rid;
+    int read_idx = -1;
+    for (int r = 0; r < NUM_READS; r++) {
+      if (ids[r] == rid) {
+        read_idx = r;
+        break;
+      }
+    }
+    if (read_idx < 0) {
+      printf("FAIL: Unknown rid 0x%x\n", rid);
+      return false;
+    }
+
+    // Track interleaving switches
+    if (beat > 0 && rid != last_id) {
+      interleave_switches++;
+    }
+    last_id = rid;
+
+    beats_received[read_idx]++;
+
+    // Check rlast
+    bool expected_last = (beats_received[read_idx] == BEATS_PER_READ);
+    if (ddr.io.r.rlast != expected_last) {
+      printf("FAIL: rlast mismatch at beat %d\n", beat);
+      return false;
+    }
+
+    sim_cycle(ddr);
+  }
+
+  // Verify all beats received
+  for (int r = 0; r < NUM_READS; r++) {
+    if (beats_received[r] != BEATS_PER_READ) {
+      printf("FAIL: Read %d received %d beats, expected %d\n", r,
+             beats_received[r], BEATS_PER_READ);
+      return false;
+    }
+  }
+
+  printf("  Interleave switches: %d\n", interleave_switches);
+  printf("PASS: Interleaving test completed (switches=%d)\n",
+         interleave_switches);
+  return true;
+}
+
 // ============================================================================
 // Main Test Runner
 // ============================================================================
@@ -866,6 +977,12 @@ int main() {
   sim_cycles(ddr, 5);
 
   if (test_outstanding_reads(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_interleaving(ddr))
     passed++;
   else
     failed++;
