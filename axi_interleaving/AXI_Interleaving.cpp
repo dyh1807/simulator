@@ -1,6 +1,10 @@
 /**
  * @file AXI_Interleaving.cpp
  * @brief AXI-Interleaving Layer Implementation
+ *
+ * AXI Protocol Compliance:
+ * - AR/AW valid signals are latched until ready handshake
+ * - Upstream req_valid can be deasserted without affecting AXI valid
  */
 
 #include "AXI_Interleaving.h"
@@ -14,12 +18,30 @@ namespace axi_interleaving {
 // ============================================================================
 void AXI_Interleaving::init() {
   r_arb_rr_idx = 0;
-  r_arb_active = false;
   r_current_master = -1;
   r_pending.clear();
 
+  // Clear AR latch
+  ar_latched.valid = false;
+  ar_latched.addr = 0;
+  ar_latched.len = 0;
+  ar_latched.size = 2;
+  ar_latched.burst = sim_ddr::AXI_BURST_INCR;
+  ar_latched.id = 0;
+  ar_latched.master_id = 0;
+  ar_latched.orig_id = 0;
+
   w_active = false;
   w_current = {};
+
+  // Clear AW latch
+  aw_latched.valid = false;
+  aw_latched.addr = 0;
+  aw_latched.len = 0;
+  aw_latched.size = 2;
+  aw_latched.burst = sim_ddr::AXI_BURST_INCR;
+  aw_latched.id = 0;
+
   while (!w_resp_pending.empty())
     w_resp_pending.pop();
 
@@ -65,20 +87,36 @@ void AXI_Interleaving::comb() {
   comb_write_response();
 }
 
+// ============================================================================
+// Read Arbiter with Latched AR (AXI Compliant)
+// ============================================================================
 void AXI_Interleaving::comb_read_arbiter() {
-  axi_io.ar.arvalid = false;
+  // Default: don't accept new requests
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     read_ports[i].req.ready = false;
   }
 
-  if (r_arb_active)
-    return;
+  // If AR is latched (waiting for arready), output latched values
+  if (ar_latched.valid) {
+    axi_io.ar.arvalid = true; // MUST stay valid until handshake!
+    axi_io.ar.araddr = ar_latched.addr;
+    axi_io.ar.arlen = ar_latched.len;
+    axi_io.ar.arsize = ar_latched.size;
+    axi_io.ar.arburst = ar_latched.burst;
+    axi_io.ar.arid = ar_latched.id;
+    return; // Cannot accept new requests while AR pending
+  }
 
+  // No latched AR, can accept new request
+  axi_io.ar.arvalid = false;
+
+  // Round-robin search for valid request
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     int idx = (r_arb_rr_idx + i) % NUM_READ_MASTERS;
     if (read_ports[idx].req.valid) {
       r_current_master = idx;
 
+      // Output AR (will be latched in seq if not immediately ready)
       axi_io.ar.arvalid = true;
       axi_io.ar.araddr = read_ports[idx].req.addr;
       axi_io.ar.arlen = calc_burst_len(read_ports[idx].req.total_size);
@@ -86,6 +124,7 @@ void AXI_Interleaving::comb_read_arbiter() {
       axi_io.ar.arburst = sim_ddr::AXI_BURST_INCR;
       axi_io.ar.arid = (idx << 2) | (read_ports[idx].req.id & 0x3);
 
+      // Signal ready to upstream (handshake with master)
       read_ports[idx].req.ready = true;
       break;
     }
@@ -109,23 +148,31 @@ void AXI_Interleaving::comb_read_response() {
   }
 }
 
+// ============================================================================
+// Write Request with Latched AW (AXI Compliant)
+// ============================================================================
 void AXI_Interleaving::comb_write_request() {
   write_port.req.ready = false;
-  axi_io.aw.awvalid = false;
   axi_io.w.wvalid = false;
 
-  if (!w_active && write_port.req.valid) {
-    write_port.req.ready = true;
+  // If AW is latched (waiting for awready), output latched values
+  if (aw_latched.valid) {
+    axi_io.aw.awvalid = true; // MUST stay valid until handshake!
+    axi_io.aw.awaddr = aw_latched.addr;
+    axi_io.aw.awlen = aw_latched.len;
+    axi_io.aw.awsize = aw_latched.size;
+    axi_io.aw.awburst = aw_latched.burst;
+    axi_io.aw.awid = aw_latched.id;
+  } else {
+    axi_io.aw.awvalid = false;
+
+    // Accept new write request if not busy
+    if (!w_active && write_port.req.valid) {
+      write_port.req.ready = true;
+    }
   }
 
-  if (w_active && !w_current.aw_done) {
-    axi_io.aw.awvalid = true;
-    axi_io.aw.awaddr = w_current.addr;
-    axi_io.aw.awlen = w_current.total_beats - 1;
-    axi_io.aw.awsize = 2;
-    axi_io.aw.awid = (MASTER_DCACHE_W << 2) | (w_current.orig_id & 0x3);
-  }
-
+  // W channel: send data after AW done
   if (w_active && w_current.aw_done && !w_current.w_done) {
     axi_io.w.wvalid = true;
     axi_io.w.wdata = w_current.wdata[w_current.beats_sent];
@@ -149,17 +196,40 @@ void AXI_Interleaving::comb_write_response() {
 // Sequential Logic
 // ============================================================================
 void AXI_Interleaving::seq() {
-  // AR handshake
+  // ========== AR Channel with Latch ==========
+
+  // If new AR request and NOT immediately ready, latch it
+  if (axi_io.ar.arvalid && !ar_latched.valid && !axi_io.ar.arready) {
+    // Latch the request
+    ar_latched.valid = true;
+    ar_latched.addr = axi_io.ar.araddr;
+    ar_latched.len = axi_io.ar.arlen;
+    ar_latched.size = axi_io.ar.arsize;
+    ar_latched.burst = axi_io.ar.arburst;
+    ar_latched.id = axi_io.ar.arid;
+    ar_latched.master_id = r_current_master;
+    ar_latched.orig_id = read_ports[r_current_master].req.id;
+  }
+
+  // AR handshake complete
   if (axi_io.ar.arvalid && axi_io.ar.arready) {
     ReadPendingTxn txn;
-    txn.master_id = r_current_master;
-    txn.orig_id = read_ports[r_current_master].req.id;
-    txn.total_beats = axi_io.ar.arlen + 1;
+    if (ar_latched.valid) {
+      // Use latched values
+      txn.master_id = ar_latched.master_id;
+      txn.orig_id = ar_latched.orig_id;
+      txn.total_beats = ar_latched.len + 1;
+      ar_latched.valid = false; // Clear latch
+    } else {
+      // Direct handshake (same cycle)
+      txn.master_id = r_current_master;
+      txn.orig_id = read_ports[r_current_master].req.id;
+      txn.total_beats = axi_io.ar.arlen + 1;
+    }
     txn.beats_done = 0;
     txn.data.clear();
     r_pending.push_back(txn);
-    r_arb_rr_idx = (r_current_master + 1) % NUM_READ_MASTERS;
-    r_arb_active = false;
+    r_arb_rr_idx = (txn.master_id + 1) % NUM_READ_MASTERS;
   }
 
   // R handshake
@@ -186,7 +256,9 @@ void AXI_Interleaving::seq() {
     }
   }
 
-  // Write: accept request
+  // ========== Write Channel ==========
+
+  // Accept new write request
   if (write_port.req.valid && write_port.req.ready) {
     w_active = true;
     w_current.master_id = MASTER_DCACHE_W;
@@ -198,10 +270,19 @@ void AXI_Interleaving::seq() {
     w_current.beats_sent = 0;
     w_current.aw_done = false;
     w_current.w_done = false;
+
+    // Immediately latch AW (will stay valid until awready)
+    aw_latched.valid = true;
+    aw_latched.addr = w_current.addr;
+    aw_latched.len = w_current.total_beats - 1;
+    aw_latched.size = 2;
+    aw_latched.burst = sim_ddr::AXI_BURST_INCR;
+    aw_latched.id = (MASTER_DCACHE_W << 2) | (w_current.orig_id & 0x3);
   }
 
   // AW handshake
   if (axi_io.aw.awvalid && axi_io.aw.awready) {
+    aw_latched.valid = false; // Clear latch
     w_current.aw_done = true;
   }
 

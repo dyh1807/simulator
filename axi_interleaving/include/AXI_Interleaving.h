@@ -5,6 +5,10 @@
  *
  * Converts simplified master interfaces (single-beat, wide data) to
  * AXI4 protocol (multi-beat bursts) for connection to SimDDR.
+ *
+ * AXI Protocol Compliance:
+ * - AR/AW valid signals are latched until ready handshake
+ * - Upstream req_valid can be deasserted without affecting AXI valid
  */
 
 #include "AXI_Interleaving_IO.h"
@@ -14,6 +18,32 @@
 #include <vector>
 
 namespace axi_interleaving {
+
+// ============================================================================
+// Latched AR/AW Requests (for AXI compliance)
+// ============================================================================
+
+// Latched AR request - holds values until arready
+struct ARLatch_t {
+  bool valid;
+  uint32_t addr;
+  uint8_t len;
+  uint8_t size;
+  uint8_t burst;
+  uint8_t id;
+  uint8_t master_id;
+  uint8_t orig_id;
+};
+
+// Latched AW request - holds values until awready
+struct AWLatch_t {
+  bool valid;
+  uint32_t addr;
+  uint8_t len;
+  uint8_t size;
+  uint8_t burst;
+  uint8_t id;
+};
 
 // ============================================================================
 // Pending Transaction Tracking
@@ -57,15 +87,23 @@ public:
   sim_ddr::SimDDR_IO_t axi_io;
 
 private:
+  // Read arbiter state
   uint8_t r_arb_rr_idx;
-  bool r_arb_active;
   int r_current_master;
 
+  // AR latch for AXI compliance
+  ARLatch_t ar_latched;
+
+  // Pending read transactions
   std::vector<ReadPendingTxn> r_pending;
 
+  // Write state
   bool w_active;
   WritePendingTxn w_current;
   std::queue<uint8_t> w_resp_pending;
+
+  // AW latch for AXI compliance
+  AWLatch_t aw_latched;
 
   void comb_read_arbiter();
   void comb_read_response();
