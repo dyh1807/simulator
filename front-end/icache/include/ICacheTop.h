@@ -75,6 +75,23 @@ public:
   void seq() override;
 };
 
+#ifdef USE_SIM_DDR
+// Implementation using TrueICache + AXI-Interconnect + SimDDR
+class SimDDRICacheTop : public ICacheTop {
+private:
+  icache_module_n::ICache &icache_hw;
+  uint32_t current_vaddr_reg = 0;
+  bool valid_reg = false;
+  long long last_req_cycle = -1;
+  bool req_driven = false;
+
+public:
+  SimDDRICacheTop(icache_module_n::ICache &hw);
+  void comb() override;
+  void seq() override;
+};
+#endif
+
 // Factory function to get the singleton instance
 ICacheTop *get_icache_instance();
 
