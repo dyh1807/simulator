@@ -7,6 +7,9 @@
 #include <cstdlib>
 #include <iostream>
 #include <util.h>
+#ifdef USE_SIM_DDR
+#include <MemorySubsystem.h>
+#endif
 
 long long commit_inst_count = 0; // 提交指令计数
 long long commit_inst_count_last = 0;
@@ -192,7 +195,7 @@ void ROB::comb_commit() {
   }
 
   stall_cycle++;
-  if (stall_cycle > 1000) {
+  if (stall_cycle > 10000) {
     cout << dec << ctx->perf.cycle << endl;
     cout << "卡死了" << endl;
 
@@ -236,7 +239,12 @@ void ROB::comb_commit() {
     // << endl; cout << "dec2front ready: " << dec <<
     // back.idu.out.dec2front->ready << endl;
 
-    // exit(1);
+#ifdef USE_SIM_DDR
+    // Print ICache-SimDDR debug info for deadlock diagnosis
+    mem_subsystem().debug_print();
+#endif
+
+    exit(1);
   }
 }
 

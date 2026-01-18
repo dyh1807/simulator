@@ -62,7 +62,23 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/mmu/include/
     ${CMAKE_SOURCE_DIR}/memory/include/
     ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
+
+# ============================================================================
+# USE_SIM_DDR Option: Use AXI-Interconnect + SimDDR for ICache memory backend
+# ============================================================================
+option(USE_SIM_DDR "Use SimDDR memory backend for ICache" OFF)
+
+if(USE_SIM_DDR)
+    message(STATUS "USE_SIM_DDR is ON: Using AXI-Interconnect + SimDDR for ICache")
+    add_compile_definitions(USE_SIM_DDR)
+    # Add sim_ddr and axi_interconnect sources to main build
+    file(GLOB SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
+    file(GLOB AXI_INTERCONNECT_SOURCES "${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect.cpp")
+    list(FILTER SIM_DDR_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
+    list(APPEND SOURCES ${SIM_DDR_SOURCES} ${AXI_INTERCONNECT_SOURCES})
+endif()
 
 # Create executable
 add_executable(${EXECUTABLE_NAME} ${SOURCES})

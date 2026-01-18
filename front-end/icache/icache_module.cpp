@@ -54,9 +54,10 @@ void ICache::comb() {
     comb_pipe1();
     comb_pipe2();
 
-    bool pipe1_equal = pipe1_to_pipe2_last.valid == pipe1_to_pipe2.valid &&
-                       pipe1_to_pipe2_last.index_w == pipe1_to_pipe2.index_w &&
-                       pipe1_to_pipe2_last.valid_next == pipe1_to_pipe2.valid_next;
+    bool pipe1_equal =
+        pipe1_to_pipe2_last.valid == pipe1_to_pipe2.valid &&
+        pipe1_to_pipe2_last.index_w == pipe1_to_pipe2.index_w &&
+        pipe1_to_pipe2_last.valid_next == pipe1_to_pipe2.valid_next;
 
     bool pipe2_equal = pipe2_to_pipe1_last.ready == pipe2_to_pipe1.ready;
 
@@ -80,19 +81,18 @@ void ICache::comb() {
     pipe2_to_pipe1_last = pipe2_to_pipe1;
 
     if (++cnt > 20) {
-      std::cerr << "Warning: ICache combinational logic did not converge." << std::endl;
+      std::cerr << "Warning: ICache combinational logic did not converge."
+                << std::endl;
       exit(1);
     }
   }
 }
 
-void ICache::seq() {
-  seq_pipe1();
-}
+void ICache::seq() { seq_pipe1(); }
 
 void ICache::comb_pipe1() {
   // Logic for Pipe 1 (IFU Request -> Pipe Register)
-  
+
   uint32_t index = (io.in.pc >> offset_bits) & (set_num - 1);
 
   // Read cache arrays
@@ -101,26 +101,27 @@ void ICache::comb_pipe1() {
       pipe1_to_pipe2.cache_set_data_w[way][word] = cache_data[index][way][word];
     }
     pipe1_to_pipe2.cache_set_tag_w[way] = cache_tag[index][way];
-    pipe1_to_pipe2.cache_set_valid_w[way] = cache_valid[index][way] && io.in.ifu_req_valid;
+    pipe1_to_pipe2.cache_set_valid_w[way] =
+        cache_valid[index][way] && io.in.ifu_req_valid;
   }
   pipe1_to_pipe2.index_w = index;
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
 
   // Flow control
   if (io.in.refetch) {
-      pipe1_to_pipe2.valid_next = false;
-      io.out.ifu_req_ready = false; 
+    pipe1_to_pipe2.valid_next = false;
+    io.out.ifu_req_ready = false;
   } else {
-      bool fire = io.in.ifu_req_valid && pipe2_to_pipe1.ready;
-      
-      if (fire) {
-          pipe1_to_pipe2.valid_next = true;
-      } else if (pipe2_to_pipe1.ready) {
-          pipe1_to_pipe2.valid_next = false;
-      } else {
-          pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
-      }
-      io.out.ifu_req_ready = pipe2_to_pipe1.ready;
+    bool fire = io.in.ifu_req_valid && pipe2_to_pipe1.ready;
+
+    if (fire) {
+      pipe1_to_pipe2.valid_next = true;
+    } else if (pipe2_to_pipe1.ready) {
+      pipe1_to_pipe2.valid_next = false;
+    } else {
+      pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
+    }
+    io.out.ifu_req_ready = pipe2_to_pipe1.ready;
   }
 }
 
@@ -132,13 +133,13 @@ void ICache::comb_pipe2() {
   io.out.ifu_page_fault = false;
   mem_axi_state_next = mem_axi_state;
   pipe2_to_pipe1.ready = false; // Default blocked
-  
+
   switch (state) {
   case IDLE:
     if (io.in.refetch) {
-        state_next = IDLE;
-        pipe2_to_pipe1.ready = true; 
-        return;
+      state_next = IDLE;
+      pipe2_to_pipe1.ready = true;
+      return;
     }
 
     if (pipe1_to_pipe2.valid_r && io.in.ppn_valid) {
@@ -152,7 +153,7 @@ void ICache::comb_pipe2() {
         state_next = IDLE;
         return;
       }
-      
+
       bool hit = false;
       for (uint32_t way = 0; way < way_cnt; ++way) {
         if (pipe1_to_pipe2.cache_set_valid_r[way] &&
@@ -164,39 +165,41 @@ void ICache::comb_pipe2() {
           break;
         }
       }
-      
+
       io.out.ifu_resp_valid = hit;
-      pipe2_to_pipe1.ready = hit; 
+      pipe2_to_pipe1.ready = hit;
       state_next = hit ? IDLE : SWAP_IN;
-      
+
     } else if (pipe1_to_pipe2.valid_r && !io.in.ppn_valid) {
-       pipe2_to_pipe1.ready = false;
-       state_next = IDLE;
+      pipe2_to_pipe1.ready = false;
+      state_next = IDLE;
     } else {
-       pipe2_to_pipe1.ready = true;
-       state_next = IDLE;
+      pipe2_to_pipe1.ready = true;
+      state_next = IDLE;
     }
-    
-    io.out.ppn_ready = pipe1_to_pipe2.valid_r; 
+
+    io.out.ppn_ready = pipe1_to_pipe2.valid_r;
     break;
 
   case SWAP_IN:
     if (io.in.refetch) {
-        if (mem_axi_state == AXI_IDLE) {
-            state_next = IDLE;
-            pipe2_to_pipe1.ready = true; 
-        } else {
-            state_next = DRAIN;
-            pipe2_to_pipe1.ready = false; 
-        }
-        return;
+      if (mem_axi_state == AXI_IDLE) {
+        state_next = IDLE;
+        pipe2_to_pipe1.ready = true;
+      } else {
+        state_next = DRAIN;
+        pipe2_to_pipe1.ready = false;
+      }
+      return;
     }
 
     if (mem_axi_state == AXI_IDLE) {
       io.out.mem_req_valid = true;
-      io.out.mem_req_addr = (ppn_r << 12) | (pipe1_to_pipe2.index_r << offset_bits);
+      io.out.mem_req_addr =
+          (ppn_r << 12) | (pipe1_to_pipe2.index_r << offset_bits);
       state_next = SWAP_IN;
-      mem_axi_state_next = (io.out.mem_req_valid && io.in.mem_req_ready) ? AXI_BUSY : AXI_IDLE;
+      mem_axi_state_next =
+          (io.out.mem_req_valid && io.in.mem_req_ready) ? AXI_BUSY : AXI_IDLE;
     } else {
       io.out.mem_req_valid = false;
       io.out.mem_resp_ready = true;
@@ -209,7 +212,7 @@ void ICache::comb_pipe2() {
         for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
           mem_resp_data_w[offset] = io.in.mem_resp_data[offset];
         }
-        
+
         bool found_invalid = false;
         for (uint32_t way = 0; way < way_cnt; ++way) {
           if (!pipe1_to_pipe2.cache_set_valid_r[way]) {
@@ -228,27 +231,27 @@ void ICache::comb_pipe2() {
   case SWAP_IN_OKEY:
     state_next = IDLE;
     if (!io.in.refetch) {
-        io.out.ifu_resp_valid = true;
-        for (uint32_t word = 0; word < word_num; ++word) {
-          io.out.rd_data[word] = mem_resp_data_r[word];
-        }
-        pipe2_to_pipe1.ready = true;
+      io.out.ifu_resp_valid = true;
+      for (uint32_t word = 0; word < word_num; ++word) {
+        io.out.rd_data[word] = mem_resp_data_r[word];
+      }
+      pipe2_to_pipe1.ready = true;
     } else {
-        pipe2_to_pipe1.ready = true;
+      pipe2_to_pipe1.ready = true;
     }
     break;
 
   case DRAIN:
     io.out.mem_resp_ready = true;
     io.out.mem_req_valid = false;
-    
+
     if (io.in.mem_resp_valid) {
-        mem_axi_state_next = AXI_IDLE; 
-        state_next = IDLE;
-        pipe2_to_pipe1.ready = true; 
+      mem_axi_state_next = AXI_IDLE;
+      state_next = IDLE;
+      pipe2_to_pipe1.ready = true;
     } else {
-        state_next = DRAIN;
-        pipe2_to_pipe1.ready = false;
+      state_next = DRAIN;
+      pipe2_to_pipe1.ready = false;
     }
     break;
 
@@ -260,38 +263,41 @@ void ICache::comb_pipe2() {
 }
 
 void ICache::seq_pipe1() {
-  if (state == SWAP_IN_OKEY) { 
-      // Update Cache
-      for (uint32_t word = 0; word < word_num; ++word) {
-        cache_data[pipe1_to_pipe2.index_r][replace_idx][word] = mem_resp_data_r[word];
-      }
-      cache_tag[pipe1_to_pipe2.index_r][replace_idx] = ppn_r;
-      cache_valid[pipe1_to_pipe2.index_r][replace_idx] = true;
+  if (state == SWAP_IN_OKEY) {
+    // Update Cache
+    for (uint32_t word = 0; word < word_num; ++word) {
+      cache_data[pipe1_to_pipe2.index_r][replace_idx][word] =
+          mem_resp_data_r[word];
+    }
+    cache_tag[pipe1_to_pipe2.index_r][replace_idx] = ppn_r;
+    cache_valid[pipe1_to_pipe2.index_r][replace_idx] = true;
   }
 
   // SWAP_IN data latching
-  if (state == SWAP_IN) { 
-      for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
-        mem_resp_data_r[offset] = mem_resp_data_w[offset];
-      }
-      replace_idx = replace_idx_next;
+  if (state == SWAP_IN) {
+    for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
+      mem_resp_data_r[offset] = mem_resp_data_w[offset];
+    }
+    replace_idx = replace_idx_next;
   }
 
   // Update valid_r based on valid_next calculated in comb_pipe1
   pipe1_to_pipe2.valid_r = pipe1_to_pipe2.valid_next;
 
   if (pipe1_to_pipe2.valid && pipe2_to_pipe1.ready && !io.in.refetch) {
-      // Load data
-      for (uint32_t way = 0; way < way_cnt; ++way) {
-        for (uint32_t word = 0; word < word_num; ++word) {
-          pipe1_to_pipe2.cache_set_data_r[way][word] = pipe1_to_pipe2.cache_set_data_w[way][word];
-        }
-        pipe1_to_pipe2.cache_set_tag_r[way] = pipe1_to_pipe2.cache_set_tag_w[way];
-        pipe1_to_pipe2.cache_set_valid_r[way] = pipe1_to_pipe2.cache_set_valid_w[way];
+    // Load data
+    for (uint32_t way = 0; way < way_cnt; ++way) {
+      for (uint32_t word = 0; word < word_num; ++word) {
+        pipe1_to_pipe2.cache_set_data_r[way][word] =
+            pipe1_to_pipe2.cache_set_data_w[way][word];
       }
-      pipe1_to_pipe2.index_r = pipe1_to_pipe2.index_w;
+      pipe1_to_pipe2.cache_set_tag_r[way] = pipe1_to_pipe2.cache_set_tag_w[way];
+      pipe1_to_pipe2.cache_set_valid_r[way] =
+          pipe1_to_pipe2.cache_set_valid_w[way];
+    }
+    pipe1_to_pipe2.index_r = pipe1_to_pipe2.index_w;
   }
-  
+
   // Save PPN
   if (io.in.ppn_valid && io.out.ppn_ready) {
     ppn_r = io.in.ppn;

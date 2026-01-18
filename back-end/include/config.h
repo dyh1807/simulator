@@ -356,11 +356,14 @@ public:
   void perf_print_tlb() {
     printf("\033[1;32m*********TLB COUNTER************\033[0m\n");
 
-    double itlb_hit_rate = (itlb_access > 0) ? (double)itlb_hit / itlb_access : 0.0;
-    double dtlb_hit_rate = (dtlb_access > 0) ? (double)dtlb_hit / dtlb_access : 0.0;
+    double itlb_hit_rate =
+        (itlb_access > 0) ? (double)itlb_hit / itlb_access : 0.0;
+    double dtlb_hit_rate =
+        (dtlb_access > 0) ? (double)dtlb_hit / dtlb_access : 0.0;
     uint64_t total_access = itlb_access + dtlb_access;
     uint64_t total_hit = itlb_hit + dtlb_hit;
-    double total_hit_rate = (total_access > 0) ? (double)total_hit / total_access : 0.0;
+    double total_hit_rate =
+        (total_access > 0) ? (double)total_hit / total_access : 0.0;
 
     printf("\033[1;32mitlb access    : %ld\033[0m\n", itlb_access);
     printf("\033[1;32mitlb hit       : %ld\033[0m\n", itlb_hit);

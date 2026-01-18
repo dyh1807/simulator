@@ -12,6 +12,9 @@
 #include <front_module.h>
 #include <iostream>
 #include <util.h>
+#ifdef USE_SIM_DDR
+#include <MemorySubsystem.h>
+#endif
 
 using namespace std;
 uint32_t *p_memory;
@@ -39,6 +42,12 @@ void SimCpu::cycle() {
   back2mmu_comb();
   // step1: fetch instructions and fill in back.in
 #endif
+
+#ifdef USE_SIM_DDR
+  // Memory subsystem output phase - ICache sees fresh resp signals
+  mem_subsystem().comb_outputs();
+#endif
+
   front_cycle();
 
 #ifdef CONFIG_MMU
@@ -75,7 +84,7 @@ void SimCpu::cycle() {
   //     Inst_entry *rob_entry = &back.rob.entry[i][j];
   //     if (rob_entry->valid) {
   //       cout << "ROB Entry valid: PC= " << hex << rob_entry->uop.pc
-  //            << " Inst= " << rob_entry->uop.instruction 
+  //            << " Inst= " << rob_entry->uop.instruction
   //            << " rob_idx= " << dec << (int) rob_entry->uop.rob_idx
   //            << " inst_idx= " << dec << (int) rob_entry->uop.inst_idx
   //            << " pc=" << hex << rob_entry->uop.pc
@@ -87,6 +96,11 @@ void SimCpu::cycle() {
   //   }
   // }
 
+#ifdef USE_SIM_DDR
+  // Memory subsystem input phase - process new requests from ICache
+  mem_subsystem().comb_inputs();
+#endif
+
   back.seq();
 
 #ifdef CONFIG_MMU
@@ -95,6 +109,11 @@ void SimCpu::cycle() {
   ctx.perf.itlb_hit = mmu.i_tlb.get_hit_count();
   ctx.perf.dtlb_access = mmu.d_tlb.get_access_count();
   ctx.perf.dtlb_hit = mmu.d_tlb.get_hit_count();
+#endif
+
+#ifdef USE_SIM_DDR
+  // Memory subsystem sequential logic
+  mem_subsystem().seq();
 #endif
 
   if (ctx.sim_end)

@@ -76,7 +76,15 @@ struct WritePendingTxn {
 class AXI_Interconnect {
 public:
   void init();
-  void comb();
+
+  // Two-phase combinational logic for proper signal timing
+  void comb_outputs(); // Phase 1: Update resp signals for masters, req.ready
+  void comb_inputs();  // Phase 2: Process req from masters, drive DDR AR/AW/W
+  void comb() {
+    comb_outputs();
+    comb_inputs();
+  } // Convenience wrapper
+
   void seq();
 
   // Upstream IO (Masters)
@@ -90,6 +98,9 @@ private:
   // Read arbiter state
   uint8_t r_arb_rr_idx;
   int r_current_master;
+
+  // Registered req.ready for each master (persists until handshake)
+  bool req_ready_r[NUM_READ_MASTERS];
 
   // AR latch for AXI compliance
   ARLatch_t ar_latched;

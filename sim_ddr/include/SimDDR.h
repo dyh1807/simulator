@@ -26,7 +26,7 @@ namespace sim_ddr {
 // ============================================================================
 // SimDDR Configuration
 // ============================================================================
-constexpr uint32_t SIM_DDR_LATENCY = 100;       // Memory latency in cycles
+constexpr uint32_t SIM_DDR_LATENCY = 10;        // Memory latency in cycles
 constexpr uint32_t SIM_DDR_MAX_BURST = 256;     // Max burst length (AXI4 limit)
 constexpr uint32_t SIM_DDR_MAX_OUTSTANDING = 8; // Max outstanding transactions
 
@@ -71,7 +71,15 @@ class SimDDR {
 public:
   // ========== Simulator Interface ==========
   void init();
-  void comb();
+
+  // Two-phase combinational logic for proper signal timing
+  void comb_outputs(); // Phase 1: arready, rvalid, rdata, bvalid, bresp
+  void comb_inputs();  // Phase 2: Process arvalid, awvalid, wvalid
+  void comb() {
+    comb_outputs();
+    comb_inputs();
+  } // Convenience wrapper
+
   void seq();
 
   // ========== IO Ports ==========

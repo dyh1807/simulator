@@ -49,11 +49,26 @@ void SimDDR::init() {
 }
 
 // ============================================================================
-// Combinational Logic - Main Entry
+// Two-Phase Combinational Logic
 // ============================================================================
-void SimDDR::comb() {
-  comb_write_channel();
+
+// Phase 1: Output signals (run BEFORE cpu.cycle())
+// Sets: arready, rvalid, rdata, bvalid, bresp
+void SimDDR::comb_outputs() {
+  // Read channel outputs (rvalid, rdata, arready)
   comb_read_channel();
+  // Write channel outputs (awready, wready, bvalid, bresp)
+  comb_write_channel();
+}
+
+// Phase 2: Input processing (run AFTER cpu.cycle())
+// Note: For SimDDR, both channels compute based on current io inputs,
+// which are already set. The wiring order in MemorySubsystem handles
+// the dependency. This function is a no-op for now but kept for symmetry.
+void SimDDR::comb_inputs() {
+  // Input processing is already handled in comb_outputs for SimDDR
+  // because the ready/valid signals are computed in the same pass.
+  // The two-phase split is primarily for AXI_Interconnect's complex logic.
 }
 
 // ============================================================================

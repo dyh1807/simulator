@@ -6,6 +6,10 @@
 #include <filesystem>
 #include <getopt.h>
 
+#ifdef USE_SIM_DDR
+#include <MemorySubsystem.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace std;
 extern RefCpu ref_cpu;
@@ -185,14 +189,10 @@ int main(int argc, char *argv[]) {
 
   cpu.init();
 
-  // ref_cpu.fast_run = true;
-  // while (1) {
-  //   difftest_step(false);
-  //   sim_time++;
-  //   if (sim_time % 100000000 == 0) {
-  //     cout << dec << sim_time << endl;
-  //   }
-  // }
+#ifdef USE_SIM_DDR
+  // Initialize memory subsystem (AXI-Interconnect + SimDDR)
+  mem_subsystem().init();
+#endif
 
   // main loop
   for (sim_time = 0; sim_time < MAX_SIM_TIME; sim_time++) {
@@ -206,6 +206,8 @@ int main(int argc, char *argv[]) {
            << endl;
     }
 
+    // CPU cycle (includes mem_subsystem integration when USE_SIM_DDR is
+    // defined)
     cpu.cycle();
 
     if (cpu.ctx.sim_end)
