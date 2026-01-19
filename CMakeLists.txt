@@ -68,7 +68,7 @@ include_directories(
 # ============================================================================
 # USE_SIM_DDR Option: Use AXI-Interconnect + SimDDR for ICache memory backend
 # ============================================================================
-option(USE_SIM_DDR "Use SimDDR memory backend for ICache" OFF)
+option(USE_SIM_DDR "Use SimDDR memory backend for ICache" ON)
 
 if(USE_SIM_DDR)
     message(STATUS "USE_SIM_DDR is ON: Using AXI-Interconnect + SimDDR for ICache")

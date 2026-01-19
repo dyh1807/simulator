@@ -71,6 +71,11 @@ SimCpu cpu;
 int main(int argc, char *argv[]) {
 
   SimConfig config;
+#ifdef USE_SIM_DDR
+  std::cout << "[simddr] enabled" << std::endl;
+#else
+  std::cout << "[simddr] disabled" << std::endl;
+#endif
 
   // 长参数定义
   static struct option long_options[] = {

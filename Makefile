@@ -1,5 +1,8 @@
 # Makefile with multi-threaded compilation support
 
+# Enable SimDDR by default; override with USE_SIM_DDR=0 if needed.
+USE_SIM_DDR ?= 1
+
 CXX := g++
 # Flags for the default target
 CXXFLAGS := -O3 -march=native -funroll-loops -mtune=native --std=c++2a
@@ -15,6 +18,11 @@ CXXINCLUDE := -I./include/ \
               -I./mmu/include/ \
               -I./memory/include/
 
+ifeq ($(USE_SIM_DDR),1)
+CXXFLAGS += -DUSE_SIM_DDR
+CXXINCLUDE += -I./sim_ddr/include/ -I./axi_interconnect/include/
+endif
+
 # Source files (dynamically found)
 SRCS := $(shell find ./back-end/ -name "*.cpp")
 SRCS += $(shell find ./front-end/ -name "*.cpp")
@@ -23,6 +31,11 @@ SRCS += $(shell find ./mmu/ -name "*.cpp")
 SRCS += $(shell find ./memory/ -name "*.cpp")
 SRCS += ./main.cpp
 SRCS += ./rv_simu_mmu_v2.cpp
+
+ifeq ($(USE_SIM_DDR),1)
+SRCS += $(shell find ./sim_ddr/ -name "*.cpp" ! -name "*_test.cpp")
+SRCS += $(shell find ./axi_interconnect/ -name "*.cpp" ! -name "*_test.cpp")
+endif
 
 # Output binary
 TARGET := a.out
