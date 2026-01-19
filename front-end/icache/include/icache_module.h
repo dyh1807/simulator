@@ -86,6 +86,7 @@ public:
   ICache();
 
   void reset();
+  void invalidate_all();
   void comb();
   void comb_pipe1();
   void comb_pipe2();
@@ -163,6 +164,7 @@ private:
       icache_module_n::IDLE; // Current state of the i-cache
   icache_module_n::ICacheState state_next =
       icache_module_n::IDLE; // Next state of the i-cache
+  bool mem_req_sent = false;
 
   /*
    * Memory Channels

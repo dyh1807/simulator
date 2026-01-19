@@ -7,6 +7,7 @@ void BPU_top(struct BPU_in *in, struct BPU_out *out);
 void BPU_change_pc_reg(uint32_t new_pc);
 
 void icache_top(struct icache_in *in, struct icache_out *out);
+void icache_flush();
 
 void instruction_FIFO_top(struct instruction_FIFO_in *in,
                           struct instruction_FIFO_out *out);

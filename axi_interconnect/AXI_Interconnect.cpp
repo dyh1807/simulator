@@ -116,6 +116,12 @@ void AXI_Interconnect::comb_inputs() {
 // Read Arbiter with Latched AR (AXI Compliant)
 // ============================================================================
 void AXI_Interconnect::comb_read_arbiter() {
+  bool req_ready_curr[NUM_READ_MASTERS];
+  for (int i = 0; i < NUM_READ_MASTERS; i++) {
+    req_ready_curr[i] = req_ready_r[i];
+    req_ready_r[i] = false;
+  }
+
   // Default: don't accept new requests
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     read_ports[i].req.ready = false;
@@ -143,12 +149,11 @@ void AXI_Interconnect::comb_read_arbiter() {
     int idx = (r_arb_rr_idx + i) % NUM_READ_MASTERS;
 
     if (read_ports[idx].req.valid) {
-      // Check if this master already has a pending transaction that hasn't
-      // been consumed (response is complete but not handed off yet)
+      // Check if this master already has a pending transaction (only one
+      // outstanding per master for correctness with simple masters)
       bool has_pending = false;
       for (const auto &txn : r_pending) {
-        if (txn.master_id == idx && txn.beats_done < txn.total_beats) {
-          // Only count as pending if response is NOT fully ready
+        if (txn.master_id == idx) {
           has_pending = true;
           break;
         }
@@ -159,6 +164,13 @@ void AXI_Interconnect::comb_read_arbiter() {
 
       r_current_master = idx;
 
+      // Raise ready first, then issue AR on following cycle when ready is seen.
+      if (!req_ready_curr[idx]) {
+        req_ready_r[idx] = true;
+        read_ports[idx].req.ready = true;
+        break;
+      }
+
       // Output AR (will be latched in seq if not immediately ready)
       axi_io.ar.arvalid = true;
       axi_io.ar.araddr = read_ports[idx].req.addr;
@@ -167,9 +179,6 @@ void AXI_Interconnect::comb_read_arbiter() {
       axi_io.ar.arburst = sim_ddr::AXI_BURST_INCR;
       axi_io.ar.arid = (idx << 2) | (read_ports[idx].req.id & 0x3);
 
-      // Signal ready to upstream via registered signal
-      // This will be output in next cycle's comb_outputs()
-      req_ready_r[idx] = true;
       read_ports[idx].req.ready = true; // Also set for immediate use
       break;
     }
@@ -281,8 +290,7 @@ void AXI_Interconnect::seq() {
     r_pending.push_back(txn);
     r_arb_rr_idx = (txn.master_id + 1) % NUM_READ_MASTERS;
 
-    // Don't clear req_ready_r here! ICache needs to see req_rdy=1 next cycle
-    // to transition to AXI_BUSY. The has_pending check prevents new requests.
+    // req_ready_r is recomputed in comb_read_arbiter.
   }
 
   // R handshake

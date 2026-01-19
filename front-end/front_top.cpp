@@ -47,7 +47,9 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     if (sim_time == 0 && !in->reset) {
       icache_out.icache_read_ready = true;
     }
-    bpu_in.icache_read_ready = icache_out.icache_read_ready;
+    bool fetch_allow = icache_out.icache_read_ready &&
+                       !front2back_fifo_out.full && !ptab_out.full;
+    bpu_in.icache_read_ready = fetch_allow;
     // run BPU
     BPU_top(&bpu_in, &bpu_out);
 
@@ -55,7 +57,8 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.reset = in->reset;
     icache_in.run_comb_only = false;
     icache_in.refetch = in->refetch;
-    icache_in.icache_read_valid = bpu_out.icache_read_valid;
+    icache_in.icache_read_valid =
+        bpu_out.icache_read_valid && fetch_allow;
     icache_in.fetch_address = bpu_out.fetch_address;
 
     // run icache
@@ -153,8 +156,9 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.reset = in->reset;
     icache_in.refetch = false;
     icache_in.run_comb_only = false;
-    icache_in.icache_read_valid = bpu_out.icache_read_valid;
+    icache_in.icache_read_valid = false;
     icache_in.fetch_address = bpu_out.fetch_address;
+    icache_top(&icache_in, &icache_out);
 
     fifo_in.reset = false;
     fifo_in.refetch = false;
@@ -255,6 +259,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
 
   // run front2back FIFO
   front2back_FIFO_top(&front2back_fifo_in, &front2back_fifo_out);
+
 
   // set output
   out->FIFO_valid = front2back_fifo_out.front2back_FIFO_valid;

@@ -1,5 +1,6 @@
 #include "CSR.h"
 #include "IO.h"
+#include "front_module.h"
 #include "oracle.h"
 #include "ref.h"
 #include <RISCV.h>
@@ -51,6 +52,8 @@ void Back_Top::difftest_cycle() {
     for (int i = 0; i < ARF_NUM; i++) {
       dut_cpu.gpr[i] = prf.reg_file[rename.arch_RAT_1[i]];
     }
+    dut_last_inst = inst->instruction;
+    dut_last_pc = inst->pc;
 
     if (is_store(*inst)) {
       dut_cpu.store = true;
@@ -80,6 +83,11 @@ void Back_Top::difftest_cycle() {
 }
 
 void Back_Top::difftest_inst(Inst_uop *inst) {
+  uint32_t opcode = inst->instruction & 0x7f;
+  uint32_t funct3 = (inst->instruction >> 12) & 0x7;
+  if (opcode == number_9_opcode_fence && funct3 == 0x1) {
+    icache_flush();
+  }
   if (inst->type == JALR) {
     if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
       ctx->perf.ret_br_num++;
@@ -163,6 +171,8 @@ void Back_Top::difftest_inst(Inst_uop *inst) {
   for (int i = 0; i < CSR_NUM; i++) {
     dut_cpu.csr[i] = csr.CSR_RegFile_1[i];
   }
+  dut_last_inst = inst->instruction;
+  dut_last_pc = inst->pc;
   dut_cpu.pc = inst->pc_next;
 
   if (inst->difftest_skip) {

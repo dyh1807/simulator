@@ -9,6 +9,8 @@
 
 CPU_state dut_cpu;
 RefCpu ref_cpu;
+uint32_t dut_last_inst = 0;
+uint32_t dut_last_pc = 0;
 
 // relocate the init_difftest function to avoid multiple definition error
 void init_difftest(int img_size) {
@@ -75,6 +77,29 @@ static void checkregs() {
 fault:
   cout << "Difftest: error" << endl;
   cout << "cycle: " << dec << sim_time << endl;
+  printf("dut inst:\t%08x\n", dut_last_inst);
+  printf("dut pc:\t\t%08x\n", dut_last_pc);
+  uint32_t dut_paddr = 0;
+  if (ref_cpu.va2pa(dut_paddr, dut_last_pc, 0)) {
+    printf("dut pc paddr:\t%08x\n", dut_paddr);
+    printf("dut mem[pc]:\t%08x\n", p_memory[dut_paddr >> 2]);
+    printf("ref mem[pc]:\t%08x\n", ref_cpu.memory[dut_paddr >> 2]);
+    uint32_t line_base = dut_paddr & ~0x1f;
+    printf("dut mem line:\t%08x:", line_base);
+    for (int i = 0; i < 8; i++) {
+      printf(" %08x", p_memory[(line_base >> 2) + i]);
+    }
+    printf("\n");
+    uint32_t page_base = dut_paddr & ~0xfff;
+    uint32_t target = dut_last_inst;
+    for (uint32_t off = 0; off < 0x1000; off += 4) {
+      uint32_t addr = page_base + off;
+      if (p_memory[addr >> 2] == target) {
+        printf("dut inst found @%08x\n", addr);
+        break;
+      }
+    }
+  }
   cout << "\t\tReference\tDut" << endl;
   for (int i = 0; i < ARF_NUM; i++) {
     cout << setw(10) << reg_names[i] << ":\t";

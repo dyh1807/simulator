@@ -33,6 +33,9 @@ public:
   // Phase 1: Output signals for CPU (run BEFORE cpu.cycle())
   // Sets: resp.valid, resp.data, req.ready
   void comb_outputs() {
+    // Reset upstream inputs each cycle; masters will drive them in comb.
+    clear_inputs();
+
     // First get DDR outputs for interconnect
     ddr.comb_outputs();
 

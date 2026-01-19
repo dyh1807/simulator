@@ -7,6 +7,8 @@
 enum { DIFFTEST_TO_DUT, DIFFTEST_TO_REF };
 
 extern CPU_state dut_cpu;
+extern uint32_t dut_last_inst;
+extern uint32_t dut_last_pc;
 extern uint32_t *p_memory;
 
 void init_difftest(int);

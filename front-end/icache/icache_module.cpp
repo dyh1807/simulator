@@ -23,6 +23,7 @@ ICache::ICache() {
   state_next = IDLE;
   mem_axi_state = AXI_IDLE;
   mem_axi_state_next = AXI_IDLE;
+  mem_req_sent = false;
   replace_idx = 0;
   replace_idx_next = 0;
   ppn_r = 0;
@@ -37,6 +38,7 @@ void ICache::reset() {
   state_next = IDLE;
   mem_axi_state = AXI_IDLE;
   mem_axi_state_next = AXI_IDLE;
+  mem_req_sent = false;
   replace_idx = 0;
   replace_idx_next = 0;
   ppn_r = 0;
@@ -44,6 +46,14 @@ void ICache::reset() {
   pipe1_to_pipe2.valid_r = false;
   pipe1_to_pipe2.valid_next = false;
   pipe2_to_pipe1.ready = true;
+}
+
+void ICache::invalidate_all() {
+  for (uint32_t i = 0; i < set_num; ++i) {
+    for (uint32_t j = 0; j < way_cnt; ++j) {
+      cache_valid[i][j] = false;
+    }
+  }
 }
 
 void ICache::comb() {
@@ -183,12 +193,12 @@ void ICache::comb_pipe2() {
 
   case SWAP_IN:
     if (io.in.refetch) {
-      if (mem_axi_state == AXI_IDLE) {
-        state_next = IDLE;
-        pipe2_to_pipe1.ready = true;
-      } else {
+      if (mem_axi_state != AXI_IDLE) {
         state_next = DRAIN;
         pipe2_to_pipe1.ready = false;
+      } else {
+        state_next = IDLE;
+        pipe2_to_pipe1.ready = true;
       }
       return;
     }
@@ -301,6 +311,21 @@ void ICache::seq_pipe1() {
   // Save PPN
   if (io.in.ppn_valid && io.out.ppn_ready) {
     ppn_r = io.in.ppn;
+  }
+
+  // Track outstanding memory request status
+  if (state == SWAP_IN && mem_axi_state == AXI_IDLE &&
+      io.out.mem_req_valid && io.in.mem_req_ready) {
+    mem_req_sent = true;
+  }
+  if (state == SWAP_IN && state_next == SWAP_IN_OKEY) {
+    mem_req_sent = false;
+  }
+  if (state == DRAIN && io.in.mem_resp_valid) {
+    mem_req_sent = false;
+  }
+  if (state == IDLE) {
+    mem_req_sent = false;
   }
 
   // State update

@@ -32,6 +32,7 @@ public:
 
   virtual void comb() = 0;
   virtual void seq() = 0;
+  virtual void flush() {}
 
   void syncPerf();
 
@@ -66,6 +67,7 @@ public:
   TrueICacheTop(icache_module_n::ICache &hw);
   void comb() override;
   void seq() override;
+  void flush() override;
 };
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
@@ -73,6 +75,7 @@ class SimpleICacheTop : public ICacheTop {
 public:
   void comb() override;
   void seq() override;
+  void flush() override {}
 };
 
 #ifdef USE_SIM_DDR
@@ -89,6 +92,7 @@ public:
   SimDDRICacheTop(icache_module_n::ICache &hw);
   void comb() override;
   void seq() override;
+  void flush() override;
 };
 #endif
 
