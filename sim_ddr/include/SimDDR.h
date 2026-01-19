@@ -26,7 +26,7 @@ namespace sim_ddr {
 // ============================================================================
 // SimDDR Configuration
 // ============================================================================
-constexpr uint32_t SIM_DDR_LATENCY = 10;        // Memory latency in cycles
+constexpr uint32_t SIM_DDR_LATENCY = ICACHE_MISS_LATENCY;
 constexpr uint32_t SIM_DDR_MAX_BURST = 256;     // Max burst length (AXI4 limit)
 constexpr uint32_t SIM_DDR_MAX_OUTSTANDING = 8; // Max outstanding transactions
 
