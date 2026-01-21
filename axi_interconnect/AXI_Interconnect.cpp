@@ -48,6 +48,9 @@ void AXI_Interconnect::init() {
   // Clear registered req.ready signals
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     req_ready_r[i] = false;
+    r_pending_age[i] = 0;
+    r_pending_warned[i] = false;
+    req_drop_warned[i] = false;
   }
 
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
@@ -122,6 +125,15 @@ void AXI_Interconnect::comb_read_arbiter() {
     req_ready_r[i] = false;
   }
 
+  // Detect ready pulses without a corresponding valid (possible dropped req).
+  for (int i = 0; i < NUM_READ_MASTERS; i++) {
+    if (req_ready_curr[i] && !read_ports[i].req.valid && !req_drop_warned[i] &&
+        DEBUG) {
+      printf("[axi] ready without valid (drop) master=%d\n", i);
+      req_drop_warned[i] = true;
+    }
+  }
+
   // Default: don't accept new requests
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     read_ports[i].req.ready = false;
@@ -138,11 +150,39 @@ void AXI_Interconnect::comb_read_arbiter() {
     // Also need to keep req.ready=true for the master whose request is latched
     // so the handshake completes and ICache knows request was accepted
     read_ports[ar_latched.master_id].req.ready = true;
+    req_ready_r[ar_latched.master_id] = true;
     return; // Cannot accept new requests while AR pending
   }
 
   // No latched AR, can accept new request
   axi_io.ar.arvalid = false;
+
+  // If a master saw ready last cycle, complete that handshake first.
+  for (int i = 0; i < NUM_READ_MASTERS; i++) {
+    if (!req_ready_curr[i] || !read_ports[i].req.valid) {
+      continue;
+    }
+    bool has_pending = false;
+    for (const auto &txn : r_pending) {
+      if (txn.master_id == i) {
+        has_pending = true;
+        break;
+      }
+    }
+    if (has_pending) {
+      continue;
+    }
+
+    r_current_master = i;
+    axi_io.ar.arvalid = true;
+    axi_io.ar.araddr = read_ports[i].req.addr;
+    axi_io.ar.arlen = calc_burst_len(read_ports[i].req.total_size);
+    axi_io.ar.arsize = 2;
+    axi_io.ar.arburst = sim_ddr::AXI_BURST_INCR;
+    axi_io.ar.arid = (i << 2) | (read_ports[i].req.id & 0x3);
+    read_ports[i].req.ready = true;
+    return;
+  }
 
   // Round-robin search for valid request
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
@@ -255,6 +295,8 @@ void AXI_Interconnect::comb_write_response() {
 // Sequential Logic
 // ============================================================================
 void AXI_Interconnect::seq() {
+  constexpr uint32_t kPendingTimeout = 100000;
+
   // ========== AR Channel with Latch ==========
 
   // If new AR request and NOT immediately ready, latch it
@@ -266,8 +308,8 @@ void AXI_Interconnect::seq() {
     ar_latched.size = axi_io.ar.arsize;
     ar_latched.burst = axi_io.ar.arburst;
     ar_latched.id = axi_io.ar.arid;
-    ar_latched.master_id = r_current_master;
-    ar_latched.orig_id = read_ports[r_current_master].req.id;
+    ar_latched.master_id = (axi_io.ar.arid >> 2) & 0x3;
+    ar_latched.orig_id = axi_io.ar.arid & 0x3;
   }
 
   // AR handshake complete
@@ -281,8 +323,8 @@ void AXI_Interconnect::seq() {
       ar_latched.valid = false; // Clear latch
     } else {
       // Direct handshake (same cycle)
-      txn.master_id = r_current_master;
-      txn.orig_id = read_ports[r_current_master].req.id;
+      txn.master_id = (axi_io.ar.arid >> 2) & 0x3;
+      txn.orig_id = axi_io.ar.arid & 0x3;
       txn.total_beats = axi_io.ar.arlen + 1;
     }
     txn.beats_done = 0;
@@ -314,6 +356,32 @@ void AXI_Interconnect::seq() {
                                               t.beats_done == t.total_beats;
                                      }),
                       r_pending.end());
+    }
+  }
+
+  // Monitor long-lived pending reads per master.
+  for (int i = 0; i < NUM_READ_MASTERS; i++) {
+    bool has_pending = false;
+    int beats_done = 0;
+    int total_beats = 0;
+    for (const auto &txn : r_pending) {
+      if (txn.master_id == i) {
+        has_pending = true;
+        beats_done = txn.beats_done;
+        total_beats = txn.total_beats;
+        break;
+      }
+    }
+    if (has_pending) {
+      r_pending_age[i]++;
+      if (r_pending_age[i] > kPendingTimeout && !r_pending_warned[i]) {
+        printf("[axi] pending read timeout master=%d beats=%d/%d\n", i,
+               beats_done, total_beats);
+        r_pending_warned[i] = true;
+      }
+    } else {
+      r_pending_age[i] = 0;
+      r_pending_warned[i] = false;
     }
   }
 
@@ -360,6 +428,22 @@ void AXI_Interconnect::seq() {
   // B handshake
   if (axi_io.b.bvalid && axi_io.b.bready && !w_resp_pending.empty()) {
     w_resp_pending.pop();
+  }
+}
+
+void AXI_Interconnect::debug_print() {
+  printf("  interconnect: ar_latched=%d r_pending=%zu w_active=%d\n",
+         ar_latched.valid, r_pending.size(), w_active);
+  if (ar_latched.valid) {
+    printf("    ar_latched: master=%u addr=0x%08x len=%u id=0x%02x\n",
+           ar_latched.master_id, ar_latched.addr, ar_latched.len,
+           ar_latched.id);
+  }
+  if (!r_pending.empty()) {
+    for (const auto &txn : r_pending) {
+      printf("    r_pending: master=%u beats=%u/%u\n", txn.master_id,
+             txn.beats_done, txn.total_beats);
+    }
   }
 }
 

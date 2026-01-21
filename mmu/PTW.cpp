@@ -7,7 +7,6 @@ using namespace mmu_n;
 
 extern TLB_to_PTW tlb2ptw;
 extern PTW_to_TLB ptw2tlb;
-extern uint32_t *p_memory;
 
 uint32_t pte_mem_count = 0;       // 统计PTW访问内存（Cache miss）的页表项次数
 const int PTW_EMU_MEM_CYCLES = 0; // 模拟访问内存的周期数
@@ -45,7 +44,13 @@ void PTW::comb() {
   // out.ptw2tlb->write_valid = false;
   // out.ptw2tlb->entry = {};
   *out.ptw2tlb = {};
+  ptw_state_next = ptw_state;
+  dcache_state_next = dcache_state;
+  out.dcache_req->valid = false;
+  out.dcache_req->paddr = 0;
+  out.dcache_resp->ready = false;
   out.mem_req->valid = false;
+  out.mem_req->paddr = 0;
   out.mem_resp->ready = false;
 
   switch (ptw_state) {
@@ -123,8 +128,6 @@ void PTW::comb() {
   case MEM_1:
     // wait for memory response for first level page table entry
     ptw_state_next = MEM_1; // memory not responded yet
-    out.mem_req->valid = false;
-    out.mem_resp->ready = false;
     if (dcache_state == DCACHE_IDLE) {
       out.mem_req->valid = true;
       uint32_t ptag = mmu_state->satp.ppn & 0xFFFFF;
@@ -238,8 +241,6 @@ void PTW::comb() {
   case MEM_2:
     // wait for memory response for second level page table entry
     ptw_state_next = MEM_2; // memory not responded yet
-    out.mem_req->valid = false;
-    out.mem_resp->ready = false;
     if (dcache_state == DCACHE_IDLE) {
       out.mem_req->valid = true;
       uint32_t pte2_ppn = (pte1.ppn1 << 10) | pte1.ppn0;

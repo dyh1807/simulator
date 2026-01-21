@@ -85,8 +85,6 @@ private:
   icache_module_n::ICache &icache_hw;
   uint32_t current_vaddr_reg = 0;
   bool valid_reg = false;
-  long long last_req_cycle = -1;
-  bool req_driven = false;
 
 public:
   SimDDRICacheTop(icache_module_n::ICache &hw);

@@ -133,6 +133,7 @@ public:
     printf("  axi_io: arvalid=%d arready=%d rvalid=%d rready=%d\n",
            interconnect.axi_io.ar.arvalid, interconnect.axi_io.ar.arready,
            interconnect.axi_io.r.rvalid, interconnect.axi_io.r.rready);
+    interconnect.debug_print();
   }
 
 private:

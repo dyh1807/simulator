@@ -295,13 +295,7 @@ void SimDDRICacheTop::comb() {
     icache_hw.reset();
     out->icache_read_ready = true;
     valid_reg = false;
-    req_driven = false;
     return;
-  }
-
-  if (last_req_cycle != sim_time) {
-    last_req_cycle = sim_time;
-    req_driven = false;
   }
 
   icache_hw.io.in.refetch = in->refetch;
@@ -331,14 +325,11 @@ void SimDDRICacheTop::comb() {
 
   // Wire ICache outputs → Interconnect requests (will be processed by
   // mem_subsystem.comb() in next main loop iteration)
-  if (!in->run_comb_only && !req_driven) {
+  if (!in->run_comb_only) {
     port.req.valid = icache_hw.io.out.mem_req_valid;
     port.req.addr = icache_hw.io.out.mem_req_addr;
     port.req.total_size = ICACHE_LINE_SIZE - 1;
     port.req.id = 0;
-    req_driven = true;
-  }
-  if (!in->run_comb_only) {
     port.resp.ready = icache_hw.io.out.mem_resp_ready;
   }
 

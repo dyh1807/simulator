@@ -87,6 +87,8 @@ public:
 
   void seq();
 
+  void debug_print();
+
   // Upstream IO (Masters)
   ReadMasterPort_t read_ports[NUM_READ_MASTERS];
   WriteMasterPort_t write_port;
@@ -101,6 +103,9 @@ private:
 
   // Registered req.ready for each master (persists until handshake)
   bool req_ready_r[NUM_READ_MASTERS];
+  uint32_t r_pending_age[NUM_READ_MASTERS];
+  bool r_pending_warned[NUM_READ_MASTERS];
+  bool req_drop_warned[NUM_READ_MASTERS];
 
   // AR latch for AXI compliance
   ARLatch_t ar_latched;

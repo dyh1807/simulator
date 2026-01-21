@@ -6,6 +6,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#ifdef USE_SIM_DDR
+#include <MemorySubsystem.h>
+#endif
 
 using namespace mmu_n;
 
@@ -247,11 +250,19 @@ void MMU::comb_arbiter() {
 }
 
 extern uint32_t *p_memory;
+extern long long sim_time;
 void MMU::comb_memory() {
+#ifdef USE_SIM_DDR
+  auto &port = mem_subsystem().mmu_port();
+  io.in.mmu_mem_req.ready = port.req.ready;
+  io.in.mmu_mem_resp.valid = port.resp.valid;
+  io.in.mmu_mem_resp.data = port.resp.data[0];
+#else
   // Drive memory slave signals
   io.in.mmu_mem_req.ready = !mem_sim.busy;
   io.in.mmu_mem_resp.valid = (mem_sim.busy && mem_sim.count >= PTW_MEM_LATENCY);
   io.in.mmu_mem_resp.data = mem_sim.data;
+#endif
 }
 
 /*
@@ -274,6 +285,15 @@ void MMU::comb_ptw() {
 
   // pass PTW signals to PTW module
   ptw.comb();
+
+#ifdef USE_SIM_DDR
+  auto &port = mem_subsystem().mmu_port();
+  port.req.valid = io.out.mmu_mem_req.valid;
+  port.req.addr = io.out.mmu_mem_req.paddr;
+  port.req.total_size = 3; // 4B PTE
+  port.req.id = 0;
+  port.resp.ready = io.out.mmu_mem_resp.ready;
+#endif
 
   // update tlb plru tree
   i_tlb.comb_arbiter();
@@ -299,6 +319,7 @@ void MMU::seq() {
   }
 
   // Memory Simulation Sequential Logic
+#ifndef USE_SIM_DDR
   if (!mem_sim.busy) {
     if (io.out.mmu_mem_req.valid) {
       mem_sim.busy = true;
@@ -316,6 +337,7 @@ void MMU::seq() {
       }
     }
   }
+#endif
 
   /*
    * Sequential update of inner modules

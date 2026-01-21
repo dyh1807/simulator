@@ -371,6 +371,12 @@ void ICache::log_state() {
     break;
   }
   std::cout << std::endl;
+  std::cout << "  mem_axi_state: " << (mem_axi_state == AXI_IDLE ? "IDLE"
+                                                               : "BUSY")
+            << " mem_req_v=" << io.out.mem_req_valid
+            << " mem_req_rdy=" << io.in.mem_req_ready
+            << " mem_resp_v=" << io.in.mem_resp_valid
+            << " mem_resp_rdy=" << io.out.mem_resp_ready << std::endl;
 }
 void ICache::log_tag(uint32_t index) {
   if (index >= set_num) {
