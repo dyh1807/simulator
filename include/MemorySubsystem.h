@@ -7,8 +7,13 @@
  * Provides single integration point for main simulation loop.
  */
 
+#ifdef USE_SIM_DDR_AXI3
+#include "../axi_interconnect/include/AXI_Interconnect_AXI3.h"
+#include "../sim_ddr/include/SimDDR_AXI3.h"
+#else
 #include "../axi_interconnect/include/AXI_Interconnect.h"
 #include "../sim_ddr/include/SimDDR.h"
+#endif
 #include <cstdint>
 
 class MemorySubsystem {
@@ -81,6 +86,9 @@ public:
     ddr.io.w.wdata = interconnect.axi_io.w.wdata;
     ddr.io.w.wstrb = interconnect.axi_io.w.wstrb;
     ddr.io.w.wlast = interconnect.axi_io.w.wlast;
+#ifdef USE_SIM_DDR_AXI3
+    ddr.io.w.wid = interconnect.axi_io.w.wid;
+#endif
 
     ddr.io.r.rready = interconnect.axi_io.r.rready;
     ddr.io.b.bready = interconnect.axi_io.b.bready;
@@ -141,8 +149,13 @@ private:
   MemorySubsystem(const MemorySubsystem &) = delete;
   MemorySubsystem &operator=(const MemorySubsystem &) = delete;
 
+#ifdef USE_SIM_DDR_AXI3
+  axi_interconnect::AXI_Interconnect_AXI3 interconnect;
+  sim_ddr_axi3::SimDDR_AXI3 ddr;
+#else
   axi_interconnect::AXI_Interconnect interconnect;
   sim_ddr::SimDDR ddr;
+#endif
 
   void clear_inputs() {
     // Clear all upstream ports

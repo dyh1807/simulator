@@ -72,7 +72,11 @@ int main(int argc, char *argv[]) {
 
   SimConfig config;
 #ifdef USE_SIM_DDR
-  std::cout << "[simddr] enabled" << std::endl;
+#ifdef USE_SIM_DDR_AXI3
+  std::cout << "[simddr] enabled (axi3/256b)" << std::endl;
+#else
+  std::cout << "[simddr] enabled (axi4/32b)" << std::endl;
+#endif
 #else
   std::cout << "[simddr] disabled" << std::endl;
 #endif

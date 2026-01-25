@@ -69,14 +69,20 @@ include_directories(
 # USE_SIM_DDR Option: Use AXI-Interconnect + SimDDR for ICache memory backend
 # ============================================================================
 option(USE_SIM_DDR "Use SimDDR memory backend for ICache" ON)
+option(USE_SIM_DDR_AXI3 "Use constrained AXI3 (256-bit) SimDDR backend" OFF)
 
 if(USE_SIM_DDR)
     message(STATUS "USE_SIM_DDR is ON: Using AXI-Interconnect + SimDDR for ICache")
     add_compile_definitions(USE_SIM_DDR)
+    if(USE_SIM_DDR_AXI3)
+        message(STATUS "USE_SIM_DDR_AXI3 is ON: Using AXI3 (256-bit) SimDDR backend")
+        add_compile_definitions(USE_SIM_DDR_AXI3)
+    endif()
     # Add sim_ddr and axi_interconnect sources to main build
     file(GLOB SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
-    file(GLOB AXI_INTERCONNECT_SOURCES "${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect.cpp")
+    file(GLOB AXI_INTERCONNECT_SOURCES "${CMAKE_SOURCE_DIR}/axi_interconnect/*.cpp")
     list(FILTER SIM_DDR_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
+    list(FILTER AXI_INTERCONNECT_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
     list(APPEND SOURCES ${SIM_DDR_SOURCES} ${AXI_INTERCONNECT_SOURCES})
 endif()
 
@@ -175,6 +181,8 @@ add_custom_target(cov
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
+        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -O0 --coverage -o ${EXECUTABLE_NAME}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Building with coverage support"
@@ -191,6 +199,8 @@ add_custom_target(gdb
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
+        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -O0 -g -march=native -lz -o ${EXECUTABLE_NAME}
     COMMAND gdb --args ./${EXECUTABLE_NAME} ${MEMORY_IMAGE_PATH}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -208,8 +218,58 @@ add_custom_target(gdb_linux
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
+        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -g -o ${EXECUTABLE_NAME}
     COMMAND gdb --args ./${EXECUTABLE_NAME} ${LINUX_IMAGE_PATH}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Building and running with gdb debugger (linux image)"
+)
+
+# ============================================================================
+# SimDDR AXI3 Test Target
+# ============================================================================
+add_executable(sim_ddr_axi3_test EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/sim_ddr/sim_ddr_axi3_test.cpp
+)
+
+target_compile_options(sim_ddr_axi3_test PRIVATE
+    -O2
+    -march=native
+)
+
+add_custom_target(run_sim_ddr_axi3_test
+    COMMAND ${CMAKE_BINARY_DIR}/sim_ddr_axi3_test
+    DEPENDS sim_ddr_axi3_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running SimDDR AXI3 test suite"
+)
+
+# ============================================================================
+# AXI-Interconnect AXI3 Test Target
+# ============================================================================
+add_executable(axi_interconnect_axi3_test EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/axi_interconnect_axi3_test.cpp
+)
+
+target_include_directories(axi_interconnect_axi3_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/back-end/include/
+    ${CMAKE_SOURCE_DIR}/front-end/
+    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
+)
+
+target_compile_options(axi_interconnect_axi3_test PRIVATE
+    -O2
+    -march=native
+)
+
+add_custom_target(run_axi_interconnect_axi3_test
+    COMMAND ${CMAKE_BINARY_DIR}/axi_interconnect_axi3_test
+    DEPENDS axi_interconnect_axi3_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running AXI-Interconnect AXI3 test suite"
 )
