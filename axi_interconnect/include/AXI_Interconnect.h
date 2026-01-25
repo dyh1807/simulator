@@ -106,6 +106,7 @@ private:
   uint32_t r_pending_age[NUM_READ_MASTERS];
   bool r_pending_warned[NUM_READ_MASTERS];
   bool req_drop_warned[NUM_READ_MASTERS];
+  bool w_req_ready_r;
 
   // AR latch for AXI compliance
   ARLatch_t ar_latched;
@@ -116,7 +117,9 @@ private:
   // Write state
   bool w_active;
   WritePendingTxn w_current;
-  std::queue<uint8_t> w_resp_pending;
+  bool w_resp_valid;
+  uint8_t w_resp_id;
+  uint8_t w_resp_resp;
 
   // AW latch for AXI compliance
   AWLatch_t aw_latched;

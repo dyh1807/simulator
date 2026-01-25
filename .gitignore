@@ -7,6 +7,12 @@ compile_commands.json
 
 # Ignore build files
 /build
+/build_nosim
+/build_simddr
+/build_*
+
+# Logs
+user.log
 
 # Ignore agent workflows
 # .agent/

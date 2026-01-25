@@ -20,6 +20,8 @@
 uint32_t *p_memory = nullptr;
 long long sim_time = 0;
 constexpr uint32_t TEST_MEM_SIZE = 1024 * 1024; // 1MB for testing
+constexpr int HANDSHAKE_TIMEOUT = 20;
+constexpr int DATA_TIMEOUT = sim_ddr::SIM_DDR_LATENCY * 8 + 200;
 
 // ============================================================================
 // Test Helper Functions
@@ -124,7 +126,7 @@ bool test_single_write(sim_ddr::SimDDR &ddr) {
 
   // Phase 3: Wait for B (write response)
   ddr.io.b.bready = true;
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -186,7 +188,7 @@ bool test_single_read(sim_ddr::SimDDR &ddr) {
 
   // Phase 2: Wait for R (read data)
   ddr.io.r.rready = true;
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.r.rvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -271,7 +273,7 @@ bool test_burst_write(sim_ddr::SimDDR &ddr) {
   ddr.io.w.wlast = false;
 
   // Phase 3: Wait for B
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -326,7 +328,7 @@ bool test_burst_read(sim_ddr::SimDDR &ddr) {
 
   // Phase 2: Receive 4 R beats
   for (int i = 0; i < 4; i++) {
-    timeout = 200;
+    timeout = DATA_TIMEOUT;
     while (!ddr.io.r.rvalid && timeout > 0) {
       sim_cycle(ddr);
       timeout--;
@@ -395,7 +397,7 @@ bool test_partial_strobe(sim_ddr::SimDDR &ddr) {
   ddr.io.w.wlast = false;
 
   // Wait for B
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -538,7 +540,7 @@ bool test_id_signals(sim_ddr::SimDDR &ddr) {
   ddr.io.w.wlast = false;
 
   // Wait for B response and check bid
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.b.bvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -573,7 +575,7 @@ bool test_id_signals(sim_ddr::SimDDR &ddr) {
   ddr.io.ar.arvalid = false;
 
   // Wait for R data and check rid
-  timeout = 200;
+  timeout = DATA_TIMEOUT;
   while (!ddr.io.r.rvalid && timeout > 0) {
     sim_cycle(ddr);
     timeout--;
@@ -644,7 +646,7 @@ bool test_stress_sequential(sim_ddr::SimDDR &ddr) {
     ddr.io.w.wlast = false;
 
     // B phase
-    timeout = 200;
+    timeout = DATA_TIMEOUT;
     while (!ddr.io.b.bvalid && timeout > 0) {
       sim_cycle(ddr);
       timeout--;
@@ -685,7 +687,7 @@ bool test_stress_sequential(sim_ddr::SimDDR &ddr) {
     ddr.io.ar.arvalid = false;
 
     // R phase
-    timeout = 200;
+    timeout = DATA_TIMEOUT;
     while (!ddr.io.r.rvalid && timeout > 0) {
       sim_cycle(ddr);
       timeout--;
@@ -717,7 +719,7 @@ bool test_outstanding_reads(sim_ddr::SimDDR &ddr) {
 
   clear_master_signals(ddr);
 
-  const int NUM_OUTSTANDING = 4;
+  constexpr int NUM_OUTSTANDING = sim_ddr::SIM_DDR_MAX_OUTSTANDING;
   uint32_t base_addr = 0x20000;
   uint32_t expected_data[NUM_OUTSTANDING];
   uint8_t expected_id[NUM_OUTSTANDING];
@@ -760,36 +762,54 @@ bool test_outstanding_reads(sim_ddr::SimDDR &ddr) {
 
   printf("  All AR requests accepted. Waiting for R responses...\n");
 
-  // Now wait for all R responses (should come in order for this implementation)
-  for (int i = 0; i < NUM_OUTSTANDING; i++) {
-    int timeout = 200;
-    while (!ddr.io.r.rvalid && timeout > 0) {
+  bool received[NUM_OUTSTANDING] = {false};
+  int received_cnt = 0;
+  int timeout = DATA_TIMEOUT * NUM_OUTSTANDING;
+  while (received_cnt < NUM_OUTSTANDING && timeout-- > 0) {
+    while (!ddr.io.r.rvalid && timeout-- > 0) {
       sim_cycle(ddr);
-      timeout--;
     }
-    if (timeout == 0) {
-      printf("FAIL: R data timeout for response %d\n", i);
+    if (timeout <= 0) {
+      printf("FAIL: R data timeout (received %d/%d)\n", received_cnt,
+             NUM_OUTSTANDING);
       return false;
     }
 
-    // Verify data and ID
-    if (ddr.io.r.rdata != expected_data[i]) {
-      printf("FAIL: Response %d data mismatch: expected 0x%08x, got 0x%08x\n",
-             i, expected_data[i], ddr.io.r.rdata);
+    // Match by rid (responses may interleave)
+    int idx = -1;
+    for (int i = 0; i < NUM_OUTSTANDING; i++) {
+      if (ddr.io.r.rid == expected_id[i]) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx < 0) {
+      printf("FAIL: Unknown rid 0x%x\n", ddr.io.r.rid);
       return false;
     }
-    if (ddr.io.r.rid != expected_id[i]) {
-      printf("FAIL: Response %d rid mismatch: expected 0x%x, got 0x%x\n", i,
-             expected_id[i], ddr.io.r.rid);
+    if (received[idx]) {
+      printf("FAIL: Duplicate response for rid=0x%x\n", ddr.io.r.rid);
+      return false;
+    }
+    if (ddr.io.r.rdata != expected_data[idx]) {
+      printf("FAIL: Response rid=0x%x data mismatch: expected 0x%08x, got 0x%08x\n",
+             ddr.io.r.rid, expected_data[idx], ddr.io.r.rdata);
       return false;
     }
     if (!ddr.io.r.rlast) {
-      printf("FAIL: Response %d rlast should be true for single-beat\n", i);
+      printf("FAIL: Response rid=0x%x rlast should be true for single-beat\n",
+             ddr.io.r.rid);
       return false;
     }
 
-    // Complete handshake
+    received[idx] = true;
+    received_cnt++;
     sim_cycle(ddr);
+  }
+  if (received_cnt != NUM_OUTSTANDING) {
+    printf("FAIL: Outstanding reads incomplete (%d/%d)\n", received_cnt,
+           NUM_OUTSTANDING);
+    return false;
   }
 
   printf("PASS: Outstanding reads test completed (%d in-flight)\n",
@@ -851,7 +871,7 @@ bool test_interleaving(sim_ddr::SimDDR &ddr) {
   uint8_t last_id = 0;
 
   for (int beat = 0; beat < total_beats; beat++) {
-    int timeout = 200;
+    int timeout = DATA_TIMEOUT;
     while (!ddr.io.r.rvalid && timeout > 0) {
       sim_cycle(ddr);
       timeout--;
@@ -872,6 +892,15 @@ bool test_interleaving(sim_ddr::SimDDR &ddr) {
     }
     if (read_idx < 0) {
       printf("FAIL: Unknown rid 0x%x\n", rid);
+      return false;
+    }
+
+    int beat_idx = beats_received[read_idx];
+    uint32_t expected_data =
+        p_memory[(base_addrs[read_idx] >> 2) + beat_idx];
+    if (ddr.io.r.rdata != expected_data) {
+      printf("FAIL: rdata mismatch rid=0x%x beat=%d exp=0x%08x got=0x%08x\n",
+             rid, beat_idx, expected_data, ddr.io.r.rdata);
       return false;
     }
 
@@ -905,6 +934,306 @@ bool test_interleaving(sim_ddr::SimDDR &ddr) {
   printf("  Interleave switches: %d\n", interleave_switches);
   printf("PASS: Interleaving test completed (switches=%d)\n",
          interleave_switches);
+  return true;
+}
+
+// Test 11: R channel backpressure via rready
+bool test_rready_backpressure(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 11: R channel backpressure (rready) ===\n");
+
+  clear_master_signals(ddr);
+
+  const int BEATS = 4;
+  uint32_t base_addr = 0x40000;
+  uint8_t id = 0x3;
+  uint32_t expected[BEATS] = {0xAAAABBBB, 0xCCCCDDDD, 0x11112222, 0x33334444};
+  for (int i = 0; i < BEATS; i++) {
+    p_memory[(base_addr >> 2) + i] = expected[i];
+  }
+
+  // Issue AR burst
+  ddr.io.ar.arvalid = true;
+  ddr.io.ar.arid = id;
+  ddr.io.ar.araddr = base_addr;
+  ddr.io.ar.arlen = BEATS - 1;
+  ddr.io.ar.arsize = 2;
+
+  int timeout = HANDSHAKE_TIMEOUT;
+  while (!ddr.io.ar.arready && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+  if (timeout == 0) {
+    printf("FAIL: AR handshake timeout\n");
+    return false;
+  }
+  sim_cycle(ddr);
+  ddr.io.ar.arvalid = false;
+
+  // Stall on first beat
+  ddr.io.r.rready = false;
+  timeout = DATA_TIMEOUT;
+  while (!ddr.io.r.rvalid && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+  if (timeout == 0) {
+    printf("FAIL: R data timeout\n");
+    return false;
+  }
+
+  if (ddr.io.r.rid != id || ddr.io.r.rdata != expected[0] || ddr.io.r.rlast) {
+    printf("FAIL: Unexpected first beat rid=0x%x data=0x%08x rlast=%d\n",
+           ddr.io.r.rid, ddr.io.r.rdata, ddr.io.r.rlast);
+    return false;
+  }
+
+  uint32_t stalled_data = ddr.io.r.rdata;
+  for (int i = 0; i < 5; i++) {
+    sim_cycle(ddr);
+    if (!ddr.io.r.rvalid) {
+      printf("FAIL: rvalid dropped while rready=0\n");
+      return false;
+    }
+    if (ddr.io.r.rid != id || ddr.io.r.rdata != stalled_data ||
+        ddr.io.r.rlast) {
+      printf("FAIL: R changed under stall rid=0x%x data=0x%08x rlast=%d\n",
+             ddr.io.r.rid, ddr.io.r.rdata, ddr.io.r.rlast);
+      return false;
+    }
+  }
+
+  // Now accept all beats
+  ddr.io.r.rready = true;
+  for (int beat = 0; beat < BEATS; beat++) {
+    timeout = DATA_TIMEOUT;
+    while (!ddr.io.r.rvalid && timeout > 0) {
+      sim_cycle(ddr);
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: R beat %d timeout\n", beat);
+      return false;
+    }
+    sim_cycle(ddr); // consume this beat and advance
+    bool expected_last = (beat == BEATS - 1);
+    if (ddr.io.r.rid != id || ddr.io.r.rdata != expected[beat] ||
+        ddr.io.r.rlast != expected_last) {
+      printf("FAIL: R beat %d mismatch rid=0x%x data=0x%08x rlast=%d\n", beat,
+             ddr.io.r.rid, ddr.io.r.rdata, ddr.io.r.rlast);
+      return false;
+    }
+  }
+
+  printf("PASS: rready backpressure test completed\n");
+  return true;
+}
+
+// Test 12: B channel backpressure via bready
+bool test_bready_backpressure(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 12: B channel backpressure (bready) ===\n");
+
+  clear_master_signals(ddr);
+
+  uint8_t id = 0x9;
+  uint32_t addr = 0x50000;
+  uint32_t data = 0xDEADBEEF;
+  p_memory[addr >> 2] = 0x12345678;
+
+  // AW
+  ddr.io.aw.awvalid = true;
+  ddr.io.aw.awid = id;
+  ddr.io.aw.awaddr = addr;
+  ddr.io.aw.awlen = 0;
+  ddr.io.aw.awsize = 2;
+  ddr.io.aw.awburst = sim_ddr::AXI_BURST_INCR;
+
+  int timeout = HANDSHAKE_TIMEOUT;
+  while (!ddr.io.aw.awready && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+  if (timeout == 0) {
+    printf("FAIL: AW handshake timeout\n");
+    return false;
+  }
+  sim_cycle(ddr);
+  ddr.io.aw.awvalid = false;
+
+  // W
+  ddr.io.w.wvalid = true;
+  ddr.io.w.wdata = data;
+  ddr.io.w.wstrb = 0xF;
+  ddr.io.w.wlast = true;
+
+  timeout = HANDSHAKE_TIMEOUT;
+  while (!ddr.io.w.wready && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+  if (timeout == 0) {
+    printf("FAIL: W handshake timeout\n");
+    return false;
+  }
+  sim_cycle(ddr);
+  ddr.io.w.wvalid = false;
+  ddr.io.w.wlast = false;
+
+  // Stall B
+  ddr.io.b.bready = false;
+  timeout = DATA_TIMEOUT;
+  while (!ddr.io.b.bvalid && timeout > 0) {
+    sim_cycle(ddr);
+    timeout--;
+  }
+  if (timeout == 0) {
+    printf("FAIL: B response timeout\n");
+    return false;
+  }
+  if (ddr.io.b.bid != id || ddr.io.b.bresp != sim_ddr::AXI_RESP_OKAY) {
+    printf("FAIL: Unexpected B bid=0x%x bresp=%d\n", ddr.io.b.bid,
+           ddr.io.b.bresp);
+    return false;
+  }
+
+  for (int i = 0; i < 5; i++) {
+    sim_cycle(ddr);
+    if (!ddr.io.b.bvalid) {
+      printf("FAIL: bvalid dropped while bready=0\n");
+      return false;
+    }
+    if (ddr.io.b.bid != id) {
+      printf("FAIL: bid changed under stall exp=0x%x got=0x%x\n", id,
+             ddr.io.b.bid);
+      return false;
+    }
+  }
+
+  // Accept B
+  ddr.io.b.bready = true;
+  sim_cycle(ddr); // handshake + pop
+  sim_cycle(ddr); // update outputs
+  if (ddr.io.b.bvalid) {
+    printf("FAIL: bvalid not cleared after handshake\n");
+    return false;
+  }
+
+  if (p_memory[addr >> 2] != data) {
+    printf("FAIL: Memory mismatch exp=0x%08x got=0x%08x\n", data,
+           p_memory[addr >> 2]);
+    return false;
+  }
+
+  printf("PASS: bready backpressure test completed\n");
+  return true;
+}
+
+// Test 13: Max outstanding reads (arready deassert at limit)
+bool test_max_outstanding_limit(sim_ddr::SimDDR &ddr) {
+  printf("=== Test 13: Max outstanding read limit ===\n");
+
+  clear_master_signals(ddr);
+  ddr.io.r.rready = false; // prevent completion
+
+  constexpr int N = sim_ddr::SIM_DDR_MAX_OUTSTANDING;
+  uint32_t base_addr = 0x60000;
+  for (int i = 0; i < N + 1; i++) {
+    p_memory[(base_addr >> 2) + i] = 0xBEEF0000 | i;
+  }
+
+  // Fill up to the limit
+  for (int i = 0; i < N; i++) {
+    ddr.io.ar.arvalid = true;
+    ddr.io.ar.arid = i;
+    ddr.io.ar.araddr = base_addr + (i * 4);
+    ddr.io.ar.arlen = 0;
+    ddr.io.ar.arsize = 2;
+
+    ddr.comb();
+    int timeout = HANDSHAKE_TIMEOUT;
+    while (!ddr.io.ar.arready && timeout > 0) {
+      ddr.seq();
+      sim_time++;
+      ddr.comb();
+      timeout--;
+    }
+    if (timeout == 0) {
+      printf("FAIL: AR handshake timeout at idx %d\n", i);
+      return false;
+    }
+    ddr.seq();
+    sim_time++;
+    ddr.io.ar.arvalid = false;
+    sim_cycle(ddr);
+  }
+
+  // One more should be backpressured
+  ddr.io.ar.arvalid = true;
+  ddr.io.ar.arid = 0xFF;
+  ddr.io.ar.araddr = base_addr + (N * 4);
+  ddr.io.ar.arlen = 0;
+  ddr.io.ar.arsize = 2;
+
+  ddr.comb();
+  if (ddr.io.ar.arready) {
+    printf("FAIL: arready should be 0 when outstanding is full\n");
+    return false;
+  }
+  ddr.io.ar.arvalid = false;
+
+  // Drain all reads (enable rready and accept responses)
+  ddr.io.r.rready = true;
+  bool received[N] = {false};
+  int received_cnt = 0;
+  int timeout = DATA_TIMEOUT * N;
+  while (received_cnt < N && timeout-- > 0) {
+    while (!ddr.io.r.rvalid && timeout-- > 0) {
+      sim_cycle(ddr);
+    }
+    if (timeout <= 0) {
+      printf("FAIL: Drain timeout (received %d/%d)\n", received_cnt, N);
+      return false;
+    }
+
+    uint8_t rid = ddr.io.r.rid;
+    if (rid >= N) {
+      printf("FAIL: unexpected rid=0x%x while draining\n", rid);
+      return false;
+    }
+    if (received[rid]) {
+      printf("FAIL: duplicate rid=0x%x while draining\n", rid);
+      return false;
+    }
+    uint32_t exp = p_memory[(base_addr >> 2) + rid];
+    if (ddr.io.r.rdata != exp || !ddr.io.r.rlast) {
+      printf("FAIL: drain mismatch rid=0x%x data=0x%08x exp=0x%08x rlast=%d\n",
+             rid, ddr.io.r.rdata, exp, ddr.io.r.rlast);
+      return false;
+    }
+
+    received[rid] = true;
+    received_cnt++;
+    sim_cycle(ddr);
+  }
+  if (received_cnt != N) {
+    printf("FAIL: drain incomplete (%d/%d)\n", received_cnt, N);
+    return false;
+  }
+
+  // After draining, arready should be reasserted.
+  ddr.io.ar.arvalid = true;
+  ddr.io.ar.arid = 0x1;
+  ddr.io.ar.araddr = base_addr;
+  ddr.io.ar.arlen = 0;
+  ddr.io.ar.arsize = 2;
+  ddr.comb();
+  if (!ddr.io.ar.arready) {
+    printf("FAIL: arready should be 1 after draining\n");
+    return false;
+  }
+  ddr.io.ar.arvalid = false;
+
+  printf("PASS: max outstanding limit test completed\n");
   return true;
 }
 
@@ -983,6 +1312,24 @@ int main() {
   sim_cycles(ddr, 5);
 
   if (test_interleaving(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_rready_backpressure(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_bready_backpressure(ddr))
+    passed++;
+  else
+    failed++;
+  sim_cycles(ddr, 5);
+
+  if (test_max_outstanding_limit(ddr))
     passed++;
   else
     failed++;
