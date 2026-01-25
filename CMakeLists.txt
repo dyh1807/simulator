@@ -70,13 +70,21 @@ include_directories(
 # ============================================================================
 option(USE_SIM_DDR "Use SimDDR memory backend for ICache" ON)
 option(USE_SIM_DDR_AXI3 "Use constrained AXI3 (256-bit) SimDDR backend" OFF)
+option(USE_SIM_DDR_AXI4 "Use legacy AXI4 (32-bit) SimDDR backend" OFF)
 
 if(USE_SIM_DDR)
     message(STATUS "USE_SIM_DDR is ON: Using AXI-Interconnect + SimDDR for ICache")
     add_compile_definitions(USE_SIM_DDR)
+    if(USE_SIM_DDR_AXI3 AND USE_SIM_DDR_AXI4)
+        message(FATAL_ERROR "USE_SIM_DDR_AXI3 and USE_SIM_DDR_AXI4 are mutually exclusive")
+    endif()
     if(USE_SIM_DDR_AXI3)
         message(STATUS "USE_SIM_DDR_AXI3 is ON: Using AXI3 (256-bit) SimDDR backend")
         add_compile_definitions(USE_SIM_DDR_AXI3)
+    endif()
+    if(USE_SIM_DDR_AXI4)
+        message(STATUS "USE_SIM_DDR_AXI4 is ON: Using AXI4 (32-bit) SimDDR backend")
+        add_compile_definitions(USE_SIM_DDR_AXI4)
     endif()
     # Add sim_ddr and axi_interconnect sources to main build
     file(GLOB SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")

@@ -2,8 +2,9 @@
 
 # Enable SimDDR by default; override with USE_SIM_DDR=0 if needed.
 USE_SIM_DDR ?= 1
-# Select constrained AXI3 (256-bit) SimDDR backend; requires USE_SIM_DDR=1.
+# Default backend is AXI3 (256-bit). Define USE_SIM_DDR_AXI4=1 to select AXI4.
 USE_SIM_DDR_AXI3 ?= 0
+USE_SIM_DDR_AXI4 ?= 0
 
 CXX := g++
 # Flags for the default target
@@ -24,7 +25,15 @@ ifeq ($(USE_SIM_DDR),1)
 CXXFLAGS += -DUSE_SIM_DDR
 CXXINCLUDE += -I./sim_ddr/include/ -I./axi_interconnect/include/
 ifeq ($(USE_SIM_DDR_AXI3),1)
+ifeq ($(USE_SIM_DDR_AXI4),1)
+$(error USE_SIM_DDR_AXI3 and USE_SIM_DDR_AXI4 are mutually exclusive)
+endif
+endif
+ifeq ($(USE_SIM_DDR_AXI3),1)
 CXXFLAGS += -DUSE_SIM_DDR_AXI3
+endif
+ifeq ($(USE_SIM_DDR_AXI4),1)
+CXXFLAGS += -DUSE_SIM_DDR_AXI4
 endif
 endif
 

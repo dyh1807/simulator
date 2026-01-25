@@ -7,7 +7,8 @@
  * Provides single integration point for main simulation loop.
  */
 
-#ifdef USE_SIM_DDR_AXI3
+// Default to AXI3 (256-bit). Define USE_SIM_DDR_AXI4 to select legacy AXI4 (32-bit).
+#ifndef USE_SIM_DDR_AXI4
 #include "../axi_interconnect/include/AXI_Interconnect_AXI3.h"
 #include "../sim_ddr/include/SimDDR_AXI3.h"
 #else
@@ -86,7 +87,7 @@ public:
     ddr.io.w.wdata = interconnect.axi_io.w.wdata;
     ddr.io.w.wstrb = interconnect.axi_io.w.wstrb;
     ddr.io.w.wlast = interconnect.axi_io.w.wlast;
-#ifdef USE_SIM_DDR_AXI3
+#ifndef USE_SIM_DDR_AXI4
     ddr.io.w.wid = interconnect.axi_io.w.wid;
 #endif
 
@@ -149,12 +150,12 @@ private:
   MemorySubsystem(const MemorySubsystem &) = delete;
   MemorySubsystem &operator=(const MemorySubsystem &) = delete;
 
-#ifdef USE_SIM_DDR_AXI3
-  axi_interconnect::AXI_Interconnect_AXI3 interconnect;
-  sim_ddr_axi3::SimDDR_AXI3 ddr;
-#else
+#ifdef USE_SIM_DDR_AXI4
   axi_interconnect::AXI_Interconnect interconnect;
   sim_ddr::SimDDR ddr;
+#else
+  axi_interconnect::AXI_Interconnect_AXI3 interconnect;
+  sim_ddr_axi3::SimDDR_AXI3 ddr;
 #endif
 
   void clear_inputs() {
