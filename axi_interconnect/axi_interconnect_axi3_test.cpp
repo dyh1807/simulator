@@ -582,7 +582,7 @@ static bool test_read_write_parallel(TestEnv &env,
   uint8_t r_id = 2;
   uint8_t w_id = 5;
 
-  axi_interconnect::WideData256_t wdata;
+ axi_interconnect::WideData256_t wdata;
   wdata.clear();
   wdata[0] = 0xCAFEBABEu;
 
@@ -680,6 +680,15 @@ static bool test_read_write_parallel(TestEnv &env,
 
   printf("PASS\n");
   return true;
+}
+
+static void set_slave_read_idle(axi_interconnect::AXI_Interconnect_AXI3 &intlv) {
+  intlv.axi_io.ar.arready = true;
+  intlv.axi_io.r.rvalid = false;
+  intlv.axi_io.r.rid = 0;
+  intlv.axi_io.r.rdata.clear();
+  intlv.axi_io.r.rlast = false;
+  intlv.axi_io.r.rresp = sim_ddr_axi3::AXI_RESP_OKAY;
 }
 
 static bool test_random_stress(TestEnv &env) {
@@ -892,6 +901,682 @@ static bool test_random_stress(TestEnv &env) {
   return true;
 }
 
+static bool test_aw_latching_w_gate() {
+  printf("=== Test 6: AW latching + W gate (mocked awready) ===\n");
+
+  axi_interconnect::AXI_Interconnect_AXI3 intlv;
+  intlv.init();
+
+  // One-beat write; keep upstream valid asserted until ready (ready-first),
+  // then drop valid and force downstream awready low to verify latching.
+  uint32_t addr = 0x4004;
+  uint8_t total_size = 3; // 4B
+  uint8_t req_id = 0xB;
+
+  axi_interconnect::WideData256_t wdata;
+  wdata.clear();
+  wdata[0] = 0xDEADBEEFu;
+  uint32_t wstrb = 0xF;
+
+  bool issued = false;
+  bool aw_hs_seen = false;
+  bool w_last_seen = false;
+  bool b_hs_seen = false;
+  bool resp_seen = false;
+
+  // Hold awready low for a few cycles after the write is accepted to stress
+  // AW latch behavior.
+  int aw_hold_left = 3;
+  uint32_t aw_addr_snap = 0;
+  uint32_t aw_id_snap = 0;
+  uint8_t aw_len_snap = 0;
+  bool aw_snapped = false;
+
+  // Simple B responder (assert bvalid a few cycles after WLAST)
+  int b_delay = -1;
+  bool b_valid = false;
+  uint32_t b_id = 0;
+
+  for (int cyc = 0; cyc < 300; cyc++) {
+    clear_upstream_inputs(intlv);
+
+    // Downstream: keep read channel idle
+    set_slave_read_idle(intlv);
+
+    // Downstream: write channel backpressure
+    bool awready = !(issued && !aw_hs_seen && (aw_hold_left > 0));
+    intlv.axi_io.aw.awready = awready;
+    intlv.axi_io.w.wready = true;
+
+    if (b_delay == 0) {
+      b_valid = true;
+    }
+    intlv.axi_io.b.bvalid = b_valid;
+    intlv.axi_io.b.bid = b_id;
+    intlv.axi_io.b.bresp = sim_ddr_axi3::AXI_RESP_OKAY;
+
+    intlv.comb_outputs();
+    bool req_ready = intlv.write_port.req.ready;
+
+    if (!issued) {
+      intlv.write_port.req.valid = true;
+      intlv.write_port.req.addr = addr;
+      intlv.write_port.req.wdata = wdata;
+      intlv.write_port.req.wstrb = wstrb;
+      intlv.write_port.req.total_size = total_size;
+      intlv.write_port.req.id = req_id;
+    }
+    intlv.write_port.resp.ready = true;
+
+    intlv.comb_inputs();
+
+    if (!issued && req_ready) {
+      issued = true;
+    }
+
+    // While AW is backpressured, awvalid must remain asserted and stable, and
+    // W must be gated off until AW handshake completes.
+    if (!aw_hs_seen) {
+      if (intlv.axi_io.w.wvalid) {
+        printf("FAIL: wvalid asserted before AW handshake\n");
+        return false;
+      }
+    }
+
+    if (intlv.axi_io.aw.awvalid) {
+      if (!aw_snapped) {
+        aw_snapped = true;
+        aw_addr_snap = intlv.axi_io.aw.awaddr;
+        aw_id_snap = intlv.axi_io.aw.awid;
+        aw_len_snap = static_cast<uint8_t>(intlv.axi_io.aw.awlen);
+      } else if (!intlv.axi_io.aw.awready) {
+        if (intlv.axi_io.aw.awaddr != aw_addr_snap ||
+            intlv.axi_io.aw.awid != aw_id_snap ||
+            intlv.axi_io.aw.awlen != aw_len_snap) {
+          printf("FAIL: AW changed under backpressure\n");
+          return false;
+        }
+      }
+
+      if (!intlv.axi_io.aw.awready && aw_hold_left > 0) {
+        aw_hold_left--;
+      }
+    }
+
+    bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    if (aw_hs) {
+      aw_hs_seen = true;
+      b_id = intlv.axi_io.aw.awid;
+    }
+
+    bool w_hs = intlv.axi_io.w.wvalid && intlv.axi_io.w.wready;
+    if (w_hs && intlv.axi_io.w.wlast) {
+      w_last_seen = true;
+      b_delay = 2;
+    }
+
+    if (b_delay > 0) {
+      b_delay--;
+    }
+
+    bool b_hs = intlv.axi_io.b.bvalid && intlv.axi_io.b.bready;
+    if (b_hs) {
+      b_hs_seen = true;
+      b_valid = false;
+      b_delay = -1;
+    }
+
+    if (intlv.write_port.resp.valid) {
+      resp_seen = true;
+    }
+
+    intlv.seq();
+    sim_time++;
+
+    if (issued && aw_hs_seen && w_last_seen && b_hs_seen && resp_seen &&
+        !intlv.write_port.resp.valid) {
+      break;
+    }
+  }
+
+  if (!issued) {
+    printf("FAIL: write req not accepted\n");
+    return false;
+  }
+  if (!aw_snapped || !aw_hs_seen) {
+    printf("FAIL: did not observe AW handshake\n");
+    return false;
+  }
+  if (!w_last_seen) {
+    printf("FAIL: did not observe WLAST handshake\n");
+    return false;
+  }
+  if (!b_hs_seen) {
+    printf("FAIL: did not observe B handshake\n");
+    return false;
+  }
+  if (!resp_seen) {
+    printf("FAIL: did not observe upstream write resp\n");
+    return false;
+  }
+
+  // Basic AW field sanity
+  DecodedId d = decode_id(aw_id_snap);
+  if (aw_addr_snap != (addr & ~0x1Fu) || aw_len_snap != 0 ||
+      d.master_id != axi_interconnect::MASTER_DCACHE_W ||
+      d.orig_id != (req_id & 0xF) || d.offset_bytes != (addr & 0x1F) ||
+      d.total_size != total_size) {
+    printf("FAIL: AW mismatch addr=0x%x len=%u master=%u id=0x%x off=%u ts=%u\n",
+           aw_addr_snap, aw_len_snap, d.master_id, d.orig_id, d.offset_bytes,
+           d.total_size);
+    return false;
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
+static bool test_w_backpressure_data_stability() {
+  printf("=== Test 7: W backpressure holds data stable (mocked wready) ===\n");
+
+  axi_interconnect::AXI_Interconnect_AXI3 intlv;
+  intlv.init();
+
+  // 32B write at offset 24 => 2 beats (8B in beat0, 24B in beat1)
+  uint32_t addr = 0x5018; // offset 24
+  uint8_t total_size = 31;
+  uint8_t req_id = 0x3;
+
+  uint8_t in_bytes[32] = {0};
+  for (int i = 0; i < 32; i++) {
+    in_bytes[i] = static_cast<uint8_t>(i);
+  }
+
+  axi_interconnect::WideData256_t wdata;
+  wdata.clear();
+  for (int w = 0; w < axi_interconnect::CACHELINE_WORDS; w++) {
+    wdata[w] = load_le32(in_bytes + (w * 4));
+  }
+
+  uint32_t wstrb = 0xFFFFFFFFu;
+
+  bool issued = false;
+  bool aw_hs_seen = false;
+  uint32_t aw_id = 0;
+  AwEvent aw_event = {};
+  std::vector<WEvent> w_events;
+
+  // Apply per-beat W backpressure
+  int w_hold_left[2] = {3, 2};
+  bool w_snapped[2] = {false, false};
+  sim_ddr_axi3::Data256_t w_data_snap[2];
+  uint32_t w_strb_snap[2] = {0, 0};
+  bool w_last_snap[2] = {false, false};
+  int w_hs_cnt = 0;
+
+  // B responder
+  int b_delay = -1;
+  bool b_valid = false;
+  uint32_t b_id = 0;
+  bool resp_seen = false;
+
+  for (int cyc = 0; cyc < 600; cyc++) {
+    clear_upstream_inputs(intlv);
+    set_slave_read_idle(intlv);
+
+    // Downstream AW always ready for this test.
+    intlv.axi_io.aw.awready = true;
+
+    // Downstream W backpressure based on current beat index.
+    bool wready = true;
+    if (aw_hs_seen && w_hs_cnt < 2 && w_hold_left[w_hs_cnt] > 0) {
+      wready = false;
+    }
+    intlv.axi_io.w.wready = wready;
+
+    if (b_delay == 0) {
+      b_valid = true;
+    }
+    intlv.axi_io.b.bvalid = b_valid;
+    intlv.axi_io.b.bid = b_id;
+    intlv.axi_io.b.bresp = sim_ddr_axi3::AXI_RESP_OKAY;
+
+    intlv.comb_outputs();
+    bool req_ready = intlv.write_port.req.ready;
+
+    if (!issued) {
+      intlv.write_port.req.valid = true;
+      intlv.write_port.req.addr = addr;
+      intlv.write_port.req.wdata = wdata;
+      intlv.write_port.req.wstrb = wstrb;
+      intlv.write_port.req.total_size = total_size;
+      intlv.write_port.req.id = req_id;
+    }
+    intlv.write_port.resp.ready = true;
+
+    intlv.comb_inputs();
+
+    if (!issued && req_ready) {
+      issued = true;
+    }
+
+    if (!aw_hs_seen && intlv.axi_io.w.wvalid) {
+      printf("FAIL: wvalid asserted before AW handshake\n");
+      return false;
+    }
+
+    // Check W stability while backpressured
+    if (intlv.axi_io.w.wvalid && !intlv.axi_io.w.wready) {
+      if (w_hs_cnt >= 2) {
+        printf("FAIL: wvalid asserted beyond expected beats\n");
+        return false;
+      }
+      if (!w_snapped[w_hs_cnt]) {
+        w_snapped[w_hs_cnt] = true;
+        w_data_snap[w_hs_cnt] = intlv.axi_io.w.wdata;
+        w_strb_snap[w_hs_cnt] = intlv.axi_io.w.wstrb;
+        w_last_snap[w_hs_cnt] = static_cast<bool>(intlv.axi_io.w.wlast);
+      } else {
+        for (int w = 0; w < sim_ddr_axi3::AXI_DATA_WORDS; w++) {
+          if (intlv.axi_io.w.wdata[w] != w_data_snap[w_hs_cnt][w]) {
+            printf("FAIL: wdata changed under backpressure beat=%d\n", w_hs_cnt);
+            return false;
+          }
+        }
+        if (intlv.axi_io.w.wstrb != w_strb_snap[w_hs_cnt] ||
+            static_cast<bool>(intlv.axi_io.w.wlast) != w_last_snap[w_hs_cnt]) {
+          printf("FAIL: wstrb/wlast changed under backpressure beat=%d\n", w_hs_cnt);
+          return false;
+        }
+      }
+
+      if (w_hold_left[w_hs_cnt] > 0) {
+        w_hold_left[w_hs_cnt]--;
+      }
+    }
+
+    bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    if (aw_hs) {
+      aw_hs_seen = true;
+      aw_id = intlv.axi_io.aw.awid;
+      aw_event.addr = intlv.axi_io.aw.awaddr;
+      aw_event.id = aw_id;
+      aw_event.len = static_cast<uint8_t>(intlv.axi_io.aw.awlen);
+      b_id = aw_id;
+    }
+
+    bool w_hs = intlv.axi_io.w.wvalid && intlv.axi_io.w.wready;
+    if (w_hs) {
+      if (intlv.axi_io.w.wid != aw_id) {
+        printf("FAIL: wid mismatch exp=0x%x got=0x%x\n", aw_id,
+               intlv.axi_io.w.wid);
+        return false;
+      }
+      w_events.push_back({.data = intlv.axi_io.w.wdata,
+                          .strb = intlv.axi_io.w.wstrb,
+                          .last = static_cast<bool>(intlv.axi_io.w.wlast)});
+      w_hs_cnt++;
+      if (intlv.axi_io.w.wlast) {
+        b_delay = 2;
+      }
+    }
+
+    if (b_delay > 0) {
+      b_delay--;
+    }
+    bool b_hs = intlv.axi_io.b.bvalid && intlv.axi_io.b.bready;
+    if (b_hs) {
+      b_valid = false;
+      b_delay = -1;
+    }
+
+    if (intlv.write_port.resp.valid) {
+      resp_seen = true;
+    }
+
+    intlv.seq();
+    sim_time++;
+
+    if (issued && aw_hs_seen && w_hs_cnt == 2 && resp_seen &&
+        !intlv.write_port.resp.valid) {
+      break;
+    }
+  }
+
+  if (!issued) {
+    printf("FAIL: write req not accepted\n");
+    return false;
+  }
+  if (!aw_hs_seen) {
+    printf("FAIL: did not observe AW handshake\n");
+    return false;
+  }
+  if (aw_event.addr != (addr & ~0x1Fu) || aw_event.len != 1) {
+    printf("FAIL: AW addr/len mismatch addr=0x%x len=%u\n", aw_event.addr,
+           aw_event.len);
+    return false;
+  }
+  DecodedId awid = decode_id(aw_event.id);
+  if (awid.master_id != axi_interconnect::MASTER_DCACHE_W ||
+      awid.orig_id != (req_id & 0xF) || awid.offset_bytes != (addr & 0x1F) ||
+      awid.total_size != total_size) {
+    printf("FAIL: AW id decode mismatch master=%u id=0x%x off=%u ts=%u\n",
+           awid.master_id, awid.orig_id, awid.offset_bytes, awid.total_size);
+    return false;
+  }
+
+  if (w_events.size() != 2) {
+    printf("FAIL: expected 2 W handshakes, got %zu\n", w_events.size());
+    return false;
+  }
+  if (w_events[0].last) {
+    printf("FAIL: W[0] last should be 0\n");
+    return false;
+  }
+  if (!w_events[1].last) {
+    printf("FAIL: W[1] last should be 1\n");
+    return false;
+  }
+
+  if (w_events[0].strb != 0xFF000000u) {
+    printf("FAIL: W[0] strb mismatch exp=0xFF000000 got=0x%x\n", w_events[0].strb);
+    return false;
+  }
+  if (w_events[1].strb != 0x00FFFFFFu) {
+    printf("FAIL: W[1] strb mismatch exp=0x00FFFFFF got=0x%x\n", w_events[1].strb);
+    return false;
+  }
+
+  // Spot-check alignment / byte placement.
+  if (w_events[0].data[6] != 0x03020100u || w_events[0].data[7] != 0x07060504u ||
+      w_events[1].data[0] != 0x0B0A0908u || w_events[1].data[5] != 0x1F1E1D1Cu) {
+    printf("FAIL: W data mismatch b0.w6=0x%08x b0.w7=0x%08x b1.w0=0x%08x b1.w5=0x%08x\n",
+           w_events[0].data[6], w_events[0].data[7], w_events[1].data[0],
+           w_events[1].data[5]);
+    return false;
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
+static bool test_random_write_stress_ready_backpressure() {
+  printf("=== Test 8: Randomized write stress (AW/W backpressure) ===\n");
+
+  axi_interconnect::AXI_Interconnect_AXI3 intlv;
+  intlv.init();
+
+  constexpr uint32_t MEM_BYTES = 64 * 1024;
+  std::vector<uint8_t> ref_mem(MEM_BYTES);
+  std::vector<uint8_t> dut_mem(MEM_BYTES);
+
+  std::mt19937 rng(2);
+  for (uint32_t i = 0; i < MEM_BYTES; i++) {
+    uint8_t v = static_cast<uint8_t>(rng() & 0xFFu);
+    ref_mem[i] = v;
+    dut_mem[i] = v;
+  }
+
+  auto apply_upstream_write = [&](uint32_t addr, uint8_t total_size,
+                                  const axi_interconnect::WideData256_t &wdata,
+                                  uint32_t wstrb) {
+    uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
+    uint8_t in_bytes[32] = {0};
+    for (int w = 0; w < axi_interconnect::CACHELINE_WORDS; w++) {
+      store_le32(in_bytes + (w * 4), wdata[w]);
+    }
+    for (uint32_t i = 0; i < bytes && i < 32; i++) {
+      if ((wstrb >> i) & 1u) {
+        ref_mem[addr + i] = in_bytes[i];
+      }
+    }
+  };
+
+  auto apply_axi_wbeat = [&](uint32_t beat_addr, const sim_ddr_axi3::Data256_t &data,
+                             uint32_t strb) {
+    uint8_t beat_bytes[32] = {0};
+    for (int w = 0; w < sim_ddr_axi3::AXI_DATA_WORDS; w++) {
+      store_le32(beat_bytes + (w * 4), data[w]);
+    }
+    for (uint32_t i = 0; i < 32; i++) {
+      if ((strb >> i) & 1u) {
+        dut_mem[beat_addr + i] = beat_bytes[i];
+      }
+    }
+  };
+
+  // Slave-side transaction tracking (single outstanding)
+  bool slave_aw_seen = false;
+  uint32_t slave_aw_addr = 0;
+  uint32_t slave_aw_id = 0;
+  uint8_t slave_aw_len = 0;
+  uint32_t slave_beats_expected = 0;
+  uint32_t slave_beats_rcv = 0;
+  int slave_b_delay = -1;
+  bool slave_b_valid = false;
+
+  struct PendingWrite {
+    bool active;
+    uint32_t addr;
+    uint8_t total_size;
+    uint8_t id;
+    axi_interconnect::WideData256_t wdata;
+    uint32_t wstrb;
+  } op = {};
+
+  static constexpr uint8_t kSizes[] = {0, 1, 3, 7, 15, 31};
+
+  constexpr int ITERS = 400;
+  for (int iter = 0; iter < ITERS; iter++) {
+    // New operation
+    op.active = true;
+    op.total_size = ((rng() & 1u) ? static_cast<uint8_t>(rng() % 32)
+                                  : kSizes[rng() % (sizeof(kSizes) /
+                                                   sizeof(kSizes[0]))]);
+    uint32_t bytes = static_cast<uint32_t>(op.total_size) + 1;
+    op.id = static_cast<uint8_t>(rng() & 0xF);
+
+    // Ensure aligned_addr+64 and addr+bytes both fit in MEM_BYTES.
+    uint32_t addr = static_cast<uint32_t>(rng() % (MEM_BYTES - 128));
+    uint32_t aligned_addr = addr & ~0x1Fu;
+    addr = aligned_addr | (rng() & 0x1Fu);
+    if (aligned_addr + 64 >= MEM_BYTES || addr + bytes >= MEM_BYTES) {
+      iter--;
+      continue;
+    }
+    op.addr = addr;
+
+    uint8_t in_bytes[32] = {0};
+    for (int i = 0; i < 32; i++) {
+      in_bytes[i] = static_cast<uint8_t>(rng() & 0xFFu);
+    }
+    op.wdata.clear();
+    for (int w = 0; w < axi_interconnect::CACHELINE_WORDS; w++) {
+      op.wdata[w] = load_le32(in_bytes + (w * 4));
+    }
+
+    uint32_t wstrb = 0;
+    for (uint32_t i = 0; i < bytes && i < 32; i++) {
+      if (rng() & 1u) {
+        wstrb |= (1u << i);
+      }
+    }
+    if (wstrb == 0) {
+      wstrb = 1u;
+    }
+    op.wstrb = wstrb;
+
+    bool accepted = false;
+    bool resp_done = false;
+    int resp_hold = static_cast<int>(rng() % 3);
+
+    // Reset slave-side state for this op.
+    slave_aw_seen = false;
+    slave_aw_addr = 0;
+    slave_aw_id = 0;
+    slave_aw_len = 0;
+    slave_beats_expected = 0;
+    slave_beats_rcv = 0;
+    slave_b_delay = -1;
+    slave_b_valid = false;
+
+    int timeout = 20000;
+    while (!resp_done && timeout-- > 0) {
+      clear_upstream_inputs(intlv);
+      set_slave_read_idle(intlv);
+
+      // Drive slave ready/valid (random backpressure, single outstanding)
+      bool allow_aw = !slave_aw_seen && !slave_b_valid;
+      intlv.axi_io.aw.awready = allow_aw && ((rng() & 3u) != 0u);
+
+      bool allow_w = slave_aw_seen && (slave_beats_rcv < slave_beats_expected);
+      intlv.axi_io.w.wready = allow_w && ((rng() & 1u) != 0u);
+
+      if (slave_b_delay == 0) {
+        slave_b_valid = true;
+      }
+      intlv.axi_io.b.bvalid = slave_b_valid;
+      intlv.axi_io.b.bid = slave_aw_id;
+      intlv.axi_io.b.bresp = sim_ddr_axi3::AXI_RESP_OKAY;
+
+      intlv.comb_outputs();
+
+      if (!accepted) {
+        intlv.write_port.req.valid = true;
+        intlv.write_port.req.addr = op.addr;
+        intlv.write_port.req.wdata = op.wdata;
+        intlv.write_port.req.wstrb = op.wstrb;
+        intlv.write_port.req.total_size = op.total_size;
+        intlv.write_port.req.id = op.id;
+      } else {
+        // Once the op is accepted, req.ready should stay low until response is consumed.
+        if (intlv.write_port.req.ready) {
+          printf("FAIL: req.ready high while write in-flight (iter=%d)\n", iter);
+          return false;
+        }
+      }
+
+      if (accepted && intlv.write_port.resp.valid) {
+        if (resp_hold-- <= 0) {
+          intlv.write_port.resp.ready = true;
+        } else {
+          intlv.write_port.resp.ready = false;
+        }
+      } else {
+        intlv.write_port.resp.ready = false;
+      }
+
+      intlv.comb_inputs();
+
+      // Upstream request handshake
+      if (!accepted && intlv.write_port.req.valid && intlv.write_port.req.ready) {
+        accepted = true;
+        apply_upstream_write(op.addr, op.total_size, op.wdata, op.wstrb);
+      }
+
+      // AW handshake
+      bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+      if (aw_hs) {
+        if (slave_aw_seen) {
+          printf("FAIL: multiple AW handshakes without completing previous op\n");
+          return false;
+        }
+        if (intlv.axi_io.aw.awsize != 5 ||
+            intlv.axi_io.aw.awburst != sim_ddr_axi3::AXI_BURST_INCR) {
+          printf("FAIL: AW size/burst mismatch size=%u burst=%u\n",
+                 static_cast<uint32_t>(intlv.axi_io.aw.awsize),
+                 static_cast<uint32_t>(intlv.axi_io.aw.awburst));
+          return false;
+        }
+        slave_aw_seen = true;
+        slave_aw_addr = intlv.axi_io.aw.awaddr;
+        slave_aw_id = intlv.axi_io.aw.awid;
+        slave_aw_len = static_cast<uint8_t>(intlv.axi_io.aw.awlen);
+        slave_beats_expected = static_cast<uint32_t>(slave_aw_len) + 1;
+        slave_beats_rcv = 0;
+      }
+
+      // W must not appear before AW handshake in this constrained bridge.
+      if (!slave_aw_seen && intlv.axi_io.w.wvalid) {
+        printf("FAIL: wvalid asserted before AW handshake (iter=%d)\n", iter);
+        return false;
+      }
+
+      // W handshake
+      bool w_hs = intlv.axi_io.w.wvalid && intlv.axi_io.w.wready;
+      if (w_hs) {
+        if (!slave_aw_seen) {
+          printf("FAIL: W handshake before AW handshake (iter=%d)\n", iter);
+          return false;
+        }
+        if (intlv.axi_io.w.wid != slave_aw_id) {
+          printf("FAIL: WID mismatch exp=0x%x got=0x%x (iter=%d)\n", slave_aw_id,
+                 intlv.axi_io.w.wid, iter);
+          return false;
+        }
+        uint32_t beat_addr = slave_aw_addr + (slave_beats_rcv * 32);
+        if (beat_addr + 32 > MEM_BYTES) {
+          printf("FAIL: beat_addr OOB beat_addr=0x%x (iter=%d)\n", beat_addr,
+                 iter);
+          return false;
+        }
+        apply_axi_wbeat(beat_addr, intlv.axi_io.w.wdata, intlv.axi_io.w.wstrb);
+        slave_beats_rcv++;
+
+        bool is_last = static_cast<bool>(intlv.axi_io.w.wlast);
+        if (is_last != (slave_beats_rcv == slave_beats_expected)) {
+          printf("FAIL: WLAST mismatch beats_rcv=%u exp=%u last=%d (iter=%d)\n",
+                 slave_beats_rcv, slave_beats_expected, is_last, iter);
+          return false;
+        }
+        if (is_last) {
+          slave_b_delay = static_cast<int>(rng() % 6);
+        }
+      }
+
+      if (slave_b_delay > 0) {
+        slave_b_delay--;
+      }
+
+      // B handshake (accept response)
+      bool b_hs = intlv.axi_io.b.bvalid && intlv.axi_io.b.bready;
+      if (b_hs) {
+        slave_b_valid = false;
+        slave_b_delay = -1;
+      }
+
+      // Upstream response handshake (done)
+      if (accepted && intlv.write_port.resp.valid && intlv.write_port.resp.ready) {
+        resp_done = true;
+      }
+
+      intlv.seq();
+      sim_time++;
+    }
+
+    if (!accepted) {
+      printf("FAIL: write req not accepted (iter=%d)\n", iter);
+      return false;
+    }
+    if (!resp_done) {
+      printf("FAIL: write resp timeout (iter=%d)\n", iter);
+      return false;
+    }
+    op.active = false;
+  }
+
+  for (uint32_t i = 0; i < MEM_BYTES; i++) {
+    if (dut_mem[i] != ref_mem[i]) {
+      printf("FAIL: mem mismatch at +0x%x exp=0x%02x got=0x%02x\n", i,
+             ref_mem[i], dut_mem[i]);
+      return false;
+    }
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
 int main() {
   p_memory = new uint32_t[TEST_MEM_WORDS];
   std::vector<uint8_t> ref_mem;
@@ -905,6 +1590,9 @@ int main() {
   ok &= test_write_split_and_resp_backpressure(env, ref_mem);
   ok &= test_read_write_parallel(env, ref_mem);
   ok &= test_random_stress(env);
+  ok &= test_aw_latching_w_gate();
+  ok &= test_w_backpressure_data_stability();
+  ok &= test_random_write_stress_ready_backpressure();
 
   delete[] p_memory;
   if (!ok) {
