@@ -112,6 +112,9 @@ using namespace std;
 #define CONFIG_LOOSE_VA2PA
 
 #define UART_BASE 0x10000000
+#define MMIO_BASE UART_BASE
+#define MMIO_SIZE 0x00001000
+#define MMIO_END (MMIO_BASE + MMIO_SIZE - 1)
 
 #define IQ_INTM 0
 #define IQ_INTD 1

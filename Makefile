@@ -19,7 +19,8 @@ CXXINCLUDE := -I./include/ \
               -I./diff/include/ \
               -I./front-end/ \
               -I./mmu/include/ \
-              -I./memory/include/
+              -I./memory/include/ \
+              -I./mmio/include/
 
 ifeq ($(USE_SIM_DDR),1)
 CXXFLAGS += -DUSE_SIM_DDR
@@ -43,6 +44,7 @@ SRCS += $(shell find ./front-end/ -name "*.cpp")
 SRCS += $(shell find ./diff/ -name "*.cpp")
 SRCS += $(shell find ./mmu/ -name "*.cpp")
 SRCS += $(shell find ./memory/ -name "*.cpp")
+SRCS += $(shell find ./mmio/ -name "*.cpp" ! -name "*_test.cpp")
 SRCS += ./main.cpp
 SRCS += ./rv_simu_mmu_v2.cpp
 

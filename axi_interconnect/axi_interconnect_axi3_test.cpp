@@ -13,6 +13,7 @@
 
 #include "AXI_Interconnect_AXI3.h"
 #include "SimDDR_AXI3.h"
+#include <mmio_map.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -88,12 +89,16 @@ struct ArEvent {
   uint32_t addr;
   uint32_t id;
   uint8_t len;
+  uint8_t size;
+  uint8_t burst;
 };
 
 struct AwEvent {
   uint32_t addr;
   uint32_t id;
   uint8_t len;
+  uint8_t size;
+  uint8_t burst;
 };
 
 struct WEvent {
@@ -171,13 +176,17 @@ static void cycle_inputs(TestEnv &env) {
     env.ar_events.push_back(
         {.addr = env.intlv.axi_io.ar.araddr,
          .id = env.intlv.axi_io.ar.arid,
-         .len = static_cast<uint8_t>(env.intlv.axi_io.ar.arlen)});
+         .len = static_cast<uint8_t>(env.intlv.axi_io.ar.arlen),
+         .size = static_cast<uint8_t>(env.intlv.axi_io.ar.arsize),
+         .burst = static_cast<uint8_t>(env.intlv.axi_io.ar.arburst)});
   }
   if (env.intlv.axi_io.aw.awvalid && env.intlv.axi_io.aw.awready) {
     env.aw_events.push_back(
         {.addr = env.intlv.axi_io.aw.awaddr,
          .id = env.intlv.axi_io.aw.awid,
-         .len = static_cast<uint8_t>(env.intlv.axi_io.aw.awlen)});
+         .len = static_cast<uint8_t>(env.intlv.axi_io.aw.awlen),
+         .size = static_cast<uint8_t>(env.intlv.axi_io.aw.awsize),
+         .burst = static_cast<uint8_t>(env.intlv.axi_io.aw.awburst)});
   }
   if (env.intlv.axi_io.w.wvalid && env.intlv.axi_io.w.wready) {
     env.w_events.push_back({.data = env.intlv.axi_io.w.wdata,
@@ -1695,6 +1704,120 @@ static bool test_aw_w_no_bubble() {
   return true;
 }
 
+static bool test_mmio_fixed_burst(TestEnv &env) {
+  printf("=== Test 10: MMIO uses FIXED burst ===\n");
+
+  env.clear_events();
+  env.intlv.init();
+  env.ddr.init();
+
+  uint32_t addr = MMIO_RANGE_BASE + 0x4;
+  uint8_t total_size = 3; // 4B
+  uint8_t id = 0x2;
+
+  // Ensure backing memory exists for this address in test build
+  if ((addr >> 2) < TEST_MEM_WORDS) {
+    p_memory[addr >> 2] = 0x11223344u;
+  }
+
+  bool issued = false;
+  bool done = false;
+  int timeout = sim_ddr_axi3::SIM_DDR_AXI3_LATENCY * 200;
+  while (timeout-- > 0 && !done) {
+    cycle_outputs(env);
+    bool ready_snapshot = env.intlv.read_ports[axi_interconnect::MASTER_MMU].req.ready;
+
+    if (!issued) {
+      auto &rp = env.intlv.read_ports[axi_interconnect::MASTER_MMU];
+      rp.req.valid = true;
+      rp.req.addr = addr;
+      rp.req.total_size = total_size;
+      rp.req.id = id;
+    }
+
+    if (env.intlv.read_ports[axi_interconnect::MASTER_MMU].resp.valid) {
+      env.intlv.read_ports[axi_interconnect::MASTER_MMU].resp.ready = true;
+      done = true;
+    }
+
+    cycle_inputs(env);
+
+    if (!issued && ready_snapshot) {
+      issued = true;
+    }
+  }
+  if (!issued || !done) {
+    printf("FAIL: MMIO read did not complete\n");
+    return false;
+  }
+  if (env.ar_events.size() != 1) {
+    printf("FAIL: expected 1 AR handshake, got %zu\n", env.ar_events.size());
+    return false;
+  }
+  const auto &ar = env.ar_events[0];
+  if (ar.len != 0 || ar.size != 5 ||
+      ar.burst != sim_ddr_axi3::AXI_BURST_FIXED) {
+    printf("FAIL: MMIO AR burst/len/size mismatch len=%u size=%u burst=%u\n",
+           ar.len, ar.size, ar.burst);
+    return false;
+  }
+
+  // Write request to MMIO range
+  env.clear_events();
+  env.intlv.init();
+  env.ddr.init();
+
+  axi_interconnect::WideData256_t wdata;
+  wdata.clear();
+  wdata[0] = 0xAABBCCDDu;
+
+  issued = false;
+  done = false;
+  timeout = sim_ddr_axi3::SIM_DDR_AXI3_LATENCY * 200;
+  while (timeout-- > 0 && !done) {
+    cycle_outputs(env);
+    bool ready_snapshot = env.intlv.write_port.req.ready;
+
+    if (!issued) {
+      env.intlv.write_port.req.valid = true;
+      env.intlv.write_port.req.addr = addr;
+      env.intlv.write_port.req.wdata = wdata;
+      env.intlv.write_port.req.wstrb = 0xF;
+      env.intlv.write_port.req.total_size = total_size;
+      env.intlv.write_port.req.id = id;
+    }
+
+    if (env.intlv.write_port.resp.valid) {
+      env.intlv.write_port.resp.ready = true;
+      done = true;
+    }
+
+    cycle_inputs(env);
+
+    if (!issued && ready_snapshot) {
+      issued = true;
+    }
+  }
+  if (!issued || !done) {
+    printf("FAIL: MMIO write did not complete\n");
+    return false;
+  }
+  if (env.aw_events.size() != 1) {
+    printf("FAIL: expected 1 AW handshake, got %zu\n", env.aw_events.size());
+    return false;
+  }
+  const auto &aw = env.aw_events[0];
+  if (aw.len != 0 || aw.size != 5 ||
+      aw.burst != sim_ddr_axi3::AXI_BURST_FIXED) {
+    printf("FAIL: MMIO AW burst/len/size mismatch len=%u size=%u burst=%u\n",
+           aw.len, aw.size, aw.burst);
+    return false;
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
 int main() {
   p_memory = new uint32_t[TEST_MEM_WORDS];
   std::vector<uint8_t> ref_mem;
@@ -1712,6 +1835,7 @@ int main() {
   ok &= test_w_backpressure_data_stability();
   ok &= test_random_write_stress_ready_backpressure();
   ok &= test_aw_w_no_bubble();
+  ok &= test_mmio_fixed_burst(env);
 
   delete[] p_memory;
   if (!ok) {

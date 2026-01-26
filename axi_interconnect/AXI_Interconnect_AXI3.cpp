@@ -4,6 +4,7 @@
  */
 
 #include "AXI_Interconnect_AXI3.h"
+#include <mmio_map.h>
 #include <cstdio>
 
 namespace axi_interconnect {
@@ -194,7 +195,21 @@ void AXI_Interconnect_AXI3::comb_read_arbiter() {
     uint32_t req_addr = read_ports[i].req.addr;
     uint8_t total_size = read_ports[i].req.total_size;
     uint8_t offset = req_addr & 0x1F;
-    uint8_t beats = calc_total_beats(offset, total_size);
+    bool is_mmio = is_mmio_addr(req_addr);
+    uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
+    uint8_t beats = 0;
+    if (is_mmio) {
+      if ((offset + bytes) > sim_ddr_axi3::AXI_DATA_BYTES) {
+        if (DEBUG) {
+          printf("[axi3] mmio read spans beats addr=0x%08x size=%u\n", req_addr,
+                 total_size);
+        }
+        continue;
+      }
+      beats = 1;
+    } else {
+      beats = calc_total_beats(offset, total_size);
+    }
     if (beats == 0 || beats > 2) {
       if (DEBUG) {
         printf("[axi3] invalid beats=%u addr=0x%08x size=%u\n", beats, req_addr,
@@ -208,7 +223,8 @@ void AXI_Interconnect_AXI3::comb_read_arbiter() {
     axi_io.ar.araddr = aligned_addr;
     axi_io.ar.arlen = static_cast<uint8_t>(beats - 1);
     axi_io.ar.arsize = 5; // 32B beats only
-    axi_io.ar.arburst = sim_ddr_axi3::AXI_BURST_INCR;
+    axi_io.ar.arburst =
+        is_mmio ? sim_ddr_axi3::AXI_BURST_FIXED : sim_ddr_axi3::AXI_BURST_INCR;
     axi_io.ar.arid = make_axi_id(i, read_ports[i].req.id, offset, total_size);
     return;
   }
@@ -227,7 +243,21 @@ void AXI_Interconnect_AXI3::comb_read_arbiter() {
     uint32_t req_addr = read_ports[idx].req.addr;
     uint8_t total_size = read_ports[idx].req.total_size;
     uint8_t offset = req_addr & 0x1F;
-    uint8_t beats = calc_total_beats(offset, total_size);
+    bool is_mmio = is_mmio_addr(req_addr);
+    uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
+    uint8_t beats = 0;
+    if (is_mmio) {
+      if ((offset + bytes) > sim_ddr_axi3::AXI_DATA_BYTES) {
+        if (DEBUG) {
+          printf("[axi3] mmio read spans beats addr=0x%08x size=%u\n", req_addr,
+                 total_size);
+        }
+        continue;
+      }
+      beats = 1;
+    } else {
+      beats = calc_total_beats(offset, total_size);
+    }
     if (beats == 0 || beats > 2) {
       continue;
     }
@@ -236,7 +266,8 @@ void AXI_Interconnect_AXI3::comb_read_arbiter() {
     axi_io.ar.araddr = aligned_addr;
     axi_io.ar.arlen = static_cast<uint8_t>(beats - 1);
     axi_io.ar.arsize = 5;
-    axi_io.ar.arburst = sim_ddr_axi3::AXI_BURST_INCR;
+    axi_io.ar.arburst =
+        is_mmio ? sim_ddr_axi3::AXI_BURST_FIXED : sim_ddr_axi3::AXI_BURST_INCR;
     axi_io.ar.arid =
         make_axi_id(idx, read_ports[idx].req.id, offset, total_size);
     break;
@@ -405,7 +436,21 @@ void AXI_Interconnect_AXI3::seq() {
     uint32_t req_addr = write_port.req.addr;
     uint8_t total_size = write_port.req.total_size;
     uint8_t offset = req_addr & 0x1F;
-    uint8_t beats = calc_total_beats(offset, total_size);
+    bool is_mmio = is_mmio_addr(req_addr);
+    uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
+    uint8_t beats = 0;
+    if (is_mmio) {
+      if ((offset + bytes) > sim_ddr_axi3::AXI_DATA_BYTES) {
+        if (DEBUG) {
+          printf("[axi3] mmio write spans beats addr=0x%08x size=%u\n", req_addr,
+                 total_size);
+        }
+      } else {
+        beats = 1;
+      }
+    } else {
+      beats = calc_total_beats(offset, total_size);
+    }
     if (beats == 0 || beats > 2) {
       if (DEBUG) {
         printf("[axi3] invalid write beats=%u addr=0x%08x size=%u\n", beats,
@@ -457,7 +502,8 @@ void AXI_Interconnect_AXI3::seq() {
       aw_latched.addr = aligned_addr;
       aw_latched.len = static_cast<uint8_t>(beats - 1);
       aw_latched.size = 5;
-      aw_latched.burst = sim_ddr_axi3::AXI_BURST_INCR;
+      aw_latched.burst =
+          is_mmio ? sim_ddr_axi3::AXI_BURST_FIXED : sim_ddr_axi3::AXI_BURST_INCR;
       aw_latched.id = axi_id;
     }
   }

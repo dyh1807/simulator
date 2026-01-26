@@ -37,6 +37,8 @@ file(GLOB_RECURSE FRONTEND_SOURCES "${CMAKE_SOURCE_DIR}/front-end/*.cpp")
 file(GLOB_RECURSE DIFF_SOURCES "${CMAKE_SOURCE_DIR}/diff/*.cpp")
 file(GLOB_RECURSE MMU_SOURCES "${CMAKE_SOURCE_DIR}/mmu/*.cpp")
 file(GLOB_RECURSE MEMORY_SOURCES "${CMAKE_SOURCE_DIR}/memory/*.cpp")
+file(GLOB_RECURSE MMIO_SOURCES "${CMAKE_SOURCE_DIR}/mmio/*.cpp")
+list(FILTER MMIO_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
 # Note: sim_ddr sources are NOT included in main executable (will be integrated later)
 # file(GLOB_RECURSE SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
 
@@ -46,7 +48,8 @@ set(SOURCES
     ${FRONTEND_SOURCES}
     ${DIFF_SOURCES}
     ${MMU_SOURCES}
-    ${MEMORY_SOURCES}   
+    ${MEMORY_SOURCES}
+    ${MMIO_SOURCES}
     ${CMAKE_SOURCE_DIR}/main.cpp
     ${CMAKE_SOURCE_DIR}/rv_simu_mmu_v2.cpp
 )
@@ -61,6 +64,7 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/front-end/
     ${CMAKE_SOURCE_DIR}/mmu/include/
     ${CMAKE_SOURCE_DIR}/memory/include/
+    ${CMAKE_SOURCE_DIR}/mmio/include/
     ${CMAKE_SOURCE_DIR}/sim_ddr/include/
     ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
@@ -273,6 +277,8 @@ target_include_directories(axi_interconnect_axi3_test PRIVATE
 target_compile_options(axi_interconnect_axi3_test PRIVATE
     -O2
     -march=native
+    -DMMIO_TEST_BASE=0x200000
+    -DMMIO_TEST_SIZE=0x1000
 )
 
 add_custom_target(run_axi_interconnect_axi3_test
@@ -280,4 +286,35 @@ add_custom_target(run_axi_interconnect_axi3_test
     DEPENDS axi_interconnect_axi3_test
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Running AXI-Interconnect AXI3 test suite"
+)
+
+# ============================================================================
+# AXI3 MMIO Router Test Target
+# ============================================================================
+add_executable(mmio_router_axi3_test EXCLUDE_FROM_ALL
+    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Router_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/mmio/MMIO_Bus_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/mmio/mmio_router_axi3_test.cpp
+)
+
+target_include_directories(mmio_router_axi3_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/back-end/include/
+    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
+    ${CMAKE_SOURCE_DIR}/mmio/include/
+)
+
+target_compile_options(mmio_router_axi3_test PRIVATE
+    -O2
+    -march=native
+    -DMMIO_TEST_BASE=0x200000
+    -DMMIO_TEST_SIZE=0x1000
+)
+
+add_custom_target(run_mmio_router_axi3_test
+    COMMAND ${CMAKE_BINARY_DIR}/mmio_router_axi3_test
+    DEPENDS mmio_router_axi3_test
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running AXI3 MMIO router test suite"
 )

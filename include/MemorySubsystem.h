@@ -10,7 +10,9 @@
 // Default to AXI3 (256-bit). Define USE_SIM_DDR_AXI4 to select legacy AXI4 (32-bit).
 #ifndef USE_SIM_DDR_AXI4
 #include "../axi_interconnect/include/AXI_Interconnect_AXI3.h"
+#include "../axi_interconnect/include/AXI_Router_AXI3.h"
 #include "../sim_ddr/include/SimDDR_AXI3.h"
+#include "../mmio/include/MMIO_Bus_AXI3.h"
 #else
 #include "../axi_interconnect/include/AXI_Interconnect.h"
 #include "../sim_ddr/include/SimDDR.h"
@@ -28,6 +30,10 @@ public:
   // Initialize subsystem
   void init() {
     interconnect.init();
+#ifndef USE_SIM_DDR_AXI4
+    router.init();
+    mmio.init();
+#endif
     ddr.init();
     clear_inputs();
   }
@@ -42,9 +48,16 @@ public:
     // Reset upstream inputs each cycle; masters will drive them in comb.
     clear_inputs();
 
-    // First get DDR outputs for interconnect
+    // First get DDR/MMIO outputs for interconnect
     ddr.comb_outputs();
+#ifndef USE_SIM_DDR_AXI4
+    mmio.comb_outputs();
+#endif
 
+#ifndef USE_SIM_DDR_AXI4
+    // Route DDR/MMIO responses to interconnect inputs via router
+    router.comb_outputs(interconnect.axi_io, ddr.io, mmio.io);
+#else
     // Wire DDR responses to interconnect inputs
     interconnect.axi_io.ar.arready = ddr.io.ar.arready;
     interconnect.axi_io.r.rvalid = ddr.io.r.rvalid;
@@ -57,6 +70,7 @@ public:
     interconnect.axi_io.b.bvalid = ddr.io.b.bvalid;
     interconnect.axi_io.b.bid = ddr.io.b.bid;
     interconnect.axi_io.b.bresp = ddr.io.b.bresp;
+#endif
 
     // Now run interconnect output phase
     interconnect.comb_outputs();
@@ -68,6 +82,10 @@ public:
     // Run interconnect input phase (arbiter, write request)
     interconnect.comb_inputs();
 
+#ifndef USE_SIM_DDR_AXI4
+    // Route interconnect -> DDR/MMIO inputs via router
+    router.comb_inputs(interconnect.axi_io, ddr.io, mmio.io);
+#else
     // Wire interconnect to DDR inputs
     ddr.io.ar.arvalid = interconnect.axi_io.ar.arvalid;
     ddr.io.ar.araddr = interconnect.axi_io.ar.araddr;
@@ -93,9 +111,13 @@ public:
 
     ddr.io.r.rready = interconnect.axi_io.r.rready;
     ddr.io.b.bready = interconnect.axi_io.b.bready;
+#endif
 
     // Run DDR input phase
     ddr.comb_inputs();
+#ifndef USE_SIM_DDR_AXI4
+    mmio.comb_inputs();
+#endif
   }
 
   // Convenience wrapper (for tests that don't need two-phase)
@@ -107,6 +129,10 @@ public:
   // Sequential logic (call in main loop after comb)
   void seq() {
     ddr.seq();
+#ifndef USE_SIM_DDR_AXI4
+    mmio.seq();
+    router.seq(interconnect.axi_io, ddr.io, mmio.io);
+#endif
     interconnect.seq();
   }
 
@@ -156,6 +182,8 @@ private:
 #else
   axi_interconnect::AXI_Interconnect_AXI3 interconnect;
   sim_ddr_axi3::SimDDR_AXI3 ddr;
+  axi_interconnect::AXI_Router_AXI3 router;
+  mmio::MMIO_Bus_AXI3 mmio;
 #endif
 
   void clear_inputs() {
