@@ -285,7 +285,8 @@ void AXI_Interconnect_AXI3::comb_write_request() {
   axi_io.w.wvalid = false;
   axi_io.w.wlast = false;
 
-  if (w_active && w_aw_done && !w_w_done) {
+  bool aw_handshake_now = aw_latched.valid && axi_io.aw.awready;
+  if (w_active && !w_w_done && (w_aw_done || aw_handshake_now)) {
     axi_io.w.wvalid = true;
     axi_io.w.wid = w_axi_id;
     axi_io.w.wdata = w_beats_data[w_beats_sent];

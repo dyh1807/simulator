@@ -974,13 +974,12 @@ static bool test_aw_latching_w_gate() {
       issued = true;
     }
 
+    bool aw_hs_now = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
     // While AW is backpressured, awvalid must remain asserted and stable, and
-    // W must be gated off until AW handshake completes.
-    if (!aw_hs_seen) {
-      if (intlv.axi_io.w.wvalid) {
-        printf("FAIL: wvalid asserted before AW handshake\n");
-        return false;
-      }
+    // W must be gated off until AW handshake completes (or same-cycle handshake).
+    if (!aw_hs_seen && !aw_hs_now && intlv.axi_io.w.wvalid) {
+      printf("FAIL: wvalid asserted before AW handshake\n");
+      return false;
     }
 
     if (intlv.axi_io.aw.awvalid) {
@@ -1003,7 +1002,7 @@ static bool test_aw_latching_w_gate() {
       }
     }
 
-    bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    bool aw_hs = aw_hs_now;
     if (aw_hs) {
       aw_hs_seen = true;
       b_id = intlv.axi_io.aw.awid;
@@ -1160,7 +1159,8 @@ static bool test_w_backpressure_data_stability() {
       issued = true;
     }
 
-    if (!aw_hs_seen && intlv.axi_io.w.wvalid) {
+    bool aw_hs_now = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    if (!aw_hs_seen && !aw_hs_now && intlv.axi_io.w.wvalid) {
       printf("FAIL: wvalid asserted before AW handshake\n");
       return false;
     }
@@ -1195,7 +1195,7 @@ static bool test_w_backpressure_data_stability() {
       }
     }
 
-    bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    bool aw_hs = aw_hs_now;
     if (aw_hs) {
       aw_hs_seen = true;
       aw_id = intlv.axi_io.aw.awid;
@@ -1577,6 +1577,124 @@ static bool test_random_write_stress_ready_backpressure() {
   return true;
 }
 
+static bool test_aw_w_no_bubble() {
+  printf("=== Test 9: AW/W same-cycle when awready=1 ===\n");
+
+  axi_interconnect::AXI_Interconnect_AXI3 intlv;
+  intlv.init();
+
+  uint32_t addr = 0x4000;
+  uint8_t total_size = 3; // 4B
+  uint8_t req_id = 0x6;
+
+  axi_interconnect::WideData256_t wdata;
+  wdata.clear();
+  wdata[0] = 0x12345678u;
+  uint32_t wstrb = 0xF;
+
+  bool issued = false;
+  int aw_cycle = -1;
+  int w_cycle = -1;
+  bool resp_done = false;
+
+  int b_delay = -1;
+  bool b_valid = false;
+  uint32_t b_id = 0;
+
+  for (int cyc = 0; cyc < 200; cyc++) {
+    clear_upstream_inputs(intlv);
+    set_slave_read_idle(intlv);
+
+    intlv.axi_io.aw.awready = true;
+    intlv.axi_io.w.wready = true;
+
+    if (b_delay == 0) {
+      b_valid = true;
+    }
+    intlv.axi_io.b.bvalid = b_valid;
+    intlv.axi_io.b.bid = b_id;
+    intlv.axi_io.b.bresp = sim_ddr_axi3::AXI_RESP_OKAY;
+
+    intlv.comb_outputs();
+    bool req_ready = intlv.write_port.req.ready;
+
+    if (!issued) {
+      intlv.write_port.req.valid = true;
+      intlv.write_port.req.addr = addr;
+      intlv.write_port.req.wdata = wdata;
+      intlv.write_port.req.wstrb = wstrb;
+      intlv.write_port.req.total_size = total_size;
+      intlv.write_port.req.id = req_id;
+    }
+    intlv.write_port.resp.ready = true;
+
+    intlv.comb_inputs();
+
+    if (!issued && req_ready) {
+      issued = true;
+    }
+
+    bool aw_hs = intlv.axi_io.aw.awvalid && intlv.axi_io.aw.awready;
+    if (aw_hs && aw_cycle < 0) {
+      aw_cycle = cyc;
+      b_id = intlv.axi_io.aw.awid;
+    }
+
+    bool w_hs = intlv.axi_io.w.wvalid && intlv.axi_io.w.wready;
+    if (w_hs && w_cycle < 0) {
+      w_cycle = cyc;
+      if (!intlv.axi_io.w.wlast) {
+        printf("FAIL: single-beat write should assert wlast\n");
+        return false;
+      }
+      b_delay = 1;
+    }
+
+    if (b_delay > 0) {
+      b_delay--;
+    }
+
+    if (intlv.write_port.resp.valid) {
+      intlv.write_port.resp.ready = true;
+    }
+
+    bool resp_hs =
+        intlv.write_port.resp.valid && intlv.write_port.resp.ready;
+    if (resp_hs) {
+      resp_done = true;
+    }
+
+    intlv.seq();
+    sim_time++;
+
+    if (issued && resp_done) {
+      break;
+    }
+  }
+
+  if (!issued) {
+    printf("FAIL: write req not accepted\n");
+    return false;
+  }
+  if (aw_cycle < 0 || w_cycle < 0) {
+    printf("FAIL: missing AW/W handshake (aw_cycle=%d w_cycle=%d)\n", aw_cycle,
+           w_cycle);
+    return false;
+  }
+  if (aw_cycle != w_cycle) {
+    printf("FAIL: AW/W bubble detected aw_cycle=%d w_cycle=%d\n", aw_cycle,
+           w_cycle);
+    return false;
+  }
+  if (!resp_done) {
+    printf("FAIL: write resp not observed\n");
+    return false;
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
 int main() {
   p_memory = new uint32_t[TEST_MEM_WORDS];
   std::vector<uint8_t> ref_mem;
@@ -1593,6 +1711,7 @@ int main() {
   ok &= test_aw_latching_w_gate();
   ok &= test_w_backpressure_data_stability();
   ok &= test_random_write_stress_ready_backpressure();
+  ok &= test_aw_w_no_bubble();
 
   delete[] p_memory;
   if (!ok) {
