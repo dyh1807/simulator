@@ -6,9 +6,12 @@
 #include "AXI_Router_AXI3.h"
 #include "MMIO_Bus_AXI3.h"
 #include "SimDDR_AXI3.h"
+#include "UART16550_Device.h"
 #include <mmio_map.h>
 #include <cstdio>
 #include <cstring>
+#include <iostream>
+#include <sstream>
 #include <vector>
 
 uint32_t *p_memory = nullptr;
@@ -307,6 +310,180 @@ static bool test_router_mmio_write(TestEnv &env, DummyDevice &dev) {
   return true;
 }
 
+static bool issue_mmio_write_byte(TestEnv &env, uint32_t addr, uint8_t data,
+                                  uint8_t orig_id) {
+  uint8_t total_size = 0; // 1B
+  uint8_t offset = addr & 0x1F;
+  uint32_t id = make_axi_id(0, orig_id, offset, total_size);
+
+  sim_ddr_axi3::Data256_t wdata;
+  wdata.clear();
+  // Put the byte into the correct lane within the 32B beat.
+  uint32_t word_idx = offset >> 2;
+  uint32_t byte_idx = offset & 3u;
+  wdata[word_idx] = static_cast<uint32_t>(data) << (byte_idx * 8);
+
+  bool issued = false;
+  bool done = false;
+  int timeout = TIMEOUT;
+  while (timeout-- > 0 && !done) {
+    clear_upstream(env);
+    cycle_outputs(env);
+
+    env.up.aw.awvalid = true;
+    env.up.aw.awaddr = addr & ~0x1Fu;
+    env.up.aw.awid = id;
+    env.up.aw.awlen = 0;
+    env.up.aw.awsize = 5;
+    env.up.aw.awburst = sim_ddr_axi3::AXI_BURST_FIXED;
+
+    env.up.w.wvalid = true;
+    env.up.w.wid = id;
+    env.up.w.wdata = wdata;
+    env.up.w.wstrb = 1u << offset;
+    env.up.w.wlast = true;
+
+    cycle_inputs(env);
+
+    if (!issued && env.up.aw.awvalid && env.up.aw.awready) {
+      issued = true;
+    }
+    if (env.up.b.bvalid && env.up.b.bready) {
+      done = true;
+    }
+  }
+
+  return issued && done;
+}
+
+static bool test_uart_write_prints_sentence(TestEnv &env,
+                                            const char *sentence,
+                                            uint8_t orig_id) {
+  std::stringstream ss;
+  struct TeeStreamBuf : public std::streambuf {
+    TeeStreamBuf(std::streambuf *a, std::streambuf *b) : sb1(a), sb2(b) {}
+    int overflow(int c) override {
+      if (c == EOF) {
+        return 0;
+      }
+      sb1->sputc(static_cast<char>(c));
+      sb2->sputc(static_cast<char>(c));
+      return c;
+    }
+    std::streamsize xsputn(const char *s, std::streamsize n) override {
+      sb1->sputn(s, n);
+      sb2->sputn(s, n);
+      return n;
+    }
+    int sync() override {
+      sb1->pubsync();
+      sb2->pubsync();
+      return 0;
+    }
+    std::streambuf *sb1;
+    std::streambuf *sb2;
+  };
+
+  std::streambuf *old = std::cout.rdbuf();
+  TeeStreamBuf tee(old, ss.rdbuf());
+  std::cout.rdbuf(&tee);
+
+  bool ok = true;
+  uint32_t thr = MMIO_RANGE_BASE; // THR offset 0
+  for (const char *p = sentence; *p; p++) {
+    if (!issue_mmio_write_byte(env, thr, static_cast<uint8_t>(*p), orig_id)) {
+      ok = false;
+      break;
+    }
+  }
+
+  std::cout.flush();
+  std::cout.rdbuf(old);
+
+  if (!ok) {
+    printf("FAIL: UART write timeout\n");
+    return false;
+  }
+
+  if (ss.str() != std::string(sentence)) {
+    printf("FAIL: UART output mismatch\n");
+    printf("  exp: \"%s\"\n", sentence);
+    printf("  got: \"%s\"\n", ss.str().c_str());
+    return false;
+  }
+
+  printf("PASS\n");
+  return true;
+}
+
+static bool test_router_mmio_uart_print(TestEnv &env) {
+  printf("=== Test 4: Router MMIO UART print (sentences) ===\n");
+
+  mmio::UART16550_Device uart(MMIO_RANGE_BASE);
+  env.mmio.add_device(MMIO_RANGE_BASE, MMIO_RANGE_SIZE, &uart);
+
+  bool ok = true;
+  printf("NOTE: UART should print the next sentence:\n");
+  ok &= test_uart_write_prints_sentence(
+      env, "UART0: MMIO over AXI3 path is alive.\n", 4);
+  ok &= test_uart_write_prints_sentence(
+      env, "The quick brown fox jumps over the lazy dog.\n", 5);
+  return ok;
+}
+
+static bool test_router_mmio_uart_lsr_ready(TestEnv &env) {
+  printf("=== Test 5: Router MMIO UART LSR ready ===\n");
+
+  mmio::UART16550_Device uart(MMIO_RANGE_BASE);
+  env.mmio.add_device(MMIO_RANGE_BASE, MMIO_RANGE_SIZE, &uart);
+
+  uint32_t addr = MMIO_RANGE_BASE + 0x5; // LSR
+  uint8_t total_size = 0;               // 1B
+  uint8_t offset = addr & 0x1F;
+  uint32_t id = make_axi_id(0, 6, offset, total_size);
+
+  bool issued = false;
+  bool done = false;
+  int timeout = TIMEOUT;
+  while (timeout-- > 0 && !done) {
+    clear_upstream(env);
+    cycle_outputs(env);
+
+    env.up.ar.arvalid = true;
+    env.up.ar.araddr = addr & ~0x1Fu;
+    env.up.ar.arid = id;
+    env.up.ar.arlen = 0;
+    env.up.ar.arsize = 5;
+    env.up.ar.arburst = sim_ddr_axi3::AXI_BURST_FIXED;
+
+    cycle_inputs(env);
+
+    if (!issued && env.up.ar.arvalid && env.up.ar.arready) {
+      issued = true;
+    }
+
+    if (env.up.r.rvalid && env.up.r.rready) {
+      done = true;
+      uint8_t bytes[32] = {0};
+      for (int w = 0; w < sim_ddr_axi3::AXI_DATA_WORDS; w++) {
+        store_le32(bytes + (w * 4), env.up.r.rdata[w]);
+      }
+      uint8_t got = bytes[offset];
+      if ((got & 0x60u) != 0x60u) {
+        printf("FAIL: UART LSR not ready exp_mask=0x60 got=0x%02x\n", got);
+        return false;
+      }
+    }
+  }
+
+  if (!issued || !done) {
+    printf("FAIL: UART LSR read timeout\n");
+    return false;
+  }
+  printf("PASS\n");
+  return true;
+}
+
 int main() {
   p_memory = new uint32_t[TEST_MEM_WORDS];
   for (uint32_t i = 0; i < TEST_MEM_WORDS; i++) {
@@ -334,6 +511,14 @@ int main() {
   env.mmio.init();
   env.mmio.add_device(MMIO_RANGE_BASE, MMIO_RANGE_SIZE, &dev);
   ok &= test_router_mmio_write(env, dev);
+  env.router.init();
+  env.ddr.init();
+  env.mmio.init();
+  ok &= test_router_mmio_uart_print(env);
+  env.router.init();
+  env.ddr.init();
+  env.mmio.init();
+  ok &= test_router_mmio_uart_lsr_ready(env);
 
   delete[] p_memory;
   if (!ok) {

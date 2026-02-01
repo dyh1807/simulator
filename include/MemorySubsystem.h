@@ -12,11 +12,13 @@
 #include "AXI_Interconnect_AXI3.h"
 #include "AXI_Router_AXI3.h"
 #include "MMIO_Bus_AXI3.h"
+#include "UART16550_Device.h"
 #include "SimDDR_AXI3.h"
 #else
 #include "AXI_Interconnect.h"
 #include "SimDDR.h"
 #endif
+#include <config.h>
 #include <cstdint>
 
 class MemorySubsystem {
@@ -33,6 +35,7 @@ public:
 #ifndef USE_SIM_DDR_AXI4
     router.init();
     mmio.init();
+    mmio.add_device(UART_BASE, 0x1000, &uart0);
 #endif
     ddr.init();
     clear_inputs();
@@ -184,6 +187,7 @@ private:
   sim_ddr_axi3::SimDDR_AXI3 ddr;
   axi_interconnect::AXI_Router_AXI3 router;
   mmio::MMIO_Bus_AXI3 mmio;
+  mmio::UART16550_Device uart0{UART_BASE};
 #endif
 
   void clear_inputs() {

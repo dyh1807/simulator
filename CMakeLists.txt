@@ -295,6 +295,7 @@ add_executable(mmio_router_axi3_test EXCLUDE_FROM_ALL
     ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR_AXI3.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Router_AXI3.cpp
     ${CMAKE_SOURCE_DIR}/uncore/mmio/MMIO_Bus_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/mmio/UART16550_Device.cpp
     ${CMAKE_SOURCE_DIR}/uncore/mmio/mmio_router_axi3_test.cpp
 )
 
