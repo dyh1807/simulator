@@ -37,10 +37,10 @@ file(GLOB_RECURSE FRONTEND_SOURCES "${CMAKE_SOURCE_DIR}/front-end/*.cpp")
 file(GLOB_RECURSE DIFF_SOURCES "${CMAKE_SOURCE_DIR}/diff/*.cpp")
 file(GLOB_RECURSE MMU_SOURCES "${CMAKE_SOURCE_DIR}/mmu/*.cpp")
 file(GLOB_RECURSE MEMORY_SOURCES "${CMAKE_SOURCE_DIR}/memory/*.cpp")
-file(GLOB_RECURSE MMIO_SOURCES "${CMAKE_SOURCE_DIR}/mmio/*.cpp")
+file(GLOB_RECURSE MMIO_SOURCES "${CMAKE_SOURCE_DIR}/uncore/mmio/*.cpp")
 list(FILTER MMIO_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
 # Note: sim_ddr sources are NOT included in main executable (will be integrated later)
-# file(GLOB_RECURSE SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
+# file(GLOB_RECURSE SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/uncore/sim_ddr/*.cpp")
 
 # Combine all sources (matching Makefile: main.cpp and rv_simu_mmu_v2.cpp)
 set(SOURCES 
@@ -64,8 +64,8 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/front-end/
     ${CMAKE_SOURCE_DIR}/mmu/include/
     ${CMAKE_SOURCE_DIR}/memory/include/
-    ${CMAKE_SOURCE_DIR}/mmio/include/
-    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/uncore/mmio/include/
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
     ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
 
@@ -91,7 +91,7 @@ if(USE_SIM_DDR)
         add_compile_definitions(USE_SIM_DDR_AXI4)
     endif()
     # Add sim_ddr and axi_interconnect sources to main build
-    file(GLOB SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/sim_ddr/*.cpp")
+    file(GLOB SIM_DDR_SOURCES "${CMAKE_SOURCE_DIR}/uncore/sim_ddr/*.cpp")
     file(GLOB AXI_INTERCONNECT_SOURCES "${CMAKE_SOURCE_DIR}/axi_interconnect/*.cpp")
     list(FILTER SIM_DDR_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
     list(FILTER AXI_INTERCONNECT_SOURCES EXCLUDE REGEX ".*_test\\.cpp$")
@@ -135,8 +135,8 @@ add_custom_target(linux
 # SimDDR Test Target (standalone test executable)
 # ============================================================================
 add_executable(sim_ddr_test EXCLUDE_FROM_ALL
-    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR.cpp
-    ${CMAKE_SOURCE_DIR}/sim_ddr/sim_ddr_test.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/sim_ddr_test.cpp
 )
 
 target_compile_options(sim_ddr_test PRIVATE
@@ -156,7 +156,7 @@ add_custom_target(run_sim_ddr_test
 # AXI-Interconnect Test Target
 # ============================================================================
 add_executable(axi_interconnect_test EXCLUDE_FROM_ALL
-    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/axi_interconnect_test.cpp
 )
@@ -164,7 +164,7 @@ add_executable(axi_interconnect_test EXCLUDE_FROM_ALL
 target_include_directories(axi_interconnect_test PRIVATE
     ${CMAKE_SOURCE_DIR}/back-end/include/
     ${CMAKE_SOURCE_DIR}/front-end/
-    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
     ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
 
@@ -193,7 +193,7 @@ add_custom_target(cov
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
-        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
         -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -O0 --coverage -o ${EXECUTABLE_NAME}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -211,7 +211,7 @@ add_custom_target(gdb
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
-        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
         -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -O0 -g -march=native -lz -o ${EXECUTABLE_NAME}
     COMMAND gdb --args ./${EXECUTABLE_NAME} ${MEMORY_IMAGE_PATH}
@@ -230,7 +230,7 @@ add_custom_target(gdb_linux
         -I${CMAKE_SOURCE_DIR}/front-end/
         -I${CMAKE_SOURCE_DIR}/mmu/include/
         -I${CMAKE_SOURCE_DIR}/memory/include/
-        -I${CMAKE_SOURCE_DIR}/sim_ddr/include/
+        -I${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
         -I${CMAKE_SOURCE_DIR}/axi_interconnect/include/
         ${SOURCES} ${CMAKE_SOURCE_DIR}/softfloat.a -g -o ${EXECUTABLE_NAME}
     COMMAND gdb --args ./${EXECUTABLE_NAME} ${LINUX_IMAGE_PATH}
@@ -242,8 +242,8 @@ add_custom_target(gdb_linux
 # SimDDR AXI3 Test Target
 # ============================================================================
 add_executable(sim_ddr_axi3_test EXCLUDE_FROM_ALL
-    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
-    ${CMAKE_SOURCE_DIR}/sim_ddr/sim_ddr_axi3_test.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/sim_ddr_axi3_test.cpp
 )
 
 target_compile_options(sim_ddr_axi3_test PRIVATE
@@ -262,7 +262,7 @@ add_custom_target(run_sim_ddr_axi3_test
 # AXI-Interconnect AXI3 Test Target
 # ============================================================================
 add_executable(axi_interconnect_axi3_test EXCLUDE_FROM_ALL
-    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR_AXI3.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Interconnect_AXI3.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/axi_interconnect_axi3_test.cpp
 )
@@ -270,7 +270,7 @@ add_executable(axi_interconnect_axi3_test EXCLUDE_FROM_ALL
 target_include_directories(axi_interconnect_axi3_test PRIVATE
     ${CMAKE_SOURCE_DIR}/back-end/include/
     ${CMAKE_SOURCE_DIR}/front-end/
-    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
     ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
 )
 
@@ -292,17 +292,17 @@ add_custom_target(run_axi_interconnect_axi3_test
 # AXI3 MMIO Router Test Target
 # ============================================================================
 add_executable(mmio_router_axi3_test EXCLUDE_FROM_ALL
-    ${CMAKE_SOURCE_DIR}/sim_ddr/SimDDR_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/SimDDR_AXI3.cpp
     ${CMAKE_SOURCE_DIR}/axi_interconnect/AXI_Router_AXI3.cpp
-    ${CMAKE_SOURCE_DIR}/mmio/MMIO_Bus_AXI3.cpp
-    ${CMAKE_SOURCE_DIR}/mmio/mmio_router_axi3_test.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/mmio/MMIO_Bus_AXI3.cpp
+    ${CMAKE_SOURCE_DIR}/uncore/mmio/mmio_router_axi3_test.cpp
 )
 
 target_include_directories(mmio_router_axi3_test PRIVATE
     ${CMAKE_SOURCE_DIR}/back-end/include/
-    ${CMAKE_SOURCE_DIR}/sim_ddr/include/
+    ${CMAKE_SOURCE_DIR}/uncore/sim_ddr/include/
     ${CMAKE_SOURCE_DIR}/axi_interconnect/include/
-    ${CMAKE_SOURCE_DIR}/mmio/include/
+    ${CMAKE_SOURCE_DIR}/uncore/mmio/include/
 )
 
 target_compile_options(mmio_router_axi3_test PRIVATE

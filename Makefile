@@ -20,11 +20,11 @@ CXXINCLUDE := -I./include/ \
               -I./front-end/ \
               -I./mmu/include/ \
               -I./memory/include/ \
-              -I./mmio/include/
+              -I./uncore/mmio/include/
 
 ifeq ($(USE_SIM_DDR),1)
 CXXFLAGS += -DUSE_SIM_DDR
-CXXINCLUDE += -I./sim_ddr/include/ -I./axi_interconnect/include/
+CXXINCLUDE += -I./uncore/sim_ddr/include/ -I./axi_interconnect/include/
 ifeq ($(USE_SIM_DDR_AXI3),1)
 ifeq ($(USE_SIM_DDR_AXI4),1)
 $(error USE_SIM_DDR_AXI3 and USE_SIM_DDR_AXI4 are mutually exclusive)
@@ -44,12 +44,12 @@ SRCS += $(shell find ./front-end/ -name "*.cpp")
 SRCS += $(shell find ./diff/ -name "*.cpp")
 SRCS += $(shell find ./mmu/ -name "*.cpp")
 SRCS += $(shell find ./memory/ -name "*.cpp")
-SRCS += $(shell find ./mmio/ -name "*.cpp" ! -name "*_test.cpp")
+SRCS += $(shell find ./uncore/mmio/ -name "*.cpp" ! -name "*_test.cpp")
 SRCS += ./main.cpp
 SRCS += ./rv_simu_mmu_v2.cpp
 
 ifeq ($(USE_SIM_DDR),1)
-SRCS += $(shell find ./sim_ddr/ -name "*.cpp" ! -name "*_test.cpp")
+SRCS += $(shell find ./uncore/sim_ddr/ -name "*.cpp" ! -name "*_test.cpp")
 SRCS += $(shell find ./axi_interconnect/ -name "*.cpp" ! -name "*_test.cpp")
 endif
 

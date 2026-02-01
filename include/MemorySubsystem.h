@@ -9,13 +9,13 @@
 
 // Default to AXI3 (256-bit). Define USE_SIM_DDR_AXI4 to select legacy AXI4 (32-bit).
 #ifndef USE_SIM_DDR_AXI4
-#include "../axi_interconnect/include/AXI_Interconnect_AXI3.h"
-#include "../axi_interconnect/include/AXI_Router_AXI3.h"
-#include "../sim_ddr/include/SimDDR_AXI3.h"
-#include "../mmio/include/MMIO_Bus_AXI3.h"
+#include "AXI_Interconnect_AXI3.h"
+#include "AXI_Router_AXI3.h"
+#include "MMIO_Bus_AXI3.h"
+#include "SimDDR_AXI3.h"
 #else
-#include "../axi_interconnect/include/AXI_Interconnect.h"
-#include "../sim_ddr/include/SimDDR.h"
+#include "AXI_Interconnect.h"
+#include "SimDDR.h"
 #endif
 #include <cstdint>
 
