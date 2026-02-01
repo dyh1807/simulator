@@ -25,6 +25,31 @@
 #include <frontend.h>
 #include <iostream>
 
+// -----------------------------------------------------------------------------
+// SRAM lookup latency model (ICache)
+// -----------------------------------------------------------------------------
+// Use SRAM-style lookup model (with configurable latency). When disabled,
+// legacy register-based behavior is preserved.
+#ifndef ICACHE_USE_SRAM_MODEL
+#define ICACHE_USE_SRAM_MODEL 0
+#endif
+// Fixed latency (cycles). Latency=1 means data available next cycle.
+// Latency=0 is treated as 1 when SRAM model is enabled.
+#ifndef ICACHE_SRAM_FIXED_LATENCY
+#define ICACHE_SRAM_FIXED_LATENCY 1
+#endif
+// Random latency enable (1=random, 0=fixed)
+#ifndef ICACHE_SRAM_RANDOM_DELAY
+#define ICACHE_SRAM_RANDOM_DELAY 0
+#endif
+// Random latency range (inclusive). Values <1 are clamped to 1.
+#ifndef ICACHE_SRAM_RANDOM_MIN
+#define ICACHE_SRAM_RANDOM_MIN 1
+#endif
+#ifndef ICACHE_SRAM_RANDOM_MAX
+#define ICACHE_SRAM_RANDOM_MAX 4
+#endif
+
 namespace icache_module_n {
 // i-Cache State
 enum ICacheState {
@@ -188,6 +213,18 @@ private:
   uint32_t replace_idx = 0;
   uint32_t replace_idx_next;
   uint32_t ppn_r; // length = paddr_length(32/34) - 12 bits = 20/22 bits
+
+  // SRAM lookup delay model (used when ICACHE_USE_SRAM_MODEL=1)
+  bool sram_pending_r = false;
+  bool sram_pending_next = false;
+  uint32_t sram_delay_r = 0;
+  uint32_t sram_delay_next = 0;
+  uint32_t sram_index_r = 0;
+  uint32_t sram_index_next = 0;
+  uint32_t sram_seed_r = 1;
+  uint32_t sram_seed_next = 1;
+  // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
+  bool sram_load_fire = false;
 };
 }; // namespace icache_module_n
 
