@@ -14,7 +14,10 @@ images = [
     "./baremetal/new_coremark/coremark.bin",
     "./baremetal/new_dhrystone/dhrystone.bin"
 ]
-target_inst = 150000000
+# Instruction target for experiment iterations.
+# Default matches the original setting; for quick local runs, override via env:
+#   TARGET_INST=1500000 python3 run_experiments_parallel.py
+target_inst = int(os.environ.get("TARGET_INST", "150000000"))
 
 # Generate configurations
 # Format: (latency, line_size, use_true_icache)
