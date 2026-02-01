@@ -225,13 +225,25 @@ void TrueICacheTop::seq() {
 void SimpleICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache] reset\n");
+    out->icache_read_complete = false;
     out->icache_read_ready = true;
+    out->fetch_pc = 0;
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      out->fetch_group[i] = INST_NOP;
+      out->page_fault_inst[i] = false;
+      out->inst_valid[i] = false;
+    }
     return;
   }
 
-  out->icache_read_complete = true;
+  // Ideal model: always ready; "complete" whenever a fetch request is issued.
   out->icache_read_ready = true;
-  out->fetch_pc = in->fetch_address;
+  out->icache_read_complete = in->icache_read_valid;
+  out->fetch_pc = in->icache_read_valid ? in->fetch_address : 0;
+
+  if (!in->run_comb_only && in->icache_read_valid) {
+    access_delta++;
+  }
 
   if (in->icache_read_valid) {
     bool mstatus[32], sstatus[32];
@@ -271,7 +283,13 @@ void SimpleICacheTop::comb() {
       }
     }
   } else {
-    out->fetch_pc = 0;
+    // No request this cycle: drive deterministic outputs (avoid re-sending
+    // previous fetch group into FIFO).
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      out->fetch_group[i] = INST_NOP;
+      out->page_fault_inst[i] = false;
+      out->inst_valid[i] = false;
+    }
   }
 }
 
