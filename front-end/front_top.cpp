@@ -42,7 +42,10 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.refetch = in->refetch;
     icache_in.run_comb_only = true;
     icache_in.icache_read_valid = false;
-    icache_in.icache_resp_ready = false;
+    // Match real backpressure when probing `icache_read_ready`; otherwise the
+    // comb-only query may pessimistically stall BPU when a response could be
+    // consumed in the same cycle (notably for ICacheV2's internal ROB pop).
+    icache_in.icache_resp_ready = !fifo_out.full;
     icache_top(&icache_in, &icache_out);
 #endif
 
