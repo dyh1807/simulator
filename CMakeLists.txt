@@ -76,6 +76,12 @@ option(USE_SIM_DDR "Use SimDDR memory backend for ICache" ON)
 option(USE_SIM_DDR_AXI3 "Use constrained AXI3 (256-bit) SimDDR backend" OFF)
 option(USE_SIM_DDR_AXI4 "Use legacy AXI4 (32-bit) SimDDR backend" OFF)
 
+option(USE_ICACHE_V2 "Use non-blocking ICache v2 (MSHR + Prefetch + ID)" OFF)
+if(USE_ICACHE_V2)
+    message(STATUS "USE_ICACHE_V2 is ON: Using non-blocking ICache v2")
+    add_compile_definitions(USE_ICACHE_V2)
+endif()
+
 if(USE_SIM_DDR)
     message(STATUS "USE_SIM_DDR is ON: Using AXI-Interconnect + SimDDR for ICache")
     add_compile_definitions(USE_SIM_DDR)

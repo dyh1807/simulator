@@ -79,6 +79,8 @@ struct icache_in {
   // from BPU
   bool icache_read_valid;
   uint32_t fetch_address;
+  // backpressure from frontend (instruction FIFO space)
+  bool icache_resp_ready;
   bool run_comb_only;
 };
 

@@ -36,11 +36,13 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
         bpu_in.tage_idx[i][j] = in->tage_idx[i][j];
       }
     }
-#ifdef USE_TRUE_ICACHE
+#if defined(USE_TRUE_ICACHE) || defined(USE_SIM_DDR)
     // get icache_read_ready signal for this cycle
     icache_in.reset = in->reset;
     icache_in.refetch = in->refetch;
     icache_in.run_comb_only = true;
+    icache_in.icache_read_valid = false;
+    icache_in.icache_resp_ready = false;
     icache_top(&icache_in, &icache_out);
 #endif
 
@@ -60,6 +62,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.icache_read_valid =
         bpu_out.icache_read_valid && fetch_allow;
     icache_in.fetch_address = bpu_out.fetch_address;
+    icache_in.icache_resp_ready = !fifo_out.full;
 
     // run icache
     icache_top(&icache_in, &icache_out);
@@ -158,6 +161,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.run_comb_only = false;
     icache_in.icache_read_valid = false;
     icache_in.fetch_address = bpu_out.fetch_address;
+    icache_in.icache_resp_ready = false;
     icache_top(&icache_in, &icache_out);
 
     fifo_in.reset = false;
@@ -219,6 +223,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
       icache_in.reset = false;
       icache_in.refetch = true;
       icache_in.icache_read_valid = false;
+      icache_in.icache_resp_ready = false;
       icache_top(&icache_in, &icache_out);
 
       BPU_change_pc_reg(

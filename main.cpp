@@ -10,6 +10,11 @@
 #include <MemorySubsystem.h>
 #endif
 
+#ifdef USE_ICACHE_V2
+#include "icache/include/icache_module_v2.h"
+extern icache_module_v2_n::ICacheV2 icache_v2;
+#endif
+
 namespace fs = std::filesystem;
 using namespace std;
 extern RefCpu ref_cpu;
@@ -230,6 +235,9 @@ int main(int argc, char *argv[]) {
     cout << "\033[1;32m-----------------------------\033[0m" << endl;
     cout << "\033[1;32mSuccess!!!!\033[0m" << endl;
     cpu.ctx.perf.perf_print();
+#ifdef USE_ICACHE_V2
+    icache_v2.perf_print();
+#endif
     cout << "\033[1;32m-----------------------------\033[0m" << endl;
 
   } else {
@@ -237,6 +245,9 @@ int main(int argc, char *argv[]) {
     cout << "\033[1;31mTIME OUT!!!!QAQ\033[0m" << endl;
     cout << "\033[1;31m------------------------------\033[0m" << endl;
     cpu.ctx.perf.perf_print();
+#ifdef USE_ICACHE_V2
+    icache_v2.perf_print();
+#endif
     cout << "\033[1;31m------------------------------\033[0m" << endl;
     exit(1);
   }

@@ -10,6 +10,10 @@
 #ifdef USE_SIM_DDR
 #include <MemorySubsystem.h>
 #endif
+#ifdef USE_ICACHE_V2
+#include "icache/include/icache_module_v2.h"
+extern icache_module_v2_n::ICacheV2 icache_v2;
+#endif
 
 long long commit_inst_count = 0; // 提交指令计数
 long long commit_inst_count_last = 0;
@@ -242,6 +246,9 @@ void ROB::comb_commit() {
 #ifdef USE_SIM_DDR
     // Print ICache-SimDDR debug info for deadlock diagnosis
     mem_subsystem().debug_print();
+#endif
+#ifdef USE_ICACHE_V2
+    icache_v2.log_debug();
 #endif
 
     exit(1);

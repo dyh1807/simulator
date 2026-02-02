@@ -3,6 +3,10 @@
 
 #include "../../front_IO.h" // For icache_in, icache_out
 #include "../include/icache_module.h"
+#ifdef USE_ICACHE_V2
+#include "../include/icache_module_v2.h"
+#endif
+#include <array>
 #include <memory>
 
 class SimContext; // Forward declaration
@@ -70,6 +74,25 @@ public:
   void flush() override;
 };
 
+#ifdef USE_ICACHE_V2
+// Implementation using non-blocking ICacheV2 (MSHR + Prefetch + ID)
+class TrueICacheV2Top : public ICacheTop {
+private:
+  // Simple non-AXI memory model with multiple outstanding transactions (0..15)
+  std::array<uint8_t, 16> mem_valid{};
+  std::array<uint32_t, 16> mem_addr{};
+  std::array<uint32_t, 16> mem_age{};
+
+  icache_module_v2_n::ICacheV2 &icache_hw;
+
+public:
+  TrueICacheV2Top(icache_module_v2_n::ICacheV2 &hw);
+  void comb() override;
+  void seq() override;
+  void flush() override;
+};
+#endif
+
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
 class SimpleICacheTop : public ICacheTop {
 public:
@@ -92,6 +115,20 @@ public:
   void seq() override;
   void flush() override;
 };
+
+#ifdef USE_ICACHE_V2
+// Implementation using ICacheV2 + AXI-Interconnect + SimDDR
+class SimDDRICacheV2Top : public ICacheTop {
+private:
+  icache_module_v2_n::ICacheV2 &icache_hw;
+
+public:
+  SimDDRICacheV2Top(icache_module_v2_n::ICacheV2 &hw);
+  void comb() override;
+  void seq() override;
+  void flush() override;
+};
+#endif
 #endif
 
 // Factory function to get the singleton instance

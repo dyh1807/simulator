@@ -1,10 +1,16 @@
 #include "../front_IO.h"
 #include "include/ICacheTop.h"
 #include "include/icache_module.h"
+#ifdef USE_ICACHE_V2
+#include "include/icache_module_v2.h"
+#endif
 #include <SimCpu.h> // For cpu
 
 // Define global ICache instance
 icache_module_n::ICache icache;
+#ifdef USE_ICACHE_V2
+icache_module_v2_n::ICacheV2 icache_v2;
+#endif
 extern SimCpu cpu;
 static bool flush_pending = false;
 

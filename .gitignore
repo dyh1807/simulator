@@ -5,6 +5,9 @@ baremetal/linux.bin
 .vscode
 compile_commands.json
 
+# Python
+__pycache__/
+
 # Ignore build files
 /build
 /build_nosim

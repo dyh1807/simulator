@@ -6,6 +6,9 @@ USE_SIM_DDR ?= 1
 USE_SIM_DDR_AXI3 ?= 0
 USE_SIM_DDR_AXI4 ?= 0
 
+# Enable non-blocking icache v2 (MSHR + Prefetch + ID); default OFF.
+USE_ICACHE_V2 ?= 0
+
 CXX := g++
 # Flags for the default target
 CXXFLAGS := -O3 -march=native -funroll-loops -mtune=native --std=c++2a
@@ -36,6 +39,10 @@ endif
 ifeq ($(USE_SIM_DDR_AXI4),1)
 CXXFLAGS += -DUSE_SIM_DDR_AXI4
 endif
+endif
+
+ifeq ($(USE_ICACHE_V2),1)
+CXXFLAGS += -DUSE_ICACHE_V2
 endif
 
 # Source files (dynamically found)
