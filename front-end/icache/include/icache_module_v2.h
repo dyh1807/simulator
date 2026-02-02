@@ -320,6 +320,10 @@ private:
   // MSHR utilization (peak occupancy since reset)
   uint32_t mshr_peak_r_ = 0;
   uint32_t mshr_peak_next_ = 0;
+
+  // TXID utilization (peak in-flight txids since reset)
+  uint32_t txid_peak_r_ = 0;
+  uint32_t txid_peak_next_ = 0;
 };
 
 } // namespace icache_module_v2_n

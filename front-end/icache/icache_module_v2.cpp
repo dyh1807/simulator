@@ -325,6 +325,8 @@ void ICacheV2::reset() {
 
   mshr_peak_r_ = 0;
   mshr_peak_next_ = 0;
+  txid_peak_r_ = 0;
+  txid_peak_next_ = 0;
 
   rob_head_r_ = 0;
   rob_tail_r_ = 0;
@@ -464,6 +466,7 @@ void ICacheV2::comb() {
   mshr_waiters_next_ = mshr_waiters_r_;
 
   mshr_peak_next_ = mshr_peak_r_;
+  txid_peak_next_ = txid_peak_r_;
 
   for (int i = 0; i < 16; ++i) {
     txid_inflight_next_[i] = txid_inflight_r_[i];
@@ -1112,6 +1115,21 @@ void ICacheV2::comb() {
   if (mshr_used > mshr_peak_next_) {
     mshr_peak_next_ = mshr_used;
   }
+
+  // -------------------------------------------------------------------------
+  // TXID utilization tracking (peak in-flight txids)
+  // Note: This reflects actual memory-level concurrency (bounded by 16 IDs),
+  // whereas MSHR occupancy can be larger and includes ALLOC/SENDING entries.
+  // -------------------------------------------------------------------------
+  uint32_t txid_used = 0;
+  for (int id = 0; id < 16; ++id) {
+    if (txid_inflight_next_[id]) {
+      txid_used++;
+    }
+  }
+  if (txid_used > txid_peak_next_) {
+    txid_peak_next_ = txid_used;
+  }
 }
 
 void ICacheV2::seq() {
@@ -1167,6 +1185,7 @@ void ICacheV2::seq() {
   mshr_txid_valid_r_ = mshr_txid_valid_next_;
   mshr_waiters_r_ = mshr_waiters_next_;
   mshr_peak_r_ = mshr_peak_next_;
+  txid_peak_r_ = txid_peak_next_;
 
   for (int i = 0; i < 16; ++i) {
     txid_inflight_r_[i] = txid_inflight_next_[i];
@@ -1290,6 +1309,10 @@ void ICacheV2::perf_print() const {
   }
   std::cout << "[icache_v2] mshr_peak: " << mshr_peak_r_ << "/" << cfg_.mshr_num
             << " (" << ratio << ")" << std::endl;
+
+  double tx_ratio = static_cast<double>(txid_peak_r_) / 16.0;
+  std::cout << "[icache_v2] txid_peak: " << txid_peak_r_ << "/16"
+            << " (" << tx_ratio << ")" << std::endl;
 }
 
 } // namespace icache_module_v2_n

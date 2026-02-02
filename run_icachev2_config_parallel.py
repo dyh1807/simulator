@@ -191,6 +191,14 @@ def parse_metrics(output: str) -> Dict:
         metrics["mshr_peak"] = int(mshr_peak_match.group(1))
         metrics["mshr_peak_cfg"] = int(mshr_peak_match.group(2))
         metrics["mshr_peak_ratio"] = float(mshr_peak_match.group(3))
+
+    txid_peak_match = re.search(
+        r"\[icache_v2\]\s+txid_peak:\s*(\d+)\s*/\s*16\s*\(([0-9.eE+-]+)\)",
+        output,
+    )
+    if txid_peak_match:
+        metrics["txid_peak"] = int(txid_peak_match.group(1))
+        metrics["txid_peak_ratio"] = float(txid_peak_match.group(2))
     return metrics
 
 
@@ -286,11 +294,17 @@ def format_row(r: Dict) -> str:
         mshr_peak_str = f"{mshr_peak}/{denom}"
     else:
         mshr_peak_str = "-"
+
+    txid_peak = r.get("txid_peak", None)
+    if isinstance(txid_peak, int):
+        txid_peak_str = f"{txid_peak}/16"
+    else:
+        txid_peak_str = "-"
     repl = r.get("repl", "-")
     pf = r.get("pf", "-")
 
     return (
-        f"{img:<15} | {name:<12} | {ver:<2} | {ways!s:<4} | {mshr!s:<4} | {mshr_peak_str:<7} | {repl!s:<4} | {pf!s:<2} | "
+        f"{img:<15} | {name:<12} | {ver:<2} | {ways!s:<4} | {mshr!s:<4} | {mshr_peak_str:<7} | {txid_peak_str:<5} | {repl!s:<4} | {pf!s:<2} | "
         f"{inst_num!s:<10} | {ipc:<8} | {ic_acc:<10} | {bpu:<10} | {status:<10} | {elapsed:<7}"
     )
 
@@ -401,7 +415,7 @@ def main():
     pool = multiprocessing.Pool(processes=min(total, multiprocessing.cpu_count()))
 
     header = (
-        f"{'Image':<15} | {'Config':<12} | {'V':<2} | {'Ways':<4} | {'MSHR':<4} | {'MSHRpk':<7} | {'Repl':<4} | {'PF':<2} | "
+        f"{'Image':<15} | {'Config':<12} | {'V':<2} | {'Ways':<4} | {'MSHR':<4} | {'MSHRpk':<7} | {'TXpk':<5} | {'Repl':<4} | {'PF':<2} | "
         f"{'Inst Num':<10} | {'IPC':<8} | {'ICacheAcc':<10} | {'BPUAcc':<10} | {'Status':<10} | {'Time(s)':<7}"
     )
     print("\n" + "=" * len(header))
