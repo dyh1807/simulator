@@ -98,8 +98,9 @@ def compile_binaries(cfgs):
 
         cxx_flags = f"{base_flags} -DMAX_COMMIT_INST={target_inst}"
         if cfg.get("ideal"):
-            # Ideal icache: no SimDDR, no SRAM model; uses SimpleICacheTop
-            pass
+            # Ideal icache: disable true icache model (no miss) and keep memory path unchanged.
+            # Note: default build enables USE_TRUE_ICACHE unless USE_IDEAL_ICACHE is defined.
+            cxx_flags += " -DUSE_IDEAL_ICACHE"
         else:
             cxx_flags += " -DUSE_SIM_DDR -DICACHE_USE_SRAM_MODEL=1"
             if cfg["random"]:
