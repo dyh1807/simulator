@@ -74,6 +74,12 @@ private:
 
   ICacheHW &icache_hw;
 
+  // When CONFIG_MMU is disabled, ICacheTop provides a minimal translation stub
+  // using va2pa() (if paging is enabled) or identity mapping. The stub returns
+  // translation results one cycle after the request.
+  bool mmu_stub_req_valid_r = false;
+  uint32_t mmu_stub_req_vtag_r = 0;
+
 public:
   TrueICacheTop(ICacheHW &hw);
   void comb() override;
@@ -94,6 +100,9 @@ public:
 class SimDDRICacheTop : public ICacheTop {
 private:
   ICacheHW &icache_hw;
+
+  bool mmu_stub_req_valid_r = false;
+  uint32_t mmu_stub_req_vtag_r = 0;
 
 public:
   SimDDRICacheTop(ICacheHW &hw);

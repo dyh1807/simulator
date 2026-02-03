@@ -9,8 +9,10 @@
 #ifdef USE_ICACHE_V2
 #include "include/icache_module_v2.h"
 #endif
+#ifdef CONFIG_MMU
 #include "mmu_io.h"
 #include <MMU.h>
+#endif
 #include <SimCpu.h>
 #include <cstdio>
 #include <iostream>
@@ -52,6 +54,10 @@ void TrueICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
     icache_hw.reset();
+#ifndef CONFIG_MMU
+    mmu_stub_req_valid_r = false;
+    mmu_stub_req_vtag_r = 0;
+#endif
     mem_valid.fill(0);
     mem_addr.fill(0);
     mem_age.fill(0);
@@ -74,10 +80,33 @@ void TrueICacheTop::comb() {
   icache_hw.io.in.ifu_resp_ready = in->icache_resp_ready;
 
   // MMU response (from last cycle)
+#ifdef CONFIG_MMU
   mmu_resp_master_t mmu_resp = cpu.mmu.io.out.mmu_ifu_resp;
   icache_hw.io.in.ppn = mmu_resp.ptag;
   icache_hw.io.in.ppn_valid = mmu_resp.valid && !in->refetch && !mmu_resp.miss;
   icache_hw.io.in.page_fault = mmu_resp.excp;
+#else
+  icache_hw.io.in.ppn = 0;
+  icache_hw.io.in.ppn_valid = false;
+  icache_hw.io.in.page_fault = false;
+
+  if (mmu_stub_req_valid_r && !in->refetch) {
+    uint32_t v_addr = mmu_stub_req_vtag_r << 12;
+    uint32_t p_addr = v_addr;
+    bool page_fault = false;
+    if ((cpu.back.out.satp & 0x80000000) && cpu.back.out.privilege != 3) {
+      bool mstatus[32], sstatus[32];
+      cvt_number_to_bit_unsigned(mstatus, cpu.back.out.mstatus, 32);
+      cvt_number_to_bit_unsigned(sstatus, cpu.back.out.sstatus, 32);
+      page_fault = !va2pa(p_addr, v_addr, cpu.back.out.satp, 0, mstatus,
+                          sstatus, static_cast<int>(cpu.back.out.privilege),
+                          p_memory);
+    }
+    icache_hw.io.in.ppn = p_addr >> 12;
+    icache_hw.io.in.ppn_valid = true;
+    icache_hw.io.in.page_fault = page_fault;
+  }
+#endif
 
   // Memory request ready (simple model: always accept; limited by txid pool)
   icache_hw.io.in.mem_req_ready = true;
@@ -112,10 +141,12 @@ void TrueICacheTop::comb() {
   icache_hw.comb();
 
   // MMU request (drive vpn directly from icache module)
+#ifdef CONFIG_MMU
   cpu.mmu.io.in.mmu_ifu_req.op_type = mmu_n::OP_FETCH;
   cpu.mmu.io.in.mmu_ifu_resp.ready = true;
   cpu.mmu.io.in.mmu_ifu_req.valid = icache_hw.io.out.mmu_req_valid;
   cpu.mmu.io.in.mmu_ifu_req.vtag = icache_hw.io.out.mmu_req_vtag;
+#endif
 
   if (in->run_comb_only) {
     out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
@@ -170,6 +201,12 @@ void TrueICacheTop::seq() {
   if (icache_hw.io.out.mem_req_valid && icache_hw.io.in.mem_req_ready) {
     miss_delta++;
   }
+
+#ifndef CONFIG_MMU
+  // MMU stub: capture req for next cycle's translation response
+  mmu_stub_req_valid_r = icache_hw.io.out.mmu_req_valid;
+  mmu_stub_req_vtag_r = icache_hw.io.out.mmu_req_vtag;
+#endif
 
   // Age outstanding requests
   for (int id = 0; id < 16; ++id) {
@@ -258,6 +295,7 @@ void SimpleICacheTop::comb() {
       }
       out->inst_valid[i] = true;
 
+#ifndef CONFIG_MMU
       if ((cpu.back.out.satp & 0x80000000) && cpu.back.out.privilege != 3) {
         out->page_fault_inst[i] =
             !va2pa(p_addr, v_addr, cpu.back.out.satp, 0, mstatus, sstatus,
@@ -271,6 +309,13 @@ void SimpleICacheTop::comb() {
         out->page_fault_inst[i] = false;
         out->fetch_group[i] = p_memory[v_addr / 4];
       }
+#else
+      // With CONFIG_MMU enabled, the simulator provides an MMU module. This
+      // ideal icache model is intended for bring-up/debug without the MMU, so
+      // do not call va2pa here; treat vaddr as paddr.
+      out->page_fault_inst[i] = false;
+      out->fetch_group[i] = p_memory[v_addr / 4];
+#endif
 
       if (DEBUG_PRINT) {
         printf("[icache] pmem_address: %x\n", p_addr);
@@ -304,6 +349,10 @@ void SimDDRICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
     icache_hw.reset();
+#ifndef CONFIG_MMU
+    mmu_stub_req_valid_r = false;
+    mmu_stub_req_vtag_r = 0;
+#endif
     out->icache_read_complete = false;
     out->icache_read_ready = true;
     out->fetch_pc = 0;
@@ -323,10 +372,33 @@ void SimDDRICacheTop::comb() {
   icache_hw.io.in.ifu_resp_ready = in->icache_resp_ready;
 
   // MMU response (from last cycle)
+#ifdef CONFIG_MMU
   mmu_resp_master_t mmu_resp = cpu.mmu.io.out.mmu_ifu_resp;
   icache_hw.io.in.ppn = mmu_resp.ptag;
   icache_hw.io.in.ppn_valid = mmu_resp.valid && !in->refetch && !mmu_resp.miss;
   icache_hw.io.in.page_fault = mmu_resp.excp;
+#else
+  icache_hw.io.in.ppn = 0;
+  icache_hw.io.in.ppn_valid = false;
+  icache_hw.io.in.page_fault = false;
+
+  if (mmu_stub_req_valid_r && !in->refetch) {
+    uint32_t v_addr = mmu_stub_req_vtag_r << 12;
+    uint32_t p_addr = v_addr;
+    bool page_fault = false;
+    if ((cpu.back.out.satp & 0x80000000) && cpu.back.out.privilege != 3) {
+      bool mstatus[32], sstatus[32];
+      cvt_number_to_bit_unsigned(mstatus, cpu.back.out.mstatus, 32);
+      cvt_number_to_bit_unsigned(sstatus, cpu.back.out.sstatus, 32);
+      page_fault = !va2pa(p_addr, v_addr, cpu.back.out.satp, 0, mstatus,
+                          sstatus, static_cast<int>(cpu.back.out.privilege),
+                          p_memory);
+    }
+    icache_hw.io.in.ppn = p_addr >> 12;
+    icache_hw.io.in.ppn_valid = true;
+    icache_hw.io.in.page_fault = page_fault;
+  }
+#endif
 
   // Interconnect -> ICache inputs
   auto &port = mem_subsystem().icache_port();
@@ -349,10 +421,12 @@ void SimDDRICacheTop::comb() {
   }
 
   // MMU request (drive vpn directly from icache module)
+#ifdef CONFIG_MMU
   cpu.mmu.io.in.mmu_ifu_req.op_type = mmu_n::OP_FETCH;
   cpu.mmu.io.in.mmu_ifu_resp.ready = true;
   cpu.mmu.io.in.mmu_ifu_req.valid = icache_hw.io.out.mmu_req_valid;
   cpu.mmu.io.in.mmu_ifu_req.vtag = icache_hw.io.out.mmu_req_vtag;
+#endif
 
   if (in->run_comb_only) {
     out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
@@ -385,6 +459,7 @@ void SimDDRICacheTop::comb() {
         out->page_fault_inst[i] = icache_hw.io.out.ifu_page_fault;
         out->inst_valid[i] = true;
 
+#ifndef CONFIG_MMU
         // Optional correctness check (instruction match against pmem)
         if (!out->page_fault_inst[i]) {
           uint32_t v_addr = out->fetch_pc + (i * 4);
@@ -409,6 +484,7 @@ void SimDDRICacheTop::comb() {
             }
           }
         }
+#endif
       }
     }
   } else {
@@ -430,6 +506,12 @@ void SimDDRICacheTop::seq() {
   }
 
   icache_hw.seq();
+
+#ifndef CONFIG_MMU
+  // MMU stub: capture req for next cycle's translation response
+  mmu_stub_req_valid_r = icache_hw.io.out.mmu_req_valid;
+  mmu_stub_req_vtag_r = icache_hw.io.out.mmu_req_vtag;
+#endif
 
   if (icache_hw.io.in.ifu_req_valid && icache_hw.io.out.ifu_req_ready) {
     access_delta++;
