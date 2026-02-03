@@ -41,6 +41,8 @@ ICache::ICache() {
   mem_gnt = 0;
   pipe1_to_pipe2.valid_r = false;
   pipe1_to_pipe2.valid_next = false;
+  pipe1_to_pipe2.pc_w = 0;
+  pipe1_to_pipe2.pc_r = 0;
   pipe2_to_pipe1.ready = true;
 
 #if ICACHE_USE_SRAM_MODEL
@@ -50,6 +52,8 @@ ICache::ICache() {
   sram_delay_next = 0;
   sram_index_r = 0;
   sram_index_next = 0;
+  sram_pc_r = 0;
+  sram_pc_next = 0;
   sram_seed_r = 1;
   sram_seed_next = 1;
   sram_load_fire = false;
@@ -68,6 +72,8 @@ void ICache::reset() {
   mem_gnt = 0;
   pipe1_to_pipe2.valid_r = false;
   pipe1_to_pipe2.valid_next = false;
+  pipe1_to_pipe2.pc_w = 0;
+  pipe1_to_pipe2.pc_r = 0;
   pipe2_to_pipe1.ready = true;
 
 #if ICACHE_USE_SRAM_MODEL
@@ -77,6 +83,8 @@ void ICache::reset() {
   sram_delay_next = 0;
   sram_index_r = 0;
   sram_index_next = 0;
+  sram_pc_r = 0;
+  sram_pc_next = 0;
   sram_seed_r = 1;
   sram_seed_next = 1;
   sram_load_fire = false;
@@ -196,22 +204,26 @@ void ICache::lookup(uint32_t index) {
   sram_delay_next = sram_delay_r;
   sram_index_next = sram_index_r;
   sram_seed_next = sram_seed_r;
+  sram_pc_next = sram_pc_r;
   sram_load_fire = false;
 
   uint32_t lookup_index = sram_pending_r ? sram_index_r : index;
   lookup_read_set(lookup_index, /*gate_valid_with_req=*/false);
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
+  pipe1_to_pipe2.pc_w = sram_pending_r ? sram_pc_r : io.in.pc;
 
   if (io.in.refetch) {
     pipe1_to_pipe2.valid_next = false;
     io.out.ifu_req_ready = false;
+    io.out.mmu_req_valid = false;
     sram_pending_next = false;
     sram_delay_next = 0;
     return;
   }
 
   // Accept new request only when no pending SRAM lookup.
-  bool can_accept = io.in.ifu_req_valid && pipe2_to_pipe1.ready && !sram_pending_r;
+  bool can_accept =
+      io.in.ifu_req_valid && pipe2_to_pipe1.ready && !sram_pending_r;
   if (can_accept) {
     uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
 #if ICACHE_SRAM_RANDOM_DELAY
@@ -234,6 +246,7 @@ void ICache::lookup(uint32_t index) {
       sram_pending_next = true;
       sram_delay_next = latency - 1;
       sram_index_next = index;
+      sram_pc_next = io.in.pc;
     }
   }
 
@@ -256,14 +269,29 @@ void ICache::lookup(uint32_t index) {
     pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
   }
 
+  // MMU request generation (match ICacheV2 top-level wiring).
+  io.out.mmu_req_valid = false;
+  if (can_accept) {
+    io.out.mmu_req_valid = true;
+    io.out.mmu_req_vtag = io.in.pc >> 12;
+  } else if (pipe1_to_pipe2.valid_r && !io.in.ppn_valid) {
+    io.out.mmu_req_valid = true;
+    io.out.mmu_req_vtag = pipe1_to_pipe2.pc_r >> 12;
+  } else if (sram_pending_next) {
+    io.out.mmu_req_valid = true;
+    io.out.mmu_req_vtag = sram_pc_next >> 12;
+  }
+
   io.out.ifu_req_ready = pipe2_to_pipe1.ready && !sram_pending_r;
 #else
   lookup_read_set(index, /*gate_valid_with_req=*/true);
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
+  pipe1_to_pipe2.pc_w = io.in.pc;
 
   if (io.in.refetch) {
     pipe1_to_pipe2.valid_next = false;
     io.out.ifu_req_ready = false;
+    io.out.mmu_req_valid = false;
     return;
   }
 
@@ -276,6 +304,16 @@ void ICache::lookup(uint32_t index) {
     pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
   }
   io.out.ifu_req_ready = pipe2_to_pipe1.ready;
+
+  // MMU request generation (match ICacheV2 top-level wiring).
+  io.out.mmu_req_valid = false;
+  if (fire) {
+    io.out.mmu_req_valid = true;
+    io.out.mmu_req_vtag = io.in.pc >> 12;
+  } else if (pipe1_to_pipe2.valid_r && !io.in.ppn_valid) {
+    io.out.mmu_req_valid = true;
+    io.out.mmu_req_vtag = pipe1_to_pipe2.pc_r >> 12;
+  }
 #endif
 }
 
@@ -291,7 +329,9 @@ void ICache::comb_pipe2() {
   io.out.mem_resp_ready = false;
   io.out.mem_req_valid = false;
   io.out.ifu_resp_valid = false;
+  io.out.ifu_resp_pc = pipe1_to_pipe2.pc_r;
   io.out.ifu_page_fault = false;
+  io.out.mem_req_id = 0;
   mem_axi_state_next = mem_axi_state;
   pipe2_to_pipe1.ready = false; // Default blocked
 
@@ -457,6 +497,7 @@ void ICache::seq_pipe1() {
       pipe1_to_pipe2.cache_set_valid_r[way] =
           pipe1_to_pipe2.cache_set_valid_w[way];
     }
+    pipe1_to_pipe2.pc_r = pipe1_to_pipe2.pc_w;
     pipe1_to_pipe2.index_r = pipe1_to_pipe2.index_w;
   }
 #else
@@ -471,6 +512,7 @@ void ICache::seq_pipe1() {
       pipe1_to_pipe2.cache_set_valid_r[way] =
           pipe1_to_pipe2.cache_set_valid_w[way];
     }
+    pipe1_to_pipe2.pc_r = pipe1_to_pipe2.pc_w;
     pipe1_to_pipe2.index_r = pipe1_to_pipe2.index_w;
   }
 #endif
@@ -503,6 +545,7 @@ void ICache::seq_pipe1() {
   sram_pending_r = sram_pending_next;
   sram_delay_r = sram_delay_next;
   sram_index_r = sram_index_next;
+  sram_pc_r = sram_pc_next;
   sram_seed_r = sram_seed_next;
 #endif
 }

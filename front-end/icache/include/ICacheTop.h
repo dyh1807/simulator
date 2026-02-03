@@ -11,6 +11,13 @@
 
 class SimContext; // Forward declaration
 
+// Select which icache module instance to wrap in ICacheTop.
+#ifdef USE_ICACHE_V2
+using ICacheHW = icache_module_v2_n::ICacheV2;
+#else
+using ICacheHW = icache_module_n::ICache;
+#endif
+
 // Abstract Base Class for ICache Top-level Logic
 class ICacheTop {
 protected:
@@ -60,38 +67,19 @@ public:
 // Implementation using the True ICache Module (Detailed Simulation)
 class TrueICacheTop : public ICacheTop {
 private:
-  bool mem_busy = false;
-  int mem_latency_cnt = 0;
-  uint32_t current_vaddr_reg = 0;
-  bool valid_reg = false;
-
-  icache_module_n::ICache &icache_hw;
-
-public:
-  TrueICacheTop(icache_module_n::ICache &hw);
-  void comb() override;
-  void seq() override;
-  void flush() override;
-};
-
-#ifdef USE_ICACHE_V2
-// Implementation using non-blocking ICacheV2 (MSHR + Prefetch + ID)
-class TrueICacheV2Top : public ICacheTop {
-private:
   // Simple non-AXI memory model with multiple outstanding transactions (0..15)
   std::array<uint8_t, 16> mem_valid{};
   std::array<uint32_t, 16> mem_addr{};
   std::array<uint32_t, 16> mem_age{};
 
-  icache_module_v2_n::ICacheV2 &icache_hw;
+  ICacheHW &icache_hw;
 
 public:
-  TrueICacheV2Top(icache_module_v2_n::ICacheV2 &hw);
+  TrueICacheTop(ICacheHW &hw);
   void comb() override;
   void seq() override;
   void flush() override;
 };
-#endif
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
 class SimpleICacheTop : public ICacheTop {
@@ -105,30 +93,14 @@ public:
 // Implementation using TrueICache + AXI-Interconnect + SimDDR
 class SimDDRICacheTop : public ICacheTop {
 private:
-  icache_module_n::ICache &icache_hw;
-  uint32_t current_vaddr_reg = 0;
-  bool valid_reg = false;
+  ICacheHW &icache_hw;
 
 public:
-  SimDDRICacheTop(icache_module_n::ICache &hw);
+  SimDDRICacheTop(ICacheHW &hw);
   void comb() override;
   void seq() override;
   void flush() override;
 };
-
-#ifdef USE_ICACHE_V2
-// Implementation using ICacheV2 + AXI-Interconnect + SimDDR
-class SimDDRICacheV2Top : public ICacheTop {
-private:
-  icache_module_v2_n::ICacheV2 &icache_hw;
-
-public:
-  SimDDRICacheV2Top(icache_module_v2_n::ICacheV2 &hw);
-  void comb() override;
-  void seq() override;
-  void flush() override;
-};
-#endif
 #endif
 
 // Factory function to get the singleton instance

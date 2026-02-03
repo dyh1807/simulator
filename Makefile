@@ -26,11 +26,12 @@ CXXINCLUDE := -I./include/ \
               -I./front-end/ \
               -I./mmu/include/ \
               -I./memory/include/ \
-              -I./uncore/mmio/include/
+              -I./uncore/mmio/include/ \
+              -I./uncore/sim_ddr/include/
 
 ifeq ($(USE_SIM_DDR),1)
 CXXFLAGS += -DUSE_SIM_DDR
-CXXINCLUDE += -I./uncore/sim_ddr/include/ -I./axi_interconnect/include/
+CXXINCLUDE += -I./axi_interconnect/include/
 ifeq ($(USE_SIM_DDR_AXI3),1)
 ifeq ($(USE_SIM_DDR_AXI4),1)
 $(error USE_SIM_DDR_AXI3 and USE_SIM_DDR_AXI4 are mutually exclusive)

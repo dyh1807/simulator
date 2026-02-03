@@ -86,6 +86,8 @@ struct ICache_in_t {
   // Input from memory
   bool mem_req_ready = false;
   bool mem_resp_valid = false;
+  // For compatibility with ICacheV2 top-level wiring (ignored by V1).
+  uint8_t mem_resp_id = 0;
   uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0}; // Data from memory (Cache line)
 
   // Lookup source control:
@@ -99,19 +101,24 @@ struct ICache_in_t {
 
 struct ICache_out_t {
   // Output to the IFU (Instruction Fetch Unit)
-  bool miss;           // Cache miss signal
-  bool ifu_resp_valid; // Indicates if output data is valid
-  bool ifu_req_ready;  // Indicates if i-cache is allow to accept next PC
-  uint32_t rd_data[ICACHE_LINE_SIZE / 4]; // Data read from cache
-  bool ifu_page_fault;                    // page fault exception signal
+  bool miss = false;           // Cache miss signal
+  bool ifu_resp_valid = false; // Indicates if output data is valid
+  bool ifu_req_ready = false;  // Indicates if i-cache is allow to accept next PC
+  uint32_t ifu_resp_pc = 0;    // PC corresponding to ifu_resp
+  uint32_t rd_data[ICACHE_LINE_SIZE / 4] = {0}; // Data read from cache
+  bool ifu_page_fault = false;                 // page fault exception signal
 
   // Output to MMU (Memory Management Unit)
-  bool ppn_ready; // ready to accept PPN
+  bool ppn_ready = false; // ready to accept PPN
+  // MMU request (drive vtag for translation; unify with ICacheV2 top wiring)
+  bool mmu_req_valid = false;
+  uint32_t mmu_req_vtag = 0;
 
   // Output to memory
-  bool mem_req_valid;    // Memory request signal
-  uint32_t mem_req_addr; // Address for memory access
-  bool mem_resp_ready;
+  bool mem_req_valid = false;    // Memory request signal
+  uint32_t mem_req_addr = 0;     // Address for memory access
+  uint8_t mem_req_id = 0;        // For compatibility with ICacheV2 (always 0)
+  bool mem_resp_ready = false;
 };
 
 // cache io
@@ -188,6 +195,7 @@ private:
     uint32_t cache_set_data_w[way_cnt][word_num]; // Data from the cache set
     uint32_t cache_set_tag_w[way_cnt];            // Tag bits from the cache set
     bool cache_set_valid_w[way_cnt]; // Valid bits from the cache set
+    uint32_t pc_w;                   // Request PC
     uint32_t index_w;                // Index extracted from PC, index_bits bit
     // Registered data (between two pipeline stages)
     bool valid_r;
@@ -195,6 +203,7 @@ private:
     uint32_t cache_set_data_r[way_cnt][word_num];
     uint32_t cache_set_tag_r[way_cnt];
     bool cache_set_valid_r[way_cnt];
+    uint32_t pc_r;
     uint32_t index_r;
   };
 
@@ -243,6 +252,8 @@ private:
   uint32_t sram_delay_next = 0;
   uint32_t sram_index_r = 0;
   uint32_t sram_index_next = 0;
+  uint32_t sram_pc_r = 0;
+  uint32_t sram_pc_next = 0;
   uint32_t sram_seed_r = 1;
   uint32_t sram_seed_next = 1;
   // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
