@@ -286,7 +286,7 @@ void SimpleICacheTop::comb() {
 
     for (int i = 0; i < FETCH_WIDTH; i++) {
       uint32_t v_addr = in->fetch_address + (i * 4);
-      uint32_t p_addr;
+      uint32_t p_addr = v_addr;
 
       if (v_addr / ICACHE_LINE_SIZE != (in->fetch_address) / ICACHE_LINE_SIZE) {
         out->fetch_group[i] = INST_NOP;
@@ -296,27 +296,17 @@ void SimpleICacheTop::comb() {
       }
       out->inst_valid[i] = true;
 
-#ifndef CONFIG_MMU
+      // Ideal ICache model still needs correct VA->PA translation and
+      // instruction page fault detection for difftest/Linux boot.
       if ((cpu.back.out.satp & 0x80000000) && cpu.back.out.privilege != 3) {
         out->page_fault_inst[i] =
             !va2pa(p_addr, v_addr, cpu.back.out.satp, 0, mstatus, sstatus,
                    cpu.back.out.privilege, p_memory);
-        if (out->page_fault_inst[i]) {
-          out->fetch_group[i] = INST_NOP;
-        } else {
-          out->fetch_group[i] = p_memory[p_addr / 4];
-        }
       } else {
         out->page_fault_inst[i] = false;
-        out->fetch_group[i] = p_memory[v_addr / 4];
       }
-#else
-      // With CONFIG_MMU enabled, the simulator provides an MMU module. This
-      // ideal icache model is intended for bring-up/debug without the MMU, so
-      // do not call va2pa here; treat vaddr as paddr.
-      out->page_fault_inst[i] = false;
-      out->fetch_group[i] = p_memory[v_addr / 4];
-#endif
+      out->fetch_group[i] =
+          out->page_fault_inst[i] ? INST_NOP : p_memory[p_addr / 4];
 
       if (DEBUG_PRINT) {
         printf("[icache] pmem_address: %x\n", p_addr);
@@ -535,7 +525,9 @@ void SimDDRICacheTop::seq() {
 ICacheTop *get_icache_instance() {
   static std::unique_ptr<ICacheTop> instance = nullptr;
   if (!instance) {
-#ifdef USE_SIM_DDR
+#ifdef USE_IDEAL_ICACHE
+    instance = std::make_unique<SimpleICacheTop>();
+#elif defined(USE_SIM_DDR)
 #ifdef USE_ICACHE_V2
     instance = std::make_unique<SimDDRICacheTop>(icache_v2);
 #else
