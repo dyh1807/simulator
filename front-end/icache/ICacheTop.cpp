@@ -53,14 +53,6 @@ void TrueICacheTop::flush() { icache_hw.invalidate_all(); }
 void TrueICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
-    icache_hw.reset();
-#ifndef CONFIG_MMU
-    mmu_stub_req_valid_r = false;
-    mmu_stub_req_vtag_r = 0;
-#endif
-    mem_valid.fill(0);
-    mem_addr.fill(0);
-    mem_age.fill(0);
     out->icache_read_complete = false;
     out->icache_read_ready = true;
     out->fetch_pc = 0;
@@ -69,6 +61,13 @@ void TrueICacheTop::comb() {
       out->page_fault_inst[i] = false;
       out->inst_valid[i] = false;
     }
+#ifdef CONFIG_MMU
+    // Keep MMU interface idle during reset.
+    cpu.mmu.io.in.mmu_ifu_req.op_type = mmu_n::OP_FETCH;
+    cpu.mmu.io.in.mmu_ifu_resp.ready = true;
+    cpu.mmu.io.in.mmu_ifu_req.valid = false;
+    cpu.mmu.io.in.mmu_ifu_req.vtag = 0;
+#endif
     return;
   }
 
@@ -148,11 +147,6 @@ void TrueICacheTop::comb() {
   cpu.mmu.io.in.mmu_ifu_req.vtag = icache_hw.io.out.mmu_req_vtag;
 #endif
 
-  if (in->run_comb_only) {
-    out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
-    return;
-  }
-
   // Output to IFU
   bool ifu_resp_valid = icache_hw.io.out.ifu_resp_valid;
   bool ifu_resp_ready = icache_hw.io.in.ifu_resp_ready;
@@ -189,6 +183,13 @@ void TrueICacheTop::comb() {
 
 void TrueICacheTop::seq() {
   if (in->reset) {
+    // Sequential reset: clear internal state at the cycle boundary.
+    icache_hw.reset();
+    mem_valid.fill(0);
+    mem_addr.fill(0);
+    mem_age.fill(0);
+    mmu_stub_req_valid_r = false;
+    mmu_stub_req_vtag_r = 0;
     return;
   }
 
@@ -348,11 +349,6 @@ void SimDDRICacheTop::flush() { icache_hw.invalidate_all(); }
 void SimDDRICacheTop::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
-    icache_hw.reset();
-#ifndef CONFIG_MMU
-    mmu_stub_req_valid_r = false;
-    mmu_stub_req_vtag_r = 0;
-#endif
     out->icache_read_complete = false;
     out->icache_read_ready = true;
     out->fetch_pc = 0;
@@ -361,6 +357,20 @@ void SimDDRICacheTop::comb() {
       out->page_fault_inst[i] = false;
       out->inst_valid[i] = false;
     }
+#ifdef CONFIG_MMU
+    // Keep MMU interface idle during reset.
+    cpu.mmu.io.in.mmu_ifu_req.op_type = mmu_n::OP_FETCH;
+    cpu.mmu.io.in.mmu_ifu_resp.ready = true;
+    cpu.mmu.io.in.mmu_ifu_req.valid = false;
+    cpu.mmu.io.in.mmu_ifu_req.vtag = 0;
+#endif
+    // Keep interconnect interface idle during reset.
+    auto &port = mem_subsystem().icache_port();
+    port.req.valid = false;
+    port.req.addr = 0;
+    port.req.total_size = 0;
+    port.req.id = 0;
+    port.resp.ready = false;
     return;
   }
 
@@ -412,13 +422,11 @@ void SimDDRICacheTop::comb() {
   icache_hw.comb();
 
   // ICache outputs -> interconnect requests
-  if (!in->run_comb_only) {
-    port.req.valid = icache_hw.io.out.mem_req_valid;
-    port.req.addr = icache_hw.io.out.mem_req_addr;
-    port.req.total_size = ICACHE_LINE_SIZE - 1;
-    port.req.id = static_cast<uint8_t>(icache_hw.io.out.mem_req_id & 0xF);
-    port.resp.ready = icache_hw.io.out.mem_resp_ready;
-  }
+  port.req.valid = icache_hw.io.out.mem_req_valid;
+  port.req.addr = icache_hw.io.out.mem_req_addr;
+  port.req.total_size = ICACHE_LINE_SIZE - 1;
+  port.req.id = static_cast<uint8_t>(icache_hw.io.out.mem_req_id & 0xF);
+  port.resp.ready = icache_hw.io.out.mem_resp_ready;
 
   // MMU request (drive vpn directly from icache module)
 #ifdef CONFIG_MMU
@@ -427,11 +435,6 @@ void SimDDRICacheTop::comb() {
   cpu.mmu.io.in.mmu_ifu_req.valid = icache_hw.io.out.mmu_req_valid;
   cpu.mmu.io.in.mmu_ifu_req.vtag = icache_hw.io.out.mmu_req_vtag;
 #endif
-
-  if (in->run_comb_only) {
-    out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
-    return;
-  }
 
   // Output to IFU
   bool ifu_resp_valid = icache_hw.io.out.ifu_resp_valid;
@@ -502,6 +505,9 @@ void SimDDRICacheTop::comb() {
 
 void SimDDRICacheTop::seq() {
   if (in->reset) {
+    icache_hw.reset();
+    mmu_stub_req_valid_r = false;
+    mmu_stub_req_vtag_r = 0;
     return;
   }
 
