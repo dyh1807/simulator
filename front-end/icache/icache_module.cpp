@@ -151,11 +151,45 @@ void ICache::comb() {
 
 void ICache::seq() { seq_pipe1(); }
 
-void ICache::comb_pipe1() {
-  // Logic for Pipe 1 (IFU Request -> Pipe Register)
+void ICache::export_lookup_set_for_pc(
+    uint32_t pc, uint32_t out_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4],
+    uint32_t out_tag[ICACHE_V1_WAYS], bool out_valid[ICACHE_V1_WAYS]) const {
+  uint32_t pc_index = (pc >> offset_bits) & (set_num - 1u);
+  uint32_t rd_index = pc_index;
+#if ICACHE_USE_SRAM_MODEL
+  rd_index = sram_pending_r ? sram_index_r : pc_index;
+#endif
 
-  uint32_t index = (io.in.pc >> offset_bits) & (set_num - 1);
+  for (uint32_t way = 0; way < way_cnt; ++way) {
+    for (uint32_t word = 0; word < word_num; ++word) {
+      out_data[way][word] = cache_data[rd_index][way][word];
+    }
+    out_tag[way] = cache_tag[rd_index][way];
+    out_valid[way] = cache_valid[rd_index][way];
+  }
+}
 
+void ICache::lookup_read_set(uint32_t lookup_index, bool gate_valid_with_req) {
+  bool from_input = io.in.lookup_from_input;
+  for (uint32_t way = 0; way < way_cnt; ++way) {
+    for (uint32_t word = 0; word < word_num; ++word) {
+      pipe1_to_pipe2.cache_set_data_w[way][word] =
+          from_input ? io.in.lookup_set_data[way][word]
+                     : cache_data[lookup_index][way][word];
+    }
+    pipe1_to_pipe2.cache_set_tag_w[way] =
+        from_input ? io.in.lookup_set_tag[way] : cache_tag[lookup_index][way];
+    bool valid_bit = from_input ? io.in.lookup_set_valid[way]
+                                : cache_valid[lookup_index][way];
+    if (gate_valid_with_req) {
+      valid_bit = valid_bit && io.in.ifu_req_valid;
+    }
+    pipe1_to_pipe2.cache_set_valid_w[way] = valid_bit;
+  }
+  pipe1_to_pipe2.index_w = lookup_index;
+}
+
+void ICache::lookup(uint32_t index) {
 #if ICACHE_USE_SRAM_MODEL
   // SRAM delay model: track pending lookup and delay before data is ready.
   sram_pending_next = sram_pending_r;
@@ -165,17 +199,7 @@ void ICache::comb_pipe1() {
   sram_load_fire = false;
 
   uint32_t lookup_index = sram_pending_r ? sram_index_r : index;
-
-  // Read cache arrays for selected index
-  for (uint32_t way = 0; way < way_cnt; ++way) {
-    for (uint32_t word = 0; word < word_num; ++word) {
-      pipe1_to_pipe2.cache_set_data_w[way][word] =
-          cache_data[lookup_index][way][word];
-    }
-    pipe1_to_pipe2.cache_set_tag_w[way] = cache_tag[lookup_index][way];
-    pipe1_to_pipe2.cache_set_valid_w[way] = cache_valid[lookup_index][way];
-  }
-  pipe1_to_pipe2.index_w = lookup_index;
+  lookup_read_set(lookup_index, /*gate_valid_with_req=*/false);
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
 
   if (io.in.refetch) {
@@ -183,88 +207,83 @@ void ICache::comb_pipe1() {
     io.out.ifu_req_ready = false;
     sram_pending_next = false;
     sram_delay_next = 0;
-  } else {
-    // Accept new request only when no pending SRAM lookup.
-    bool can_accept =
-        io.in.ifu_req_valid && pipe2_to_pipe1.ready && !sram_pending_r;
+    return;
+  }
 
-    if (can_accept) {
-      uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
+  // Accept new request only when no pending SRAM lookup.
+  bool can_accept = io.in.ifu_req_valid && pipe2_to_pipe1.ready && !sram_pending_r;
+  if (can_accept) {
+    uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
 #if ICACHE_SRAM_RANDOM_DELAY
-      uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
-      uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
-      if (max_lat < min_lat) {
-        max_lat = min_lat;
-      }
-      uint32_t seed = xorshift32(sram_seed_r);
-      sram_seed_next = seed;
-      uint32_t range = max_lat - min_lat + 1;
-      latency = min_lat + (seed % range);
+    uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
+    uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
+    if (max_lat < min_lat) {
+      max_lat = min_lat;
+    }
+    uint32_t seed = xorshift32(sram_seed_r);
+    sram_seed_next = seed;
+    uint32_t range = max_lat - min_lat + 1;
+    latency = min_lat + (seed % range);
 #endif
-      latency = clamp_latency(latency); // treat 0 as 1
-      if (latency <= 1) {
-        // Data ready for next cycle
-        sram_load_fire = true;
-      } else {
-        // Extra delay cycles beyond the base 1-cycle pipeline
-        sram_pending_next = true;
-        sram_delay_next = latency - 1;
-        sram_index_next = index;
-      }
-    }
-
-    // Progress pending SRAM lookup
-    if (sram_pending_r) {
-      if (sram_delay_r <= 1) {
-        sram_load_fire = true;
-        sram_pending_next = false;
-        sram_delay_next = 0;
-      } else {
-        sram_delay_next = sram_delay_r - 1;
-      }
-    }
-
-    if (sram_load_fire) {
-      pipe1_to_pipe2.valid_next = true;
-    } else if (pipe2_to_pipe1.ready) {
-      pipe1_to_pipe2.valid_next = false;
+    latency = clamp_latency(latency); // treat 0 as 1
+    if (latency <= 1) {
+      // Data ready for next cycle
+      sram_load_fire = true;
     } else {
-      pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
+      // Extra delay cycles beyond the base 1-cycle pipeline
+      sram_pending_next = true;
+      sram_delay_next = latency - 1;
+      sram_index_next = index;
     }
-
-    io.out.ifu_req_ready = pipe2_to_pipe1.ready && !sram_pending_r;
   }
 
+  // Progress pending SRAM lookup
+  if (sram_pending_r) {
+    if (sram_delay_r <= 1) {
+      sram_load_fire = true;
+      sram_pending_next = false;
+      sram_delay_next = 0;
+    } else {
+      sram_delay_next = sram_delay_r - 1;
+    }
+  }
+
+  if (sram_load_fire) {
+    pipe1_to_pipe2.valid_next = true;
+  } else if (pipe2_to_pipe1.ready) {
+    pipe1_to_pipe2.valid_next = false;
+  } else {
+    pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
+  }
+
+  io.out.ifu_req_ready = pipe2_to_pipe1.ready && !sram_pending_r;
 #else
-  // Read cache arrays
-  for (uint32_t way = 0; way < way_cnt; ++way) {
-    for (uint32_t word = 0; word < word_num; ++word) {
-      pipe1_to_pipe2.cache_set_data_w[way][word] = cache_data[index][way][word];
-    }
-    pipe1_to_pipe2.cache_set_tag_w[way] = cache_tag[index][way];
-    pipe1_to_pipe2.cache_set_valid_w[way] =
-        cache_valid[index][way] && io.in.ifu_req_valid;
-  }
-  pipe1_to_pipe2.index_w = index;
+  lookup_read_set(index, /*gate_valid_with_req=*/true);
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
 
-  // Flow control
   if (io.in.refetch) {
     pipe1_to_pipe2.valid_next = false;
     io.out.ifu_req_ready = false;
-  } else {
-    bool fire = io.in.ifu_req_valid && pipe2_to_pipe1.ready;
-
-    if (fire) {
-      pipe1_to_pipe2.valid_next = true;
-    } else if (pipe2_to_pipe1.ready) {
-      pipe1_to_pipe2.valid_next = false;
-    } else {
-      pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
-    }
-    io.out.ifu_req_ready = pipe2_to_pipe1.ready;
+    return;
   }
+
+  bool fire = io.in.ifu_req_valid && pipe2_to_pipe1.ready;
+  if (fire) {
+    pipe1_to_pipe2.valid_next = true;
+  } else if (pipe2_to_pipe1.ready) {
+    pipe1_to_pipe2.valid_next = false;
+  } else {
+    pipe1_to_pipe2.valid_next = pipe1_to_pipe2.valid_r;
+  }
+  io.out.ifu_req_ready = pipe2_to_pipe1.ready;
 #endif
+}
+
+void ICache::comb_pipe1() {
+  // Logic for Pipe 1 (IFU Request -> Pipe Register)
+  uint32_t index = (io.in.pc >> offset_bits) & (set_num - 1);
+
+  lookup(index);
 }
 
 void ICache::comb_pipe2() {

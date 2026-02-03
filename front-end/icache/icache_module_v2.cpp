@@ -195,6 +195,137 @@ void ICacheV2::cache_set_tag_valid(uint32_t set, uint32_t way, uint32_t tag,
   cache_valid_[idx] = valid ? 1 : 0;
 }
 
+void ICacheV2::lookup_read_set(uint32_t set) {
+  if (io.in.lookup_from_input) {
+    if (cfg_.ways > ICACHE_V2_WAYS) {
+      std::cerr << "[icache_v2] lookup_from_input requires cfg.ways <= "
+                << ICACHE_V2_WAYS << std::endl;
+      std::exit(1);
+    }
+    for (uint32_t way = 0; way < cfg_.ways; ++way) {
+      set_tag_w_[way] = io.in.lookup_set_tag[way];
+      set_valid_w_[way] = io.in.lookup_set_valid[way] ? 1 : 0;
+      for (uint32_t w = 0; w < word_num_; ++w) {
+        set_data_w_[static_cast<size_t>(way) * word_num_ + w] =
+            io.in.lookup_set_data[way][w];
+      }
+    }
+    return;
+  }
+
+  for (uint32_t way = 0; way < cfg_.ways; ++way) {
+    set_tag_w_[way] = cache_tag_at(set, way);
+    set_valid_w_[way] = cache_valid_at(set, way) ? 1 : 0;
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      set_data_w_[static_cast<size_t>(way) * word_num_ + w] =
+          cache_data_at(set, way, w);
+    }
+  }
+}
+
+void ICacheV2::export_lookup_set_for_pc(
+    uint32_t pc, uint32_t out_data[ICACHE_V2_WAYS][ICACHE_LINE_SIZE / 4],
+    uint32_t out_tag[ICACHE_V2_WAYS], bool out_valid[ICACHE_V2_WAYS]) const {
+  for (uint32_t way = 0; way < ICACHE_V2_WAYS; ++way) {
+    out_tag[way] = 0;
+    out_valid[way] = false;
+    for (uint32_t w = 0; w < (ICACHE_LINE_SIZE / 4); ++w) {
+      out_data[way][w] = 0;
+    }
+  }
+
+  uint32_t pc_index = get_index_from_pc(pc);
+  uint32_t rd_index = pc_index;
+#if ICACHE_USE_SRAM_MODEL
+  rd_index = sram_pending_r_ ? sram_index_r_ : pc_index;
+#endif
+
+  uint32_t ways = cfg_.ways;
+  if (ways > ICACHE_V2_WAYS) {
+    ways = ICACHE_V2_WAYS;
+  }
+  uint32_t words = word_num_;
+  if (words > (ICACHE_LINE_SIZE / 4)) {
+    words = (ICACHE_LINE_SIZE / 4);
+  }
+
+  for (uint32_t way = 0; way < ways; ++way) {
+    out_tag[way] = cache_tag_at(rd_index, way);
+    out_valid[way] = cache_valid_at(rd_index, way);
+    for (uint32_t w = 0; w < words; ++w) {
+      out_data[way][w] = cache_data_at(rd_index, way, w);
+    }
+  }
+}
+
+bool ICacheV2::lookup(uint32_t pc_index, bool ifu_fire, uint32_t new_rob_idx) {
+  uint32_t rd_index = sram_pending_r_ ? sram_index_r_ : pc_index;
+  lookup_read_set(rd_index);
+
+  bool lookup_load_fire = false;
+
+#if ICACHE_USE_SRAM_MODEL
+  if (ifu_fire) {
+    uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
+#if ICACHE_SRAM_RANDOM_DELAY
+    uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
+    uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
+    if (max_lat < min_lat) {
+      max_lat = min_lat;
+    }
+    uint32_t seed = xorshift32(sram_seed_r_);
+    sram_seed_next_ = seed;
+    uint32_t range = max_lat - min_lat + 1;
+    latency = min_lat + (seed % range);
+#endif
+    latency = clamp_latency(latency);
+    if (latency <= 1) {
+      sram_load_fire_ = true;
+    } else {
+      sram_pending_next_ = true;
+      sram_delay_next_ = latency - 1;
+      sram_index_next_ = pc_index;
+      sram_pc_next_ = io.in.pc;
+      sram_rob_idx_next_ = new_rob_idx;
+    }
+  }
+
+  if (sram_pending_r_) {
+    if (sram_delay_r_ <= 1) {
+      sram_load_fire_ = true;
+      sram_pending_next_ = false;
+      sram_delay_next_ = 0;
+    } else {
+      sram_delay_next_ = sram_delay_r_ - 1;
+    }
+  }
+
+  if (sram_load_fire_) {
+    lookup_load_fire = true;
+    set_load_fire_ = true;
+    if (sram_pending_r_) {
+      lookup_pc_next_ = sram_pc_r_;
+      lookup_index_next_ = sram_index_r_;
+      lookup_rob_idx_next_ = sram_rob_idx_r_;
+    } else {
+      lookup_pc_next_ = io.in.pc;
+      lookup_index_next_ = pc_index;
+      lookup_rob_idx_next_ = new_rob_idx;
+    }
+  }
+#else
+  if (ifu_fire) {
+    lookup_load_fire = true;
+    set_load_fire_ = true;
+    lookup_pc_next_ = io.in.pc;
+    lookup_index_next_ = pc_index;
+    lookup_rob_idx_next_ = new_rob_idx;
+  }
+#endif
+
+  return lookup_load_fire;
+}
+
 uint32_t ICacheV2::plru_choose(uint32_t set) const {
   if (cfg_.ways <= 1) {
     return 0;
@@ -607,16 +738,7 @@ void ICacheV2::comb() {
   // SRAM/Register lookup stage1 array read (wire)
   // -------------------------------------------------------------------------
   uint32_t pc_index = get_index_from_pc(io.in.pc);
-  uint32_t rd_index = sram_pending_r_ ? sram_index_r_ : pc_index;
-
-  for (uint32_t way = 0; way < cfg_.ways; ++way) {
-    set_tag_w_[way] = cache_tag_at(rd_index, way);
-    set_valid_w_[way] = cache_valid_at(rd_index, way) ? 1 : 0;
-    for (uint32_t w = 0; w < word_num_; ++w) {
-      set_data_w_[static_cast<size_t>(way) * word_num_ + w] =
-          cache_data_at(rd_index, way, w);
-    }
-  }
+  // (Actual set read is done in lookup() after ifu_fire is known.)
 
   // -------------------------------------------------------------------------
   // Lookup stage2: consume lookup regs when translation is available
@@ -789,21 +911,6 @@ void ICacheV2::comb() {
   bool stage2_ready_for_new = (!lookup_valid_r_) || lookup_fire;
 
   // -------------------------------------------------------------------------
-  // SRAM model progression (single outstanding lookup)
-  // -------------------------------------------------------------------------
-#if ICACHE_USE_SRAM_MODEL
-  if (sram_pending_r_) {
-    if (sram_delay_r_ <= 1) {
-      sram_load_fire_ = true;
-      sram_pending_next_ = false;
-      sram_delay_next_ = 0;
-    } else {
-      sram_delay_next_ = sram_delay_r_ - 1;
-    }
-  }
-#endif
-
-  // -------------------------------------------------------------------------
   // Allocate/merge MSHR for WAIT_MSHR_ALLOC slots (at most one per cycle)
   // Also allow it to resolve if cache got filled by prefetch.
   // -------------------------------------------------------------------------
@@ -880,11 +987,9 @@ void ICacheV2::comb() {
   bool ifu_fire = io.in.ifu_req_valid && io.out.ifu_req_ready;
   bool lookup_load_fire = false;
   uint32_t new_rob_idx = 0;
-  bool new_rob_valid = false;
 
   if (ifu_fire) {
     new_rob_idx = rob_tail_next_;
-    new_rob_valid = true;
     rob_valid_next_[new_rob_idx] = 1;
     rob_pc_next_[new_rob_idx] = io.in.pc;
     rob_state_next_[new_rob_idx] = static_cast<uint8_t>(RobState::LOOKUP);
@@ -895,54 +1000,7 @@ void ICacheV2::comb() {
     rob_count_next_ = rob_count_next_ + 1;
   }
 
-#if ICACHE_USE_SRAM_MODEL
-  if (ifu_fire) {
-    uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
-#if ICACHE_SRAM_RANDOM_DELAY
-    uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
-    uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
-    if (max_lat < min_lat) {
-      max_lat = min_lat;
-    }
-    uint32_t seed = xorshift32(sram_seed_r_);
-    sram_seed_next_ = seed;
-    uint32_t range = max_lat - min_lat + 1;
-    latency = min_lat + (seed % range);
-#endif
-    latency = clamp_latency(latency);
-    if (latency <= 1) {
-      sram_load_fire_ = true;
-    } else {
-      sram_pending_next_ = true;
-      sram_delay_next_ = latency - 1;
-      sram_index_next_ = pc_index;
-      sram_pc_next_ = io.in.pc;
-      sram_rob_idx_next_ = new_rob_idx;
-    }
-  }
-
-  if (sram_load_fire_) {
-    lookup_load_fire = true;
-    set_load_fire_ = true;
-    if (sram_pending_r_) {
-      lookup_pc_next_ = sram_pc_r_;
-      lookup_index_next_ = sram_index_r_;
-      lookup_rob_idx_next_ = sram_rob_idx_r_;
-    } else {
-      lookup_pc_next_ = io.in.pc;
-      lookup_index_next_ = pc_index;
-      lookup_rob_idx_next_ = new_rob_valid ? new_rob_idx : lookup_rob_idx_r_;
-    }
-  }
-#else
-  if (ifu_fire) {
-    lookup_load_fire = true;
-    set_load_fire_ = true;
-    lookup_pc_next_ = io.in.pc;
-    lookup_index_next_ = pc_index;
-    lookup_rob_idx_next_ = new_rob_idx;
-  }
-#endif
+  lookup_load_fire = lookup(pc_index, ifu_fire, new_rob_idx);
 
   if (lookup_load_fire) {
     lookup_valid_next_ = true;

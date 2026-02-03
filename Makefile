@@ -14,6 +14,9 @@ CXX := g++
 CXXFLAGS := -O3 -march=native -funroll-loops -mtune=native --std=c++2a
 LDFLAGS := -lz -lstdc++fs
 
+# Optional extra C++ flags (e.g., `make EXTRA_CXXFLAGS=-DICACHE_USE_SRAM_MODEL=1`)
+EXTRA_CXXFLAGS ?=
+
 # Include directories
 CXXINCLUDE := -I./include/ \
               -I./back-end/include/ \
@@ -44,6 +47,9 @@ endif
 ifeq ($(USE_ICACHE_V2),1)
 CXXFLAGS += -DUSE_ICACHE_V2
 endif
+
+# Always apply user-provided extra flags last (do not override defaults).
+CXXFLAGS += $(EXTRA_CXXFLAGS)
 
 # Source files (dynamically found)
 SRCS := $(shell find ./back-end/ -name "*.cpp")

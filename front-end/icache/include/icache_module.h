@@ -50,6 +50,13 @@
 #define ICACHE_SRAM_RANDOM_MAX 4
 #endif
 
+// -----------------------------------------------------------------------------
+// ICache V1 (blocking) configurable knobs
+// -----------------------------------------------------------------------------
+#ifndef ICACHE_V1_WAYS
+#define ICACHE_V1_WAYS 8
+#endif
+
 namespace icache_module_n {
 // i-Cache State
 enum ICacheState {
@@ -66,20 +73,28 @@ enum AXIState {
 
 struct ICache_in_t {
   // Input from the IFU (Instruction Fetch Unit)
-  uint32_t pc;         // Program Counter
-  bool ifu_req_valid;  // Fetch enable signal
-  bool ifu_resp_ready; // actually always true in current design
-  bool refetch;        // Refetch signal from Top
+  uint32_t pc = 0;        // Program Counter
+  bool ifu_req_valid = false;  // Fetch enable signal
+  bool ifu_resp_ready = true;  // actually always true in current design
+  bool refetch = false;        // Refetch signal from Top
 
   // Input from MMU (Memory Management Unit)
-  uint32_t ppn;    // Physical Page Number
-  bool ppn_valid;  // PPN valid signal
-  bool page_fault; // page fault exception signal
+  uint32_t ppn = 0;    // Physical Page Number
+  bool ppn_valid = false;  // PPN valid signal
+  bool page_fault = false; // page fault exception signal
 
   // Input from memory
-  bool mem_req_ready;
-  bool mem_resp_valid;
-  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4]; // Data from memory (Cache line)
+  bool mem_req_ready = false;
+  bool mem_resp_valid = false;
+  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0}; // Data from memory (Cache line)
+
+  // Lookup source control:
+  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
+  // - When lookup_from_input=1, lookup reads the set view from the fields below.
+  bool lookup_from_input = false;
+  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
+  uint32_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
+  bool lookup_set_valid[ICACHE_V1_WAYS] = {false};
 };
 
 struct ICache_out_t {
@@ -118,6 +133,13 @@ public:
   void seq();
   void seq_pipe1();
 
+  // Debug/verification helper: export the set view that the lookup stage reads
+  // in the current cycle for the given pc (including SRAM pending selection).
+  void export_lookup_set_for_pc(uint32_t pc,
+                                uint32_t out_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4],
+                                uint32_t out_tag[ICACHE_V1_WAYS],
+                                bool out_valid[ICACHE_V1_WAYS]) const;
+
   // IO ports
   ICache_IO_t io;
 
@@ -152,7 +174,7 @@ private:
   static uint32_t const word_num =
       1 << (offset_bits - 2); // Number of words per cache line (8 words, since
                               // each word is 4 bytes)
-  static uint32_t const way_cnt = 8; // 8-way set associative cache
+  static uint32_t const way_cnt = ICACHE_V1_WAYS; // N-way set associative cache
   uint32_t cache_data[set_num][way_cnt][word_num]; // Cache data storage
   uint32_t cache_tag[set_num][way_cnt];            // Cache tags
   bool cache_valid[set_num][way_cnt]; // Valid bits for each cache line
@@ -225,6 +247,10 @@ private:
   uint32_t sram_seed_next = 1;
   // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
   bool sram_load_fire = false;
+
+  // Lookup helpers (stage1 read)
+  void lookup(uint32_t index);
+  void lookup_read_set(uint32_t lookup_index, bool gate_valid_with_req);
 };
 }; // namespace icache_module_n
 

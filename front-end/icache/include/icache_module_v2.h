@@ -97,6 +97,14 @@ struct ICacheV2_in_t {
   bool mem_resp_valid = false;
   uint8_t mem_resp_id = 0;
   uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0};
+
+  // Lookup source control:
+  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
+  // - When lookup_from_input=1, lookup reads the set view from the fields below.
+  bool lookup_from_input = false;
+  uint32_t lookup_set_data[ICACHE_V2_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
+  uint32_t lookup_set_tag[ICACHE_V2_WAYS] = {0};
+  bool lookup_set_valid[ICACHE_V2_WAYS] = {false};
 };
 
 struct ICacheV2_out_t {
@@ -136,6 +144,13 @@ public:
   void log_debug() const;
   void perf_print() const;
 
+  // Debug/verification helper: export the set view that the lookup stage reads
+  // in the current cycle for the given pc (including SRAM pending selection).
+  void export_lookup_set_for_pc(uint32_t pc,
+                                uint32_t out_data[ICACHE_V2_WAYS][ICACHE_LINE_SIZE / 4],
+                                uint32_t out_tag[ICACHE_V2_WAYS],
+                                bool out_valid[ICACHE_V2_WAYS]) const;
+
   ICacheV2_IO_t io;
 
 private:
@@ -154,6 +169,10 @@ private:
   void cache_write_line(uint32_t set, uint32_t way,
                         const uint32_t *line_words);
   void cache_set_tag_valid(uint32_t set, uint32_t way, uint32_t tag, bool valid);
+
+  // Lookup (stage1 read + optional SRAM latency)
+  void lookup_read_set(uint32_t set);
+  bool lookup(uint32_t pc_index, bool ifu_fire, uint32_t new_rob_idx);
 
   // Replacement
   uint32_t choose_victim_way(uint32_t set);
