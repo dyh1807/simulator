@@ -58,6 +58,14 @@
 #endif
 
 namespace icache_module_n {
+// -----------------------------------------------------------------------------
+// ICache V1 derived parameters (for generalized-IO structs)
+// -----------------------------------------------------------------------------
+static constexpr uint32_t ICACHE_V1_OFFSET_BITS = __builtin_ctz(ICACHE_LINE_SIZE);
+static constexpr uint32_t ICACHE_V1_INDEX_BITS = 12 - ICACHE_V1_OFFSET_BITS;
+static constexpr uint32_t ICACHE_V1_SET_NUM = 1u << ICACHE_V1_INDEX_BITS;
+static constexpr uint32_t ICACHE_V1_WORD_NUM = 1u << (ICACHE_V1_OFFSET_BITS - 2);
+
 // i-Cache State
 enum ICacheState {
   IDLE,         // Idle state
@@ -69,6 +77,100 @@ enum ICacheState {
 enum AXIState {
   AXI_IDLE, // Idle state
   AXI_BUSY, // Busy state
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: lookup inputs (split from external inputs)
+// -----------------------------------------------------------------------------
+struct ICache_lookup_in_t {
+  // Lookup source control:
+  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
+  // - When lookup_from_input=1, lookup reads the set view from the fields below.
+  bool lookup_from_input = false;
+  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
+  uint32_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
+  bool lookup_set_valid[ICACHE_V1_WAYS] = {false};
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: register state (sequential) excluding perf counters
+// -----------------------------------------------------------------------------
+struct ICache_regs_t {
+  // Cache arrays (register-based storage; also models SRAM contents)
+  uint32_t cache_data[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{{0}}};
+  uint32_t cache_tag[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS] = {{0}};
+  bool cache_valid[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS] = {{false}};
+
+  // Pipeline registers (between pipe1 and pipe2)
+  bool pipe_valid_r = false;
+  uint32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
+  uint32_t pipe_cache_set_tag_r[ICACHE_V1_WAYS] = {0};
+  bool pipe_cache_set_valid_r[ICACHE_V1_WAYS] = {false};
+  uint32_t pipe_pc_r = 0;
+  uint32_t pipe_index_r = 0;
+
+  // FSM + memory channel registers
+  uint8_t state = static_cast<uint8_t>(IDLE);
+  uint8_t mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
+  bool mem_req_sent = false;
+
+  // Memory response registers
+  uint32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};
+
+  // Replacement / translation state
+  uint32_t replace_idx = 0;
+  uint32_t ppn_r = 0;
+
+  // SRAM lookup delay model registers (when enabled)
+  bool sram_pending_r = false;
+  uint32_t sram_delay_r = 0;
+  uint32_t sram_index_r = 0;
+  uint32_t sram_pc_r = 0;
+  uint32_t sram_seed_r = 1;
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: register write results (applied unconditionally in seq)
+// -----------------------------------------------------------------------------
+struct ICache_reg_write_t {
+  // Pipeline registers (between pipe1 and pipe2)
+  bool pipe_valid_r = false;
+  uint32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
+  uint32_t pipe_cache_set_tag_r[ICACHE_V1_WAYS] = {0};
+  bool pipe_cache_set_valid_r[ICACHE_V1_WAYS] = {false};
+  uint32_t pipe_pc_r = 0;
+  uint32_t pipe_index_r = 0;
+
+  // FSM + memory channel registers
+  uint8_t state = static_cast<uint8_t>(IDLE);
+  uint8_t mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
+  bool mem_req_sent = false;
+
+  // Memory response registers
+  uint32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};
+
+  // Replacement / translation state
+  uint32_t replace_idx = 0;
+  uint32_t ppn_r = 0;
+
+  // SRAM lookup delay model registers (when enabled)
+  bool sram_pending_r = false;
+  uint32_t sram_delay_r = 0;
+  uint32_t sram_index_r = 0;
+  uint32_t sram_pc_r = 0;
+  uint32_t sram_seed_r = 1;
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: table write controls (observable write port)
+// -----------------------------------------------------------------------------
+struct ICache_table_write_t {
+  bool we = false;
+  uint32_t index = 0;
+  uint32_t way = 0;
+  uint32_t data[ICACHE_LINE_SIZE / 4] = {0};
+  uint32_t tag = 0;
+  bool valid = false;
 };
 
 struct ICache_in_t {
@@ -89,14 +191,6 @@ struct ICache_in_t {
   // For compatibility with ICacheV2 top-level wiring (ignored by V1).
   uint8_t mem_resp_id = 0;
   uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0}; // Data from memory (Cache line)
-
-  // Lookup source control:
-  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
-  // - When lookup_from_input=1, lookup reads the set view from the fields below.
-  bool lookup_from_input = false;
-  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
-  uint32_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
-  bool lookup_set_valid[ICACHE_V1_WAYS] = {false};
 };
 
 struct ICache_out_t {
@@ -124,7 +218,11 @@ struct ICache_out_t {
 // cache io
 struct ICache_IO_t {
   ICache_in_t in;
+  ICache_regs_t regs;
+  ICache_lookup_in_t lookup_in;
   ICache_out_t out;
+  ICache_reg_write_t reg_write;
+  ICache_table_write_t table_write;
 };
 
 class ICache {
@@ -159,7 +257,7 @@ public:
     int count = 0;
     for (uint32_t i = 0; i < set_num; ++i) {
       for (uint32_t j = 0; j < way_cnt; ++j) {
-        if (cache_valid[i][j]) {
+        if (io.regs.cache_valid[i][j]) {
           count++;
         }
       }
@@ -182,9 +280,6 @@ private:
       1 << (offset_bits - 2); // Number of words per cache line (8 words, since
                               // each word is 4 bytes)
   static uint32_t const way_cnt = ICACHE_V1_WAYS; // N-way set associative cache
-  uint32_t cache_data[set_num][way_cnt][word_num]; // Cache data storage
-  uint32_t cache_tag[set_num][way_cnt];            // Cache tags
-  bool cache_valid[set_num][way_cnt]; // Valid bits for each cache line
 
   /*
    * Icache Inner connections between 2 pipeline stages
@@ -197,14 +292,8 @@ private:
     bool cache_set_valid_w[way_cnt]; // Valid bits from the cache set
     uint32_t pc_w;                   // Request PC
     uint32_t index_w;                // Index extracted from PC, index_bits bit
-    // Registered data (between two pipeline stages)
-    bool valid_r;
+    // next-valid for pipe register
     bool valid_next;
-    uint32_t cache_set_data_r[way_cnt][word_num];
-    uint32_t cache_set_tag_r[way_cnt];
-    bool cache_set_valid_r[way_cnt];
-    uint32_t pc_r;
-    uint32_t index_r;
   };
 
   struct pipe2_to_pipe1_t {
@@ -215,25 +304,18 @@ private:
   // pipeline datapath
   pipe1_to_pipe2_t pipe1_to_pipe2;
   pipe2_to_pipe1_t pipe2_to_pipe1;
-
-  icache_module_n::ICacheState state =
-      icache_module_n::IDLE; // Current state of the i-cache
   icache_module_n::ICacheState state_next =
       icache_module_n::IDLE; // Next state of the i-cache
-  bool mem_req_sent = false;
 
   /*
    * Memory Channels
    */
   // state machine
-  icache_module_n::AXIState mem_axi_state =
-      icache_module_n::AXI_IDLE; // Current state of the memory channel
   icache_module_n::AXIState mem_axi_state_next =
-      icache_module_n::AXI_IDLE; // Current state of the memory channel
+      icache_module_n::AXI_IDLE; // Next state of the memory channel
 
   // received data from memory
   uint32_t mem_resp_data_w[ICACHE_LINE_SIZE / 4]; // Data received wire
-  uint32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4]; // Data received register
 
   // handshake signals
   bool mem_gnt;
@@ -241,20 +323,13 @@ private:
   /*
    * Replacement policy (Random Replacement in current design)
    */
-  uint32_t replace_idx = 0;
   uint32_t replace_idx_next;
-  uint32_t ppn_r; // length = paddr_length(32/34) - 12 bits = 20/22 bits
 
   // SRAM lookup delay model (used when ICACHE_USE_SRAM_MODEL=1)
-  bool sram_pending_r = false;
   bool sram_pending_next = false;
-  uint32_t sram_delay_r = 0;
   uint32_t sram_delay_next = 0;
-  uint32_t sram_index_r = 0;
   uint32_t sram_index_next = 0;
-  uint32_t sram_pc_r = 0;
   uint32_t sram_pc_next = 0;
-  uint32_t sram_seed_r = 1;
   uint32_t sram_seed_next = 1;
   // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
   bool sram_load_fire = false;

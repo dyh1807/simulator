@@ -31,18 +31,19 @@ static void test_icache_v1_external_lookup_hit() {
   std::fill(std::begin(ic.io.in.mem_resp_data), std::end(ic.io.in.mem_resp_data),
             0u);
 
-  ic.io.in.lookup_from_input = true;
+  ic.io.lookup_in.lookup_from_input = true;
   for (int way = 0; way < ICACHE_V1_WAYS; ++way) {
-    ic.io.in.lookup_set_tag[way] = 0;
-    ic.io.in.lookup_set_valid[way] = false;
+    ic.io.lookup_in.lookup_set_tag[way] = 0;
+    ic.io.lookup_in.lookup_set_valid[way] = false;
     for (int w = 0; w < ICACHE_LINE_SIZE / 4; ++w) {
-      ic.io.in.lookup_set_data[way][w] = 0;
+      ic.io.lookup_in.lookup_set_data[way][w] = 0;
     }
   }
-  ic.io.in.lookup_set_tag[0] = ppn;
-  ic.io.in.lookup_set_valid[0] = true;
+  ic.io.lookup_in.lookup_set_tag[0] = ppn;
+  ic.io.lookup_in.lookup_set_valid[0] = true;
   for (int w = 0; w < ICACHE_LINE_SIZE / 4; ++w) {
-    ic.io.in.lookup_set_data[0][w] = 0x11110000u + static_cast<uint32_t>(w);
+    ic.io.lookup_in.lookup_set_data[0][w] =
+        0x11110000u + static_cast<uint32_t>(w);
   }
 
   ic.comb();
