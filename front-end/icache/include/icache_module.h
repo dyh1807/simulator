@@ -302,8 +302,8 @@ private:
   };
 
   // pipeline datapath
-  pipe1_to_pipe2_t pipe1_to_pipe2;
-  pipe2_to_pipe1_t pipe2_to_pipe1;
+  pipe1_to_pipe2_t pipe1_to_pipe2{};
+  pipe2_to_pipe1_t pipe2_to_pipe1{};
   icache_module_n::ICacheState state_next =
       icache_module_n::IDLE; // Next state of the i-cache
 
@@ -315,15 +315,15 @@ private:
       icache_module_n::AXI_IDLE; // Next state of the memory channel
 
   // received data from memory
-  uint32_t mem_resp_data_w[ICACHE_LINE_SIZE / 4]; // Data received wire
+  uint32_t mem_resp_data_w[ICACHE_LINE_SIZE / 4] = {0}; // Data received wire
 
   // handshake signals
-  bool mem_gnt;
+  bool mem_gnt = false;
 
   /*
    * Replacement policy (Random Replacement in current design)
    */
-  uint32_t replace_idx_next;
+  uint32_t replace_idx_next = 0;
 
   // SRAM lookup delay model (used when ICACHE_USE_SRAM_MODEL=1)
   bool sram_pending_next = false;
