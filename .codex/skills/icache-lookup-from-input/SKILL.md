@@ -20,25 +20,36 @@ Use this skill when you need to:
 - `ICACHE_SRAM_FIXED_LATENCY` (cycles, `1` means next-cycle ready; `0` is clamped to `1`)
 - `ICACHE_SRAM_RANDOM_DELAY`, `ICACHE_SRAM_RANDOM_MIN`, `ICACHE_SRAM_RANDOM_MAX`
 
+### Build-time macro (V1 only): external-fed lookup
+- `ICACHE_LOOKUP_FROM_INPUT`:
+  - `0` (default): stage1 reads from the internal V1 cache table (table state is *not* part of generalized PI/PO)
+  - `1`: stage1 reads the set view from `ICache_lookup_in_t` (external-fed)
+
 ### Makefile hook
 Use `EXTRA_CXXFLAGS` to inject macros without overriding the default `CXXFLAGS`:
 ```bash
 make -j USE_SIM_DDR=1 USE_ICACHE_V2=1 EXTRA_CXXFLAGS='-DICACHE_USE_SRAM_MODEL=1 -DICACHE_SRAM_FIXED_LATENCY=4'
 ```
 
-### lookup_from_input (data source select)
-Both V1/V2 `*_in_t` add:
+### Lookup set view inputs (V1/V2)
+
+#### V1: `ICache_lookup_in_t` (split struct)
+- `lookup_resp_valid` (bool): **transfer-valid** for the set view in this cycle
+- `lookup_set_data[WAYS][LINE_WORDS]`
+- `lookup_set_tag[WAYS]`
+- `lookup_set_valid[WAYS]` (**entry-valid** per way)
+
+Notes:
+- V1 ways is compile-time `ICACHE_V1_WAYS`
+- When `ICACHE_LOOKUP_FROM_INPUT=0`, these fields are ignored.
+
+#### V2: `ICacheV2_in_t` (legacy location)
 - `lookup_from_input` (bool)
 - `lookup_set_data[WAYS][LINE_WORDS]`
 - `lookup_set_tag[WAYS]`
 - `lookup_set_valid[WAYS]`
 
-Semantics:
-- `lookup_from_input=0` (default): stage1 reads icache internal arrays
-- `lookup_from_input=1`: stage1 reads the “set view” from the input fields above
-
 Notes:
-- V1 ways is compile-time `ICACHE_V1_WAYS`
 - V2 input arrays are sized by compile-time `ICACHE_V2_WAYS`; when `lookup_from_input=1`, **require `cfg.ways <= ICACHE_V2_WAYS`**
 
 ## Implementation pattern (what to keep stable)
@@ -47,9 +58,11 @@ Notes:
 
 **Layer A: set read (`lookup_read_set`)**
 - Only responsibility: move `{data, tag, valid}` of the chosen set into stage1→stage2 wires/registers.
-- This function is where `lookup_from_input` is handled:
+- This function is where “external-fed set view” is handled:
   - internal source: read `cache_*[set][way]...`
-  - external source: read `io.in.lookup_set_*[way]...`
+  - external source:
+    - V1 (`ICACHE_LOOKUP_FROM_INPUT=1`): read `io.lookup_in.lookup_set_*[way]...`
+    - V2 (`io.in.lookup_from_input=1`): read `io.in.lookup_set_*[way]...`
 
 **Layer B: control (`lookup`)**
 - Only responsibility: handle:
@@ -76,25 +89,38 @@ Typical behavior:
 
 ## How to use `lookup_from_input` correctly
 
-`lookup_from_input=1` is intended for cases where the set view is produced outside the icache module:
+### V1 external-fed mode (`ICACHE_LOOKUP_FROM_INPUT=1`)
+
+This mode is intended for cases where the set view is produced outside the icache module:
 - an SRAM macro model that returns `{tag/data/valid}` after N cycles
 - a wrapper that mirrors icache state and wants to “inject” the read result into stage1
 
 Requirements:
 - Before calling `icache_hw.comb()` each cycle, set:
-  - `icache_hw.io.in.lookup_from_input = true`
-  - and fill `lookup_set_{data,tag,valid}` for the set that stage1 will read **in that cycle**
-- The icache still maintains internal state for fills/replacements; if the external producer is not a loopback, it must stay coherent with icache state (or the design will intentionally diverge).
+  - fill `io.lookup_in.lookup_set_{data,tag,valid}` for the set that stage1 will read **in that cycle**
+  - set `io.lookup_in.lookup_resp_valid = true` only when that set view is transfer-valid in this cycle
+
+Semantics:
+- **Entry-valid**: `lookup_set_valid[way]` indicates whether that way contains a valid line.
+- **Transfer-valid**: `lookup_resp_valid` indicates whether the whole set view is ready to be consumed this cycle
+  - register-style lookup: usually `lookup_resp_valid=1` every cycle
+  - SRAM-style lookup: `lookup_resp_valid` pulses when the read response matures
+
+### V2 external-fed mode (`io.in.lookup_from_input=1`)
+This is the legacy behavior: stage1 reads the set view directly from `io.in.lookup_set_*`.
 
 ### Temporary loopback for verification
 When validating the split, you can loop internal arrays back into the input to prove equivalence:
 - Use the helper `export_lookup_set_for_pc(pc, out_data, out_tag, out_valid)` (added to both V1/V2)
-- Feed those exported arrays into `io.in.lookup_set_*`, then set `lookup_from_input=1`
+- V1: compile with `-DICACHE_LOOKUP_FROM_INPUT=1`, then feed into:
+  - `io.lookup_in.lookup_set_*` and set `io.lookup_in.lookup_resp_valid=1`
+- V2: feed into:
+  - `io.in.lookup_set_*` and set `io.in.lookup_from_input=1`
 - After validation, delete the loopback feed code in the top wrapper
 
 ## Simulator validation (quick recipe)
 
-### Internal source (lookup_from_input=0)
+### Internal source (default / no external-fed set view)
 Register lookup:
 ```bash
 make clean && make -j USE_SIM_DDR=1 USE_ICACHE_V2=0
@@ -113,8 +139,11 @@ make clean && make -j USE_SIM_DDR=1 USE_ICACHE_V2=1 EXTRA_CXXFLAGS='-DICACHE_USE
 timeout 60s ./a.out baremetal/new_dhrystone/dhrystone.bin
 ```
 
-### External source (lookup_from_input=1)
-- Add temporary “feed-before-comb” code in the icache top wrapper:
-  - Fill `lookup_set_*` each cycle for the active PC (or pending SRAM PC), set `lookup_from_input=1`
+### External source (external-fed set view)
+- V1: compile with `-DICACHE_LOOKUP_FROM_INPUT=1` and add temporary “feed-before-comb” code:
+  - Fill `io.lookup_in.lookup_set_*` each cycle for the active PC (or pending SRAM PC)
+  - Drive `io.lookup_in.lookup_resp_valid` appropriately (register: always 1; SRAM: pulse on response cycle)
+- V2: add temporary “feed-before-comb” code in the icache top wrapper:
+  - Fill `io.in.lookup_set_*` each cycle for the active PC (or pending SRAM PC), set `io.in.lookup_from_input=1`
 - Run the same regressions above (both `ICACHE_USE_SRAM_MODEL=0/1`, and `USE_ICACHE_V2=0/1`)
 - Remove the feed code once validated
