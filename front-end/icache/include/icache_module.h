@@ -56,6 +56,13 @@
 #ifndef ICACHE_V1_WAYS
 #define ICACHE_V1_WAYS 8
 #endif
+// Lookup set-view data source (V1):
+// - 0: lookup reads from the internal table state.
+// - 1: lookup reads from io.lookup_in (external-fed set view).
+// Note: kept as a build-time knob so it is not part of generalized PI/PO.
+#ifndef ICACHE_LOOKUP_FROM_INPUT
+#define ICACHE_LOOKUP_FROM_INPUT 0
+#endif
 
 namespace icache_module_n {
 // -----------------------------------------------------------------------------
@@ -83,11 +90,12 @@ enum AXIState {
 // Generalized-IO: lookup inputs (split from external inputs)
 // -----------------------------------------------------------------------------
 struct ICache_lookup_in_t {
-  // Lookup source control:
-  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
-  // - When lookup_from_input=1, lookup reads the set view from the fields below.
-  bool lookup_from_input = false;
-  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
+  // Transfer-valid for the lookup set view in this cycle.
+  // - register-style lookup: typically true every cycle
+  // - SRAM-style lookup: asserted only when the read response is ready
+  bool lookup_resp_valid = false;
+  // Set view (WAYS x LINE_WORDS).
+  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
   uint32_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
   bool lookup_set_valid[ICACHE_V1_WAYS] = {false};
 };
@@ -96,11 +104,6 @@ struct ICache_lookup_in_t {
 // Generalized-IO: register state (sequential) excluding perf counters
 // -----------------------------------------------------------------------------
 struct ICache_regs_t {
-  // Cache arrays (register-based storage; also models SRAM contents)
-  uint32_t cache_data[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{{0}}};
-  uint32_t cache_tag[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS] = {{0}};
-  bool cache_valid[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS] = {{false}};
-
   // Pipeline registers (between pipe1 and pipe2)
   bool pipe_valid_r = false;
   uint32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
@@ -257,7 +260,7 @@ public:
     int count = 0;
     for (uint32_t i = 0; i < set_num; ++i) {
       for (uint32_t j = 0; j < way_cnt; ++j) {
-        if (io.regs.cache_valid[i][j]) {
+        if (cache_valid[i][j]) {
           count++;
         }
       }
@@ -280,6 +283,12 @@ private:
       1 << (offset_bits - 2); // Number of words per cache line (8 words, since
                               // each word is 4 bytes)
   static uint32_t const way_cnt = ICACHE_V1_WAYS; // N-way set associative cache
+
+  // Table state is intentionally kept outside generalized-IO regs so PI/PO
+  // bitvectors do not include the full cache contents.
+  uint32_t cache_data[set_num][way_cnt][word_num] = {{{0}}};
+  uint32_t cache_tag[set_num][way_cnt] = {{0}};
+  bool cache_valid[set_num][way_cnt] = {{false}};
 
   /*
    * Icache Inner connections between 2 pipeline stages

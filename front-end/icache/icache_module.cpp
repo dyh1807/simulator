@@ -21,10 +21,10 @@ ICache::ICache() {
   // Initialize cache data, tags, and valid bits
   for (uint32_t i = 0; i < set_num; ++i) {
     for (uint32_t j = 0; j < way_cnt; ++j) {
-      io.regs.cache_valid[i][j] = false;
-      io.regs.cache_tag[i][j] = 0;
+      cache_valid[i][j] = false;
+      cache_tag[i][j] = 0;
       for (uint32_t k = 0; k < word_num; ++k) {
-        io.regs.cache_data[i][j][k] = 0;
+        cache_data[i][j][k] = 0;
       }
     }
   }
@@ -110,7 +110,7 @@ void ICache::reset() {
 void ICache::invalidate_all() {
   for (uint32_t i = 0; i < set_num; ++i) {
     for (uint32_t j = 0; j < way_cnt; ++j) {
-      io.regs.cache_valid[i][j] = false;
+      cache_valid[i][j] = false;
     }
   }
 }
@@ -197,26 +197,35 @@ void ICache::export_lookup_set_for_pc(
 
   for (uint32_t way = 0; way < way_cnt; ++way) {
     for (uint32_t word = 0; word < word_num; ++word) {
-      out_data[way][word] = io.regs.cache_data[rd_index][way][word];
+      out_data[way][word] = cache_data[rd_index][way][word];
     }
-    out_tag[way] = io.regs.cache_tag[rd_index][way];
-    out_valid[way] = io.regs.cache_valid[rd_index][way];
+    out_tag[way] = cache_tag[rd_index][way];
+    out_valid[way] = cache_valid[rd_index][way];
   }
 }
 
 void ICache::lookup_read_set(uint32_t lookup_index, bool gate_valid_with_req) {
-  bool from_input = io.lookup_in.lookup_from_input;
+  constexpr bool from_input = (ICACHE_LOOKUP_FROM_INPUT != 0);
+  bool resp_valid = true;
+  if (from_input) {
+    resp_valid = io.lookup_in.lookup_resp_valid;
+  }
   for (uint32_t way = 0; way < way_cnt; ++way) {
     for (uint32_t word = 0; word < word_num; ++word) {
       pipe1_to_pipe2.cache_set_data_w[way][word] =
           from_input ? io.lookup_in.lookup_set_data[way][word]
-                     : io.regs.cache_data[lookup_index][way][word];
+                     : cache_data[lookup_index][way][word];
     }
     pipe1_to_pipe2.cache_set_tag_w[way] =
         from_input ? io.lookup_in.lookup_set_tag[way]
-                   : io.regs.cache_tag[lookup_index][way];
+                   : cache_tag[lookup_index][way];
     bool valid_bit = from_input ? io.lookup_in.lookup_set_valid[way]
-                                : io.regs.cache_valid[lookup_index][way];
+                                : cache_valid[lookup_index][way];
+    if (from_input) {
+      // When the lookup response is not transfer-valid, treat all entries as
+      // invalid regardless of their tag/data/valid fields.
+      valid_bit = resp_valid && valid_bit;
+    }
     if (gate_valid_with_req) {
       valid_bit = valid_bit && io.in.ifu_req_valid;
     }
@@ -599,10 +608,10 @@ void ICache::seq_pipe1() {
     uint32_t way = io.table_write.way;
     if (index < set_num && way < way_cnt) {
       for (uint32_t word = 0; word < word_num; ++word) {
-        io.regs.cache_data[index][way][word] = io.table_write.data[word];
+        cache_data[index][way][word] = io.table_write.data[word];
       }
-      io.regs.cache_tag[index][way] = io.table_write.tag;
-      io.regs.cache_valid[index][way] = io.table_write.valid;
+      cache_tag[index][way] = io.table_write.tag;
+      cache_valid[index][way] = io.table_write.valid;
     }
   }
 
@@ -691,13 +700,13 @@ void ICache::log_tag(uint32_t index) {
   }
   std::cout << "Cache Set Index: " << index << std::endl;
   for (uint32_t way = 0; way < way_cnt; ++way) {
-    std::cout << "  Way " << way << ": Valid=" << io.regs.cache_valid[index][way]
-              << ", Tag=0x" << std::hex << io.regs.cache_tag[index][way] << std::dec
+    std::cout << "  Way " << way << ": Valid=" << cache_valid[index][way]
+              << ", Tag=0x" << std::hex << cache_tag[index][way] << std::dec
               << ", Data=[";
     for (uint32_t word = 0; word < word_num; ++word) {
       if (word > 0)
         std::cout << ", ";
-      std::cout << "0x" << std::hex << io.regs.cache_data[index][way][word] << std::dec;
+      std::cout << "0x" << std::hex << cache_data[index][way][word] << std::dec;
     }
     std::cout << "]" << std::endl;
   }
@@ -709,7 +718,7 @@ void ICache::log_valid(uint32_t index) {
   }
   std::cout << "Cache Set Index: " << index << " Valid Bits: ";
   for (uint32_t way = 0; way < way_cnt; ++way) {
-    std::cout << io.regs.cache_valid[index][way] << " ";
+    std::cout << cache_valid[index][way] << " ";
   }
   std::cout << std::endl;
 }

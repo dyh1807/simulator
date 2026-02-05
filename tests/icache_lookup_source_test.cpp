@@ -31,7 +31,9 @@ static void test_icache_v1_external_lookup_hit() {
   std::fill(std::begin(ic.io.in.mem_resp_data), std::end(ic.io.in.mem_resp_data),
             0u);
 
-  ic.io.lookup_in.lookup_from_input = true;
+  // This test exercises the external-fed lookup path; compile with:
+  //   -DICACHE_LOOKUP_FROM_INPUT=1
+  ic.io.lookup_in.lookup_resp_valid = true;
   for (int way = 0; way < ICACHE_V1_WAYS; ++way) {
     ic.io.lookup_in.lookup_set_tag[way] = 0;
     ic.io.lookup_in.lookup_set_valid[way] = false;
