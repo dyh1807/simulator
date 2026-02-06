@@ -79,6 +79,40 @@ ICacheV2::ICacheV2(ICacheV2Config cfg) : cfg_(cfg) {
   word_num_ = cfg_.line_bytes / 4;
   waiters_words_ = (cfg_.rob_depth + 63u) / 64u;
 
+  // Generalized-IO bitvector structs are compile-time sized by ICACHE_V2_*.
+  // Keep runtime config within those compile-time bounds.
+  if (cfg_.ways > ICACHE_V2_WAYS) {
+    std::cerr << "[icache_v2] cfg.ways exceeds ICACHE_V2_WAYS" << std::endl;
+    std::exit(1);
+  }
+  if (cfg_.mshr_num > ICACHE_V2_MSHR_NUM) {
+    std::cerr << "[icache_v2] cfg.mshr_num exceeds ICACHE_V2_MSHR_NUM"
+              << std::endl;
+    std::exit(1);
+  }
+  if (cfg_.rob_depth > ICACHE_V2_ROB_DEPTH) {
+    std::cerr << "[icache_v2] cfg.rob_depth exceeds ICACHE_V2_ROB_DEPTH"
+              << std::endl;
+    std::exit(1);
+  }
+  if (set_num_ > ICACHE_V2_SET_NUM) {
+    std::cerr << "[icache_v2] cfg.page_offset_bits/set_num exceeds "
+                 "ICACHE_V2_SET_NUM bound"
+              << std::endl;
+    std::exit(1);
+  }
+  if (word_num_ > ICACHE_V2_WORD_NUM) {
+    std::cerr << "[icache_v2] cfg.line_bytes/word_num exceeds ICACHE_V2_WORD_NUM"
+              << std::endl;
+    std::exit(1);
+  }
+  if (waiters_words_ > ICACHE_V2_WAITER_WORDS) {
+    std::cerr << "[icache_v2] cfg.rob_depth waiters_words exceeds "
+                 "ICACHE_V2_WAITER_WORDS"
+              << std::endl;
+    std::exit(1);
+  }
+
   // Allocate arrays.
   cache_data_.assign(static_cast<size_t>(set_num_) * cfg_.ways * word_num_, 0);
   cache_tag_.assign(static_cast<size_t>(set_num_) * cfg_.ways, 0);
@@ -196,18 +230,16 @@ void ICacheV2::cache_set_tag_valid(uint32_t set, uint32_t way, uint32_t tag,
 }
 
 void ICacheV2::lookup_read_set(uint32_t set) {
-  if (io.in.lookup_from_input) {
-    if (cfg_.ways > ICACHE_V2_WAYS) {
-      std::cerr << "[icache_v2] lookup_from_input requires cfg.ways <= "
-                << ICACHE_V2_WAYS << std::endl;
-      std::exit(1);
-    }
+  constexpr bool lookup_from_input = (ICACHE_V2_LOOKUP_FROM_INPUT != 0);
+  if (lookup_from_input) {
+    bool resp_valid = io.lookup_in.lookup_resp_valid;
     for (uint32_t way = 0; way < cfg_.ways; ++way) {
-      set_tag_w_[way] = io.in.lookup_set_tag[way];
-      set_valid_w_[way] = io.in.lookup_set_valid[way] ? 1 : 0;
+      set_tag_w_[way] = io.lookup_in.lookup_set_tag[way];
+      bool valid = io.lookup_in.lookup_set_valid[way] && resp_valid;
+      set_valid_w_[way] = valid ? 1 : 0;
       for (uint32_t w = 0; w < word_num_; ++w) {
         set_data_w_[static_cast<size_t>(way) * word_num_ + w] =
-            io.in.lookup_set_data[way][w];
+            io.lookup_in.lookup_set_data[way][w];
       }
     }
     return;
@@ -432,6 +464,247 @@ void ICacheV2::free_txid(uint8_t txid) {
   txid_mshr_next_[txid] = 0;
 }
 
+void ICacheV2::load_regs_from_io() {
+  const auto &r = io.regs;
+
+  epoch_r_ = r.epoch_r;
+  for (uint32_t set = 0; set < set_num_; ++set) {
+    rr_ptr_r_[set] = r.rr_ptr_r[set];
+  }
+  if (!plru_bits_r_.empty()) {
+    for (uint32_t set = 0; set < set_num_; ++set) {
+      for (uint32_t bit = 0; bit < (cfg_.ways - 1); ++bit) {
+        plru_bits_r_[static_cast<size_t>(set) * (cfg_.ways - 1) + bit] =
+            r.plru_bits_r[set][bit];
+      }
+    }
+  }
+  rand_seed_r_ = r.rand_seed_r;
+
+  rob_head_r_ = (cfg_.rob_depth == 0) ? 0 : (r.rob_head_r % cfg_.rob_depth);
+  rob_tail_r_ = (cfg_.rob_depth == 0) ? 0 : (r.rob_tail_r % cfg_.rob_depth);
+  rob_count_r_ = (r.rob_count_r > cfg_.rob_depth) ? cfg_.rob_depth : r.rob_count_r;
+  for (uint32_t i = 0; i < cfg_.rob_depth; ++i) {
+    rob_valid_r_[i] = r.rob_valid_r[i] ? 1 : 0;
+    rob_pc_r_[i] = r.rob_pc_r[i];
+    rob_state_r_[i] = r.rob_state_r[i];
+    rob_line_addr_r_[i] = r.rob_line_addr_r[i];
+    rob_mshr_idx_r_[i] = r.rob_mshr_idx_r[i];
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      rob_line_data_r_[static_cast<size_t>(i) * word_num_ + w] =
+          r.rob_line_data_r[i][w];
+    }
+  }
+
+  lookup_valid_r_ = r.lookup_valid_r;
+  lookup_pc_r_ = r.lookup_pc_r;
+  lookup_index_r_ = (set_num_ == 0) ? 0 : (r.lookup_index_r % set_num_);
+  lookup_rob_idx_r_ =
+      (cfg_.rob_depth == 0) ? 0 : (r.lookup_rob_idx_r % cfg_.rob_depth);
+  for (uint32_t way = 0; way < cfg_.ways; ++way) {
+    set_tag_r_[way] = r.set_tag_r[way];
+    set_valid_r_[way] = r.set_valid_r[way] ? 1 : 0;
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      set_data_r_[static_cast<size_t>(way) * word_num_ + w] =
+          r.set_data_r[way][w];
+    }
+  }
+
+  sram_pending_r_ = r.sram_pending_r;
+  sram_delay_r_ = r.sram_delay_r;
+  sram_index_r_ = (set_num_ == 0) ? 0 : (r.sram_index_r % set_num_);
+  sram_pc_r_ = r.sram_pc_r;
+  sram_rob_idx_r_ = (cfg_.rob_depth == 0) ? 0 : (r.sram_rob_idx_r % cfg_.rob_depth);
+  sram_seed_r_ = r.sram_seed_r;
+
+  for (uint32_t i = 0; i < cfg_.mshr_num; ++i) {
+    mshr_state_r_[i] = r.mshr_state_r[i];
+    mshr_line_addr_r_[i] = r.mshr_line_addr_r[i];
+    mshr_is_prefetch_r_[i] = r.mshr_is_prefetch_r[i];
+    mshr_txid_r_[i] = r.mshr_txid_r[i] & 0xF;
+    mshr_txid_valid_r_[i] = r.mshr_txid_valid_r[i] ? 1 : 0;
+    for (uint32_t w = 0; w < waiters_words_; ++w) {
+      mshr_waiters_r_[static_cast<size_t>(i) * waiters_words_ + w] =
+          r.mshr_waiters_r[i][w];
+    }
+  }
+
+  for (int id = 0; id < 16; ++id) {
+    txid_inflight_r_[id] = r.txid_inflight_r[id];
+    txid_canceled_r_[id] = r.txid_canceled_r[id];
+    txid_mshr_r_[id] =
+        static_cast<uint8_t>((cfg_.mshr_num == 0) ? 0 : (r.txid_mshr_r[id] % cfg_.mshr_num));
+    txid_mshr_valid_r_[id] = r.txid_mshr_valid_r[id];
+  }
+  txid_rr_r_ = static_cast<uint8_t>(r.txid_rr_r & 0xF);
+
+  memreq_latched_valid_r_ = r.memreq_latched_valid_r;
+  memreq_latched_addr_r_ = r.memreq_latched_addr_r;
+  memreq_latched_id_r_ = static_cast<uint8_t>(r.memreq_latched_id_r & 0xF);
+  memreq_latched_mshr_r_ = static_cast<uint8_t>(
+      (cfg_.mshr_num == 0) ? 0 : (r.memreq_latched_mshr_r % cfg_.mshr_num));
+}
+
+void ICacheV2::sync_regs_to_io() {
+  auto &r = io.regs;
+  r = {};
+
+  r.epoch_r = epoch_r_;
+  for (uint32_t set = 0; set < set_num_; ++set) {
+    r.rr_ptr_r[set] = rr_ptr_r_[set];
+  }
+  if (!plru_bits_r_.empty()) {
+    for (uint32_t set = 0; set < set_num_; ++set) {
+      for (uint32_t bit = 0; bit < (cfg_.ways - 1); ++bit) {
+        r.plru_bits_r[set][bit] =
+            plru_bits_r_[static_cast<size_t>(set) * (cfg_.ways - 1) + bit];
+      }
+    }
+  }
+  r.rand_seed_r = rand_seed_r_;
+
+  r.rob_head_r = rob_head_r_;
+  r.rob_tail_r = rob_tail_r_;
+  r.rob_count_r = rob_count_r_;
+  for (uint32_t i = 0; i < cfg_.rob_depth; ++i) {
+    r.rob_valid_r[i] = rob_valid_r_[i] != 0;
+    r.rob_pc_r[i] = rob_pc_r_[i];
+    r.rob_state_r[i] = rob_state_r_[i];
+    r.rob_line_addr_r[i] = rob_line_addr_r_[i];
+    r.rob_mshr_idx_r[i] = rob_mshr_idx_r_[i];
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      r.rob_line_data_r[i][w] =
+          rob_line_data_r_[static_cast<size_t>(i) * word_num_ + w];
+    }
+  }
+
+  r.lookup_valid_r = lookup_valid_r_;
+  r.lookup_pc_r = lookup_pc_r_;
+  r.lookup_index_r = lookup_index_r_;
+  r.lookup_rob_idx_r = lookup_rob_idx_r_;
+  for (uint32_t way = 0; way < cfg_.ways; ++way) {
+    r.set_tag_r[way] = set_tag_r_[way];
+    r.set_valid_r[way] = set_valid_r_[way] != 0;
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      r.set_data_r[way][w] = set_data_r_[static_cast<size_t>(way) * word_num_ + w];
+    }
+  }
+
+  r.sram_pending_r = sram_pending_r_;
+  r.sram_delay_r = sram_delay_r_;
+  r.sram_index_r = sram_index_r_;
+  r.sram_pc_r = sram_pc_r_;
+  r.sram_rob_idx_r = sram_rob_idx_r_;
+  r.sram_seed_r = sram_seed_r_;
+
+  for (uint32_t i = 0; i < cfg_.mshr_num; ++i) {
+    r.mshr_state_r[i] = mshr_state_r_[i];
+    r.mshr_line_addr_r[i] = mshr_line_addr_r_[i];
+    r.mshr_is_prefetch_r[i] = mshr_is_prefetch_r_[i];
+    r.mshr_txid_r[i] = mshr_txid_r_[i];
+    r.mshr_txid_valid_r[i] = mshr_txid_valid_r_[i];
+    for (uint32_t w = 0; w < waiters_words_; ++w) {
+      r.mshr_waiters_r[i][w] =
+          mshr_waiters_r_[static_cast<size_t>(i) * waiters_words_ + w];
+    }
+  }
+
+  for (int id = 0; id < 16; ++id) {
+    r.txid_inflight_r[id] = txid_inflight_r_[id];
+    r.txid_canceled_r[id] = txid_canceled_r_[id];
+    r.txid_mshr_r[id] = txid_mshr_r_[id];
+    r.txid_mshr_valid_r[id] = txid_mshr_valid_r_[id];
+  }
+  r.txid_rr_r = txid_rr_r_;
+
+  r.memreq_latched_valid_r = memreq_latched_valid_r_;
+  r.memreq_latched_addr_r = memreq_latched_addr_r_;
+  r.memreq_latched_id_r = memreq_latched_id_r_;
+  r.memreq_latched_mshr_r = memreq_latched_mshr_r_;
+}
+
+void ICacheV2::publish_reg_write_from_next() {
+  auto &rw = io.reg_write;
+  rw = {};
+
+  rw.epoch_r = epoch_next_;
+  for (uint32_t set = 0; set < set_num_; ++set) {
+    rw.rr_ptr_r[set] = rr_ptr_next_[set];
+  }
+  if (!plru_bits_next_.empty()) {
+    for (uint32_t set = 0; set < set_num_; ++set) {
+      for (uint32_t bit = 0; bit < (cfg_.ways - 1); ++bit) {
+        rw.plru_bits_r[set][bit] =
+            plru_bits_next_[static_cast<size_t>(set) * (cfg_.ways - 1) + bit];
+      }
+    }
+  }
+  rw.rand_seed_r = rand_seed_next_;
+
+  rw.rob_head_r = rob_head_next_;
+  rw.rob_tail_r = rob_tail_next_;
+  rw.rob_count_r = rob_count_next_;
+  for (uint32_t i = 0; i < cfg_.rob_depth; ++i) {
+    rw.rob_valid_r[i] = rob_valid_next_[i] != 0;
+    rw.rob_pc_r[i] = rob_pc_next_[i];
+    rw.rob_state_r[i] = rob_state_next_[i];
+    rw.rob_line_addr_r[i] = rob_line_addr_next_[i];
+    rw.rob_mshr_idx_r[i] = rob_mshr_idx_next_[i];
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      rw.rob_line_data_r[i][w] =
+          rob_line_data_next_[static_cast<size_t>(i) * word_num_ + w];
+    }
+  }
+
+  rw.lookup_valid_r = lookup_valid_next_;
+  rw.lookup_pc_r = lookup_pc_next_;
+  rw.lookup_index_r = lookup_index_next_;
+  rw.lookup_rob_idx_r = lookup_rob_idx_next_;
+  for (uint32_t way = 0; way < cfg_.ways; ++way) {
+    rw.set_tag_r[way] = set_load_fire_ ? set_tag_w_[way] : set_tag_r_[way];
+    rw.set_valid_r[way] =
+        (set_load_fire_ ? set_valid_w_[way] : set_valid_r_[way]) != 0;
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      rw.set_data_r[way][w] =
+          set_load_fire_
+              ? set_data_w_[static_cast<size_t>(way) * word_num_ + w]
+              : set_data_r_[static_cast<size_t>(way) * word_num_ + w];
+    }
+  }
+
+  rw.sram_pending_r = sram_pending_next_;
+  rw.sram_delay_r = sram_delay_next_;
+  rw.sram_index_r = sram_index_next_;
+  rw.sram_pc_r = sram_pc_next_;
+  rw.sram_rob_idx_r = sram_rob_idx_next_;
+  rw.sram_seed_r = sram_seed_next_;
+
+  for (uint32_t i = 0; i < cfg_.mshr_num; ++i) {
+    rw.mshr_state_r[i] = mshr_state_next_[i];
+    rw.mshr_line_addr_r[i] = mshr_line_addr_next_[i];
+    rw.mshr_is_prefetch_r[i] = mshr_is_prefetch_next_[i];
+    rw.mshr_txid_r[i] = mshr_txid_next_[i];
+    rw.mshr_txid_valid_r[i] = mshr_txid_valid_next_[i];
+    for (uint32_t w = 0; w < waiters_words_; ++w) {
+      rw.mshr_waiters_r[i][w] =
+          mshr_waiters_next_[static_cast<size_t>(i) * waiters_words_ + w];
+    }
+  }
+
+  for (int id = 0; id < 16; ++id) {
+    rw.txid_inflight_r[id] = txid_inflight_next_[id];
+    rw.txid_canceled_r[id] = txid_canceled_next_[id];
+    rw.txid_mshr_r[id] = txid_mshr_next_[id];
+    rw.txid_mshr_valid_r[id] = txid_mshr_valid_next_[id];
+  }
+  rw.txid_rr_r = txid_rr_next_;
+
+  rw.memreq_latched_valid_r = memreq_latched_valid_next_;
+  rw.memreq_latched_addr_r = memreq_latched_addr_next_;
+  rw.memreq_latched_id_r = memreq_latched_id_next_;
+  rw.memreq_latched_mshr_r = memreq_latched_mshr_next_;
+}
+
 bool ICacheV2::mshr_waiter_test(uint32_t mshr_idx, uint32_t rob_idx) const {
   uint32_t word = rob_idx / 64u;
   uint32_t bit = rob_idx % 64u;
@@ -448,6 +721,9 @@ void ICacheV2::mshr_waiter_set(uint32_t mshr_idx, uint32_t rob_idx) {
 
 void ICacheV2::invalidate_all() {
   std::fill(cache_valid_.begin(), cache_valid_.end(), 0);
+#if ICACHE_V2_GENERALIZED_IO_MODE
+  sync_regs_to_io();
+#endif
 }
 
 void ICacheV2::reset() {
@@ -551,11 +827,24 @@ void ICacheV2::reset() {
             << " mshr=" << cfg_.mshr_num << " rob=" << cfg_.rob_depth
             << " repl=" << static_cast<int>(cfg_.repl)
             << " prefetch=" << (cfg_.prefetch_enable ? 1 : 0) << std::endl;
+
+  io.out = {};
+  io.out.mem_resp_ready = true;
+  io.table_write = {};
+  io.reg_write = {};
+#if ICACHE_V2_GENERALIZED_IO_MODE
+  sync_regs_to_io();
+#endif
 }
 
 void ICacheV2::comb() {
+#if ICACHE_V2_GENERALIZED_IO_MODE
+  load_regs_from_io();
+#endif
+
   io.out = {};
   io.out.mem_resp_ready = true; // always drain
+  io.table_write = {};
   set_load_fire_ = false;
   cache_fill_fire_ = false;
 
@@ -677,6 +966,9 @@ void ICacheV2::comb() {
     io.out.ifu_resp_valid = false;
     io.out.ppn_ready = false;
     io.out.mem_req_valid = false;
+#if ICACHE_V2_GENERALIZED_IO_MODE
+    publish_reg_write_from_next();
+#endif
     return;
   }
 
@@ -1188,6 +1480,21 @@ void ICacheV2::comb() {
   if (txid_used > txid_peak_next_) {
     txid_peak_next_ = txid_used;
   }
+
+  if (cache_fill_fire_) {
+    io.table_write.we = true;
+    io.table_write.set = cache_fill_set_;
+    io.table_write.way = cache_fill_way_;
+    io.table_write.tag = cache_fill_tag_;
+    io.table_write.valid = true;
+    for (uint32_t w = 0; w < word_num_; ++w) {
+      io.table_write.data[w] = cache_fill_words_[w];
+    }
+  }
+
+#if ICACHE_V2_GENERALIZED_IO_MODE
+  publish_reg_write_from_next();
+#endif
 }
 
 void ICacheV2::seq() {
@@ -1203,10 +1510,11 @@ void ICacheV2::seq() {
     }
   }
 
-  // Apply cache fill (single line)
-  if (cache_fill_fire_) {
-    cache_write_line(cache_fill_set_, cache_fill_way_, cache_fill_words_.data());
-    cache_set_tag_valid(cache_fill_set_, cache_fill_way_, cache_fill_tag_, true);
+  // Apply cache fill (single line) via explicit table-write output.
+  if (io.table_write.we) {
+    cache_write_line(io.table_write.set, io.table_write.way, io.table_write.data);
+    cache_set_tag_valid(io.table_write.set, io.table_write.way, io.table_write.tag,
+                        io.table_write.valid);
   }
 
   epoch_r_ = epoch_next_;
@@ -1257,6 +1565,10 @@ void ICacheV2::seq() {
   memreq_latched_addr_r_ = memreq_latched_addr_next_;
   memreq_latched_id_r_ = memreq_latched_id_next_;
   memreq_latched_mshr_r_ = memreq_latched_mshr_next_;
+
+#if ICACHE_V2_GENERALIZED_IO_MODE
+  sync_regs_to_io();
+#endif
 }
 
 void ICacheV2::log_debug() const {

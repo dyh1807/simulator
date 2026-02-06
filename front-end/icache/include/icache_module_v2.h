@@ -55,6 +55,25 @@
 #ifndef ICACHE_V2_REPL_POLICY
 #define ICACHE_V2_REPL_POLICY 2
 #endif
+// Lookup set-view data source (V2):
+// - 0: lookup reads from internal cache table state.
+// - 1: lookup reads from io.lookup_in (external-fed set view).
+// Keep this as a build-time knob so it is not part of generalized PI/PO.
+#ifndef ICACHE_V2_LOOKUP_FROM_INPUT
+#define ICACHE_V2_LOOKUP_FROM_INPUT 0
+#endif
+// Generalized-IO state bridge:
+// - 0: keep runtime fast path (internal regs), still expose struct definitions.
+// - 1: comb() loads from io.regs and publishes io.reg_write for PI/PO extraction.
+#ifndef ICACHE_V2_GENERALIZED_IO_MODE
+#define ICACHE_V2_GENERALIZED_IO_MODE 0
+#endif
+
+#if ICACHE_V2_WAYS > 1
+#define ICACHE_V2_PLRU_BITS_PER_SET (ICACHE_V2_WAYS - 1)
+#else
+#define ICACHE_V2_PLRU_BITS_PER_SET 1
+#endif
 
 namespace icache_module_v2_n {
 
@@ -80,6 +99,17 @@ struct ICacheV2Config {
   ReplPolicy repl = static_cast<ReplPolicy>(ICACHE_V2_REPL_POLICY);
 };
 
+// -----------------------------------------------------------------------------
+// ICache V2 derived parameters (for generalized-IO structs)
+// -----------------------------------------------------------------------------
+static constexpr uint32_t ICACHE_V2_OFFSET_BITS = __builtin_ctz(ICACHE_LINE_SIZE);
+static constexpr uint32_t ICACHE_V2_INDEX_BITS =
+    ICACHE_V2_PAGE_OFFSET_BITS - ICACHE_V2_OFFSET_BITS;
+static constexpr uint32_t ICACHE_V2_SET_NUM = 1u << ICACHE_V2_INDEX_BITS;
+static constexpr uint32_t ICACHE_V2_WORD_NUM = ICACHE_LINE_SIZE / 4;
+static constexpr uint32_t ICACHE_V2_WAITER_WORDS =
+    (ICACHE_V2_ROB_DEPTH + 63u) / 64u;
+
 struct ICacheV2_in_t {
   // Input from IFU
   uint32_t pc = 0;
@@ -97,14 +127,137 @@ struct ICacheV2_in_t {
   bool mem_resp_valid = false;
   uint8_t mem_resp_id = 0;
   uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0};
+};
 
-  // Lookup source control:
-  // - When lookup_from_input=0 (default), lookup reads from icache internal arrays.
-  // - When lookup_from_input=1, lookup reads the set view from the fields below.
-  bool lookup_from_input = false;
-  uint32_t lookup_set_data[ICACHE_V2_WAYS][ICACHE_LINE_SIZE / 4] = {{0}};
+// -----------------------------------------------------------------------------
+// Generalized-IO: lookup inputs (split from external inputs)
+// -----------------------------------------------------------------------------
+struct ICacheV2_lookup_in_t {
+  // Transfer-valid for the lookup set view in this cycle.
+  bool lookup_resp_valid = false;
+  uint32_t lookup_set_data[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
   uint32_t lookup_set_tag[ICACHE_V2_WAYS] = {0};
   bool lookup_set_valid[ICACHE_V2_WAYS] = {false};
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: register state (sequential) excluding perf counters
+// -----------------------------------------------------------------------------
+struct ICacheV2_regs_t {
+  // Epoch / replacement
+  uint32_t epoch_r = 0;
+  uint32_t rr_ptr_r[ICACHE_V2_SET_NUM] = {0};
+  uint8_t plru_bits_r[ICACHE_V2_SET_NUM][ICACHE_V2_PLRU_BITS_PER_SET] = {{0}};
+  uint32_t rand_seed_r = 1;
+
+  // ROB
+  uint32_t rob_head_r = 0;
+  uint32_t rob_tail_r = 0;
+  uint32_t rob_count_r = 0;
+  uint8_t rob_valid_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_pc_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint8_t rob_state_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_line_addr_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_mshr_idx_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_line_data_r[ICACHE_V2_ROB_DEPTH][ICACHE_V2_WORD_NUM] = {{0}};
+
+  // Lookup stage1->stage2 regs
+  bool lookup_valid_r = false;
+  uint32_t lookup_pc_r = 0;
+  uint32_t lookup_index_r = 0;
+  uint32_t lookup_rob_idx_r = 0;
+  uint32_t set_data_r[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
+  uint32_t set_tag_r[ICACHE_V2_WAYS] = {0};
+  bool set_valid_r[ICACHE_V2_WAYS] = {false};
+
+  // SRAM lookup delay model
+  bool sram_pending_r = false;
+  uint32_t sram_delay_r = 0;
+  uint32_t sram_index_r = 0;
+  uint32_t sram_pc_r = 0;
+  uint32_t sram_rob_idx_r = 0;
+  uint32_t sram_seed_r = 1;
+
+  // MSHR
+  uint8_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_is_prefetch_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_txid_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_txid_valid_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint64_t mshr_waiters_r[ICACHE_V2_MSHR_NUM][ICACHE_V2_WAITER_WORDS] = {{0}};
+
+  // TXID mapping
+  bool txid_inflight_r[16] = {false};
+  bool txid_canceled_r[16] = {false};
+  uint8_t txid_mshr_r[16] = {0};
+  bool txid_mshr_valid_r[16] = {false};
+  uint8_t txid_rr_r = 0;
+
+  // Memory request latch
+  bool memreq_latched_valid_r = false;
+  uint32_t memreq_latched_addr_r = 0;
+  uint8_t memreq_latched_id_r = 0;
+  uint8_t memreq_latched_mshr_r = 0;
+};
+
+// -----------------------------------------------------------------------------
+// Generalized-IO: register write results (applied in seq)
+// -----------------------------------------------------------------------------
+struct ICacheV2_reg_write_t {
+  // Epoch / replacement
+  uint32_t epoch_r = 0;
+  uint32_t rr_ptr_r[ICACHE_V2_SET_NUM] = {0};
+  uint8_t plru_bits_r[ICACHE_V2_SET_NUM][ICACHE_V2_PLRU_BITS_PER_SET] = {{0}};
+  uint32_t rand_seed_r = 1;
+
+  // ROB
+  uint32_t rob_head_r = 0;
+  uint32_t rob_tail_r = 0;
+  uint32_t rob_count_r = 0;
+  uint8_t rob_valid_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_pc_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint8_t rob_state_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_line_addr_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_mshr_idx_r[ICACHE_V2_ROB_DEPTH] = {0};
+  uint32_t rob_line_data_r[ICACHE_V2_ROB_DEPTH][ICACHE_V2_WORD_NUM] = {{0}};
+
+  // Lookup stage1->stage2 regs
+  bool lookup_valid_r = false;
+  uint32_t lookup_pc_r = 0;
+  uint32_t lookup_index_r = 0;
+  uint32_t lookup_rob_idx_r = 0;
+  uint32_t set_data_r[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
+  uint32_t set_tag_r[ICACHE_V2_WAYS] = {0};
+  bool set_valid_r[ICACHE_V2_WAYS] = {false};
+
+  // SRAM lookup delay model
+  bool sram_pending_r = false;
+  uint32_t sram_delay_r = 0;
+  uint32_t sram_index_r = 0;
+  uint32_t sram_pc_r = 0;
+  uint32_t sram_rob_idx_r = 0;
+  uint32_t sram_seed_r = 1;
+
+  // MSHR
+  uint8_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_is_prefetch_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_txid_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint8_t mshr_txid_valid_r[ICACHE_V2_MSHR_NUM] = {0};
+  uint64_t mshr_waiters_r[ICACHE_V2_MSHR_NUM][ICACHE_V2_WAITER_WORDS] = {{0}};
+
+  // TXID mapping
+  bool txid_inflight_r[16] = {false};
+  bool txid_canceled_r[16] = {false};
+  uint8_t txid_mshr_r[16] = {0};
+  bool txid_mshr_valid_r[16] = {false};
+  uint8_t txid_rr_r = 0;
+
+  // Memory request latch
+  bool memreq_latched_valid_r = false;
+  uint32_t memreq_latched_addr_r = 0;
+  uint8_t memreq_latched_id_r = 0;
+  uint8_t memreq_latched_mshr_r = 0;
 };
 
 struct ICacheV2_out_t {
@@ -128,9 +281,25 @@ struct ICacheV2_out_t {
   bool mem_resp_ready = false;
 };
 
+// -----------------------------------------------------------------------------
+// Generalized-IO: table write controls (observable write port)
+// -----------------------------------------------------------------------------
+struct ICacheV2_table_write_t {
+  bool we = false;
+  uint32_t set = 0;
+  uint32_t way = 0;
+  uint32_t data[ICACHE_V2_WORD_NUM] = {0};
+  uint32_t tag = 0;
+  bool valid = false;
+};
+
 struct ICacheV2_IO_t {
   ICacheV2_in_t in;
+  ICacheV2_regs_t regs;
+  ICacheV2_lookup_in_t lookup_in;
   ICacheV2_out_t out;
+  ICacheV2_reg_write_t reg_write;
+  ICacheV2_table_write_t table_write;
 };
 
 class ICacheV2 {
@@ -192,6 +361,9 @@ private:
   // TXID helpers (0..15)
   int alloc_txid();
   void free_txid(uint8_t txid);
+  void load_regs_from_io();
+  void sync_regs_to_io();
+  void publish_reg_write_from_next();
 
   // --- Config / Derived parameters ---
   ICacheV2Config cfg_;

@@ -20,6 +20,8 @@
 // External dependencies
 extern SimCpu cpu;
 extern uint32_t *p_memory;
+extern icache_module_n::ICache icache;
+extern icache_module_v2_n::ICacheV2 icache_v2;
 
 // Initialize static member
 bool ICacheTop::debug_enable = false;
@@ -41,9 +43,6 @@ void ICacheTop::syncPerf() {
 }
 
 namespace {
-
-icache_module_n::ICache g_icache;
-icache_module_v2_n::ICacheV2 g_icache_v2;
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
 class SimpleICacheTop : public ICacheTop {
@@ -573,18 +572,18 @@ ICacheTop *get_icache_instance() {
 #ifdef USE_ICACHE_V2
     instance =
         std::make_unique<SimDDRICacheTopT<icache_module_v2_n::ICacheV2>>(
-            g_icache_v2);
+            icache_v2);
 #else
     instance = std::make_unique<SimDDRICacheTopT<icache_module_n::ICache>>(
-        g_icache);
+        icache);
 #endif
 #elif defined(USE_TRUE_ICACHE)
 #ifdef USE_ICACHE_V2
     instance = std::make_unique<TrueICacheTopT<icache_module_v2_n::ICacheV2>>(
-        g_icache_v2);
+        icache_v2);
 #else
     instance = std::make_unique<TrueICacheTopT<icache_module_n::ICache>>(
-        g_icache);
+        icache);
 #endif
 #else
     instance = std::make_unique<SimpleICacheTop>();
