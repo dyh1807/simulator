@@ -172,14 +172,6 @@ struct ICacheV2_regs_t {
   reg20_t set_tag_r[ICACHE_V2_WAYS] = {0};
   reg1_t set_valid_r[ICACHE_V2_WAYS] = {false};
 
-  // SRAM lookup delay model
-  reg1_t sram_pending_r = false;
-  reg8_t sram_delay_r = 0;
-  reg12_t sram_index_r = 0;
-  reg32_t sram_pc_r = 0;
-  reg8_t sram_rob_idx_r = 0;
-  reg32_t sram_seed_r = 1;
-
   // MSHR
   reg2_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
   reg32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
@@ -386,21 +378,6 @@ private:
   std::vector<uint8_t> set_valid_w_;
   std::vector<uint8_t> set_valid_r_;
   bool set_load_fire_ = false; // comb-only: load set_*_w_ -> set_*_r_ in seq
-
-  // SRAM lookup delay model (single outstanding lookup)
-  bool sram_pending_r_ = false;
-  bool sram_pending_next_ = false;
-  uint32_t sram_delay_r_ = 0;
-  uint32_t sram_delay_next_ = 0;
-  uint32_t sram_index_r_ = 0;
-  uint32_t sram_index_next_ = 0;
-  uint32_t sram_pc_r_ = 0;
-  uint32_t sram_pc_next_ = 0;
-  uint32_t sram_rob_idx_r_ = 0;
-  uint32_t sram_rob_idx_next_ = 0;
-  uint32_t sram_seed_r_ = 1;
-  uint32_t sram_seed_next_ = 1;
-  bool sram_load_fire_ = false; // comb-only
 
   // --- MSHR ---
   enum class MshrState : uint8_t {

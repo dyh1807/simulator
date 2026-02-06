@@ -6,6 +6,60 @@
 namespace icache_module_n {
 namespace icache_v1_pi_po {
 
+static constexpr size_t ICache_lookup_in_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS));
+inline void pack_ICache_lookup_in_t(const icache_module_n::ICache_lookup_in_t &v, bool *bits, size_t &idx) {
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_resp_valid) >> b) & 1u) != 0; }
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+for (size_t i1 = 0; i1 < (ICACHE_V1_WORD_NUM); ++i1) {
+for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_data[i0][i1]) >> b) & 1u) != 0; }
+}
+}
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_tag[i0]) >> b) & 1u) != 0; }
+}
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_valid[i0]) >> b) & 1u) != 0; }
+}
+}
+
+inline void unpack_ICache_lookup_in_t(const bool *bits, size_t &idx, icache_module_n::ICache_lookup_in_t &v) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_resp_valid = static_cast<wire1_t>(tmp); }
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+for (size_t i1 = 0; i1 < (ICACHE_V1_WORD_NUM); ++i1) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_data[i0][i1] = static_cast<wire32_t>(tmp); }
+}
+}
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_tag[i0] = static_cast<wire20_t>(tmp); }
+}
+for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_valid[i0] = static_cast<wire1_t>(tmp); }
+}
+}
+
+static constexpr size_t ICache_table_write_t_BITS = (1 * 1) + (7 * 1) + (8 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (20 * 1) + (1 * 1);
+inline void pack_ICache_table_write_t(const icache_module_n::ICache_table_write_t &v, bool *bits, size_t &idx) {
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.we) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 7; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.index) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.way) >> b) & 1u) != 0; }
+for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
+for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.data[i0]) >> b) & 1u) != 0; }
+}
+for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.tag) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.valid) >> b) & 1u) != 0; }
+}
+
+inline void unpack_ICache_table_write_t(const bool *bits, size_t &idx, icache_module_n::ICache_table_write_t &v) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.we = static_cast<wire1_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 7; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.index = static_cast<wire7_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.way = static_cast<wire8_t>(tmp); }
+for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.data[i0] = static_cast<wire32_t>(tmp); }
+}
+{ uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.tag = static_cast<wire20_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.valid = static_cast<wire1_t>(tmp); }
+}
+
 static constexpr size_t ICache_out_t_BITS = (1 * 1) + (1 * 1) + (1 * 1) + (32 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (1 * 1) + (1 * 1) + (1 * 1) + (20 * 1) + (1 * 1) + (32 * 1) + (4 * 1) + (1 * 1);
 inline void pack_ICache_out_t(const icache_module_n::ICache_out_t &v, bool *bits, size_t &idx) {
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.miss) >> b) & 1u) != 0; }
@@ -43,30 +97,7 @@ for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_resp_ready = static_cast<wire1_t>(tmp); }
 }
 
-static constexpr size_t ICache_table_write_t_BITS = (1 * 1) + (7 * 1) + (8 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (20 * 1) + (1 * 1);
-inline void pack_ICache_table_write_t(const icache_module_n::ICache_table_write_t &v, bool *bits, size_t &idx) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.we) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 7; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.index) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.way) >> b) & 1u) != 0; }
-for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
-for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.data[i0]) >> b) & 1u) != 0; }
-}
-for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.tag) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.valid) >> b) & 1u) != 0; }
-}
-
-inline void unpack_ICache_table_write_t(const bool *bits, size_t &idx, icache_module_n::ICache_table_write_t &v) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.we = static_cast<wire1_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 7; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.index = static_cast<wire7_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.way = static_cast<wire8_t>(tmp); }
-for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.data[i0] = static_cast<wire32_t>(tmp); }
-}
-{ uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.tag = static_cast<wire20_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.valid = static_cast<wire1_t>(tmp); }
-}
-
-static constexpr size_t ICache_regs_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS)) + (32 * 1) + (7 * 1) + (1 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (8 * 1) + (20 * 1) + (1 * 1) + (8 * 1) + (7 * 1) + (32 * 1) + (32 * 1);
+static constexpr size_t ICache_regs_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS)) + (32 * 1) + (7 * 1) + (1 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (8 * 1) + (20 * 1);
 inline void pack_ICache_regs_t(const icache_module_n::ICache_regs_t &v, bool *bits, size_t &idx) {
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pipe_valid_r) >> b) & 1u) != 0; }
 for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
@@ -88,11 +119,6 @@ for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.mem_re
 }
 for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.replace_idx) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ppn_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.sram_pending_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.sram_delay_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 7; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.sram_index_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.sram_pc_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.sram_seed_r) >> b) & 1u) != 0; }
 }
 
 inline void unpack_ICache_regs_t(const bool *bits, size_t &idx, icache_module_n::ICache_regs_t &v) {
@@ -116,11 +142,6 @@ for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 }
 { uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.replace_idx = static_cast<reg8_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ppn_r = static_cast<reg20_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.sram_pending_r = static_cast<reg1_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.sram_delay_r = static_cast<reg8_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 7; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.sram_index_r = static_cast<reg7_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.sram_pc_r = static_cast<reg32_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.sram_seed_r = static_cast<reg32_t>(tmp); }
 }
 
 static constexpr size_t ICache_in_t_BITS = (32 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (20 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (4 * 1) + (32 * (ICACHE_LINE_SIZE / 4));
@@ -155,37 +176,6 @@ inline void unpack_ICache_in_t(const bool *bits, size_t &idx, icache_module_n::I
 { uint64_t tmp = 0; for (size_t b = 0; b < 4; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_resp_id = static_cast<wire4_t>(tmp); }
 for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_resp_data[i0] = static_cast<wire32_t>(tmp); }
-}
-}
-
-static constexpr size_t ICache_lookup_in_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS));
-inline void pack_ICache_lookup_in_t(const icache_module_n::ICache_lookup_in_t &v, bool *bits, size_t &idx) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_resp_valid) >> b) & 1u) != 0; }
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-for (size_t i1 = 0; i1 < (ICACHE_V1_WORD_NUM); ++i1) {
-for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_data[i0][i1]) >> b) & 1u) != 0; }
-}
-}
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_tag[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lookup_set_valid[i0]) >> b) & 1u) != 0; }
-}
-}
-
-inline void unpack_ICache_lookup_in_t(const bool *bits, size_t &idx, icache_module_n::ICache_lookup_in_t &v) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_resp_valid = static_cast<wire1_t>(tmp); }
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-for (size_t i1 = 0; i1 < (ICACHE_V1_WORD_NUM); ++i1) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_data[i0][i1] = static_cast<wire32_t>(tmp); }
-}
-}
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_tag[i0] = static_cast<wire20_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lookup_set_valid[i0] = static_cast<wire1_t>(tmp); }
 }
 }
 

@@ -137,13 +137,6 @@ struct ICache_regs_t {
   // Replacement / translation state
   reg8_t replace_idx = 0;
   reg20_t ppn_r = 0;
-
-  // SRAM lookup delay model registers (when enabled)
-  reg1_t sram_pending_r = false;
-  reg8_t sram_delay_r = 0;
-  reg7_t sram_index_r = 0;
-  reg32_t sram_pc_r = 0;
-  reg32_t sram_seed_r = 1;
 };
 
 // Generalized-IO note:
@@ -321,12 +314,6 @@ private:
    */
   uint32_t replace_idx_next = 0;
 
-  // Lookup delay model state (used when ICACHE_LOOKUP_LATENCY > 0)
-  bool sram_pending_next = false;
-  uint32_t sram_delay_next = 0;
-  uint32_t sram_index_next = 0;
-  uint32_t sram_pc_next = 0;
-  uint32_t sram_seed_next = 1;
   // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
   bool sram_load_fire = false;
 
