@@ -34,7 +34,7 @@ def main() -> int:
         ],
         po_fields=[
             ("out", "ICacheV2_out_t"),
-            ("reg_write", "ICacheV2_reg_write_t"),
+            ("reg_write", "ICacheV2_regs_t"),
             ("table_write", "ICacheV2_table_write_t"),
         ],
         type_overrides={},

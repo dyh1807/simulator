@@ -109,24 +109,25 @@ static constexpr uint32_t ICACHE_V2_SET_NUM = 1u << ICACHE_V2_INDEX_BITS;
 static constexpr uint32_t ICACHE_V2_WORD_NUM = ICACHE_LINE_SIZE / 4;
 static constexpr uint32_t ICACHE_V2_WAITER_WORDS =
     (ICACHE_V2_ROB_DEPTH + 63u) / 64u;
+static constexpr uint32_t ICACHE_V2_TAG_BITS = 20;
 
 struct ICacheV2_in_t {
   // Input from IFU
-  uint32_t pc = 0;
-  bool ifu_req_valid = false;
-  bool ifu_resp_ready = true;
-  bool refetch = false;
+  wire32_t pc = 0;
+  wire1_t ifu_req_valid = false;
+  wire1_t ifu_resp_ready = true;
+  wire1_t refetch = false;
 
   // Input from MMU
-  uint32_t ppn = 0;
-  bool ppn_valid = false;
-  bool page_fault = false;
+  wire20_t ppn = 0;
+  wire1_t ppn_valid = false;
+  wire1_t page_fault = false;
 
   // Input from memory
-  bool mem_req_ready = false;
-  bool mem_resp_valid = false;
-  uint8_t mem_resp_id = 0;
-  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0};
+  wire1_t mem_req_ready = false;
+  wire1_t mem_resp_valid = false;
+  wire4_t mem_resp_id = 0;
+  wire32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0};
 };
 
 // -----------------------------------------------------------------------------
@@ -134,10 +135,10 @@ struct ICacheV2_in_t {
 // -----------------------------------------------------------------------------
 struct ICacheV2_lookup_in_t {
   // Transfer-valid for the lookup set view in this cycle.
-  bool lookup_resp_valid = false;
-  uint32_t lookup_set_data[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
-  uint32_t lookup_set_tag[ICACHE_V2_WAYS] = {0};
-  bool lookup_set_valid[ICACHE_V2_WAYS] = {false};
+  wire1_t lookup_resp_valid = false;
+  wire32_t lookup_set_data[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
+  wire20_t lookup_set_tag[ICACHE_V2_WAYS] = {0};
+  wire1_t lookup_set_valid[ICACHE_V2_WAYS] = {false};
 };
 
 // -----------------------------------------------------------------------------
@@ -145,152 +146,96 @@ struct ICacheV2_lookup_in_t {
 // -----------------------------------------------------------------------------
 struct ICacheV2_regs_t {
   // Epoch / replacement
-  uint32_t epoch_r = 0;
-  uint32_t rr_ptr_r[ICACHE_V2_SET_NUM] = {0};
-  uint8_t plru_bits_r[ICACHE_V2_SET_NUM][ICACHE_V2_PLRU_BITS_PER_SET] = {{0}};
-  uint32_t rand_seed_r = 1;
+  reg32_t epoch_r = 0;
+  reg8_t rr_ptr_r[ICACHE_V2_SET_NUM] = {0};
+  reg1_t plru_bits_r[ICACHE_V2_SET_NUM][ICACHE_V2_PLRU_BITS_PER_SET] = {{0}};
+  reg32_t rand_seed_r = 1;
 
   // ROB
-  uint32_t rob_head_r = 0;
-  uint32_t rob_tail_r = 0;
-  uint32_t rob_count_r = 0;
-  uint8_t rob_valid_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_pc_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint8_t rob_state_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_line_addr_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_mshr_idx_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_line_data_r[ICACHE_V2_ROB_DEPTH][ICACHE_V2_WORD_NUM] = {{0}};
+  reg8_t rob_head_r = 0;
+  reg8_t rob_tail_r = 0;
+  reg8_t rob_count_r = 0;
+  reg1_t rob_valid_r[ICACHE_V2_ROB_DEPTH] = {0};
+  reg32_t rob_pc_r[ICACHE_V2_ROB_DEPTH] = {0};
+  reg3_t rob_state_r[ICACHE_V2_ROB_DEPTH] = {0};
+  reg32_t rob_line_addr_r[ICACHE_V2_ROB_DEPTH] = {0};
+  reg8_t rob_mshr_idx_r[ICACHE_V2_ROB_DEPTH] = {0};
+  reg32_t rob_line_data_r[ICACHE_V2_ROB_DEPTH][ICACHE_V2_WORD_NUM] = {{0}};
 
   // Lookup stage1->stage2 regs
-  bool lookup_valid_r = false;
-  uint32_t lookup_pc_r = 0;
-  uint32_t lookup_index_r = 0;
-  uint32_t lookup_rob_idx_r = 0;
-  uint32_t set_data_r[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
-  uint32_t set_tag_r[ICACHE_V2_WAYS] = {0};
-  bool set_valid_r[ICACHE_V2_WAYS] = {false};
+  reg1_t lookup_valid_r = false;
+  reg32_t lookup_pc_r = 0;
+  reg12_t lookup_index_r = 0;
+  reg8_t lookup_rob_idx_r = 0;
+  reg32_t set_data_r[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
+  reg20_t set_tag_r[ICACHE_V2_WAYS] = {0};
+  reg1_t set_valid_r[ICACHE_V2_WAYS] = {false};
 
   // SRAM lookup delay model
-  bool sram_pending_r = false;
-  uint32_t sram_delay_r = 0;
-  uint32_t sram_index_r = 0;
-  uint32_t sram_pc_r = 0;
-  uint32_t sram_rob_idx_r = 0;
-  uint32_t sram_seed_r = 1;
+  reg1_t sram_pending_r = false;
+  reg8_t sram_delay_r = 0;
+  reg12_t sram_index_r = 0;
+  reg32_t sram_pc_r = 0;
+  reg8_t sram_rob_idx_r = 0;
+  reg32_t sram_seed_r = 1;
 
   // MSHR
-  uint8_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_is_prefetch_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_txid_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_txid_valid_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint64_t mshr_waiters_r[ICACHE_V2_MSHR_NUM][ICACHE_V2_WAITER_WORDS] = {{0}};
+  reg2_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
+  reg32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
+  reg1_t mshr_is_prefetch_r[ICACHE_V2_MSHR_NUM] = {0};
+  reg4_t mshr_txid_r[ICACHE_V2_MSHR_NUM] = {0};
+  reg1_t mshr_txid_valid_r[ICACHE_V2_MSHR_NUM] = {0};
+  reg64_t mshr_waiters_r[ICACHE_V2_MSHR_NUM][ICACHE_V2_WAITER_WORDS] = {{0}};
 
   // TXID mapping
-  bool txid_inflight_r[16] = {false};
-  bool txid_canceled_r[16] = {false};
-  uint8_t txid_mshr_r[16] = {0};
-  bool txid_mshr_valid_r[16] = {false};
-  uint8_t txid_rr_r = 0;
+  reg1_t txid_inflight_r[16] = {false};
+  reg1_t txid_canceled_r[16] = {false};
+  reg8_t txid_mshr_r[16] = {0};
+  reg1_t txid_mshr_valid_r[16] = {false};
+  reg4_t txid_rr_r = 0;
 
   // Memory request latch
-  bool memreq_latched_valid_r = false;
-  uint32_t memreq_latched_addr_r = 0;
-  uint8_t memreq_latched_id_r = 0;
-  uint8_t memreq_latched_mshr_r = 0;
+  reg1_t memreq_latched_valid_r = false;
+  reg32_t memreq_latched_addr_r = 0;
+  reg4_t memreq_latched_id_r = 0;
+  reg8_t memreq_latched_mshr_r = 0;
 };
 
-// -----------------------------------------------------------------------------
-// Generalized-IO: register write results (applied in seq)
-// -----------------------------------------------------------------------------
-struct ICacheV2_reg_write_t {
-  // Epoch / replacement
-  uint32_t epoch_r = 0;
-  uint32_t rr_ptr_r[ICACHE_V2_SET_NUM] = {0};
-  uint8_t plru_bits_r[ICACHE_V2_SET_NUM][ICACHE_V2_PLRU_BITS_PER_SET] = {{0}};
-  uint32_t rand_seed_r = 1;
-
-  // ROB
-  uint32_t rob_head_r = 0;
-  uint32_t rob_tail_r = 0;
-  uint32_t rob_count_r = 0;
-  uint8_t rob_valid_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_pc_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint8_t rob_state_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_line_addr_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_mshr_idx_r[ICACHE_V2_ROB_DEPTH] = {0};
-  uint32_t rob_line_data_r[ICACHE_V2_ROB_DEPTH][ICACHE_V2_WORD_NUM] = {{0}};
-
-  // Lookup stage1->stage2 regs
-  bool lookup_valid_r = false;
-  uint32_t lookup_pc_r = 0;
-  uint32_t lookup_index_r = 0;
-  uint32_t lookup_rob_idx_r = 0;
-  uint32_t set_data_r[ICACHE_V2_WAYS][ICACHE_V2_WORD_NUM] = {{0}};
-  uint32_t set_tag_r[ICACHE_V2_WAYS] = {0};
-  bool set_valid_r[ICACHE_V2_WAYS] = {false};
-
-  // SRAM lookup delay model
-  bool sram_pending_r = false;
-  uint32_t sram_delay_r = 0;
-  uint32_t sram_index_r = 0;
-  uint32_t sram_pc_r = 0;
-  uint32_t sram_rob_idx_r = 0;
-  uint32_t sram_seed_r = 1;
-
-  // MSHR
-  uint8_t mshr_state_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint32_t mshr_line_addr_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_is_prefetch_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_txid_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint8_t mshr_txid_valid_r[ICACHE_V2_MSHR_NUM] = {0};
-  uint64_t mshr_waiters_r[ICACHE_V2_MSHR_NUM][ICACHE_V2_WAITER_WORDS] = {{0}};
-
-  // TXID mapping
-  bool txid_inflight_r[16] = {false};
-  bool txid_canceled_r[16] = {false};
-  uint8_t txid_mshr_r[16] = {0};
-  bool txid_mshr_valid_r[16] = {false};
-  uint8_t txid_rr_r = 0;
-
-  // Memory request latch
-  bool memreq_latched_valid_r = false;
-  uint32_t memreq_latched_addr_r = 0;
-  uint8_t memreq_latched_id_r = 0;
-  uint8_t memreq_latched_mshr_r = 0;
-};
+// Generalized-IO note:
+// `reg_write` and `regs` share the same structure by design.
+using ICacheV2_reg_write_t = ICacheV2_regs_t;
 
 struct ICacheV2_out_t {
   // Output to IFU
-  bool miss = false;
-  bool ifu_resp_valid = false;
-  bool ifu_req_ready = false;
-  uint32_t ifu_resp_pc = 0;
-  uint32_t rd_data[ICACHE_LINE_SIZE / 4] = {0};
-  bool ifu_page_fault = false;
+  wire1_t miss = false;
+  wire1_t ifu_resp_valid = false;
+  wire1_t ifu_req_ready = false;
+  wire32_t ifu_resp_pc = 0;
+  wire32_t rd_data[ICACHE_LINE_SIZE / 4] = {0};
+  wire1_t ifu_page_fault = false;
 
   // Output to MMU
-  bool ppn_ready = false;
-  bool mmu_req_valid = false;
-  uint32_t mmu_req_vtag = 0;
+  wire1_t ppn_ready = false;
+  wire1_t mmu_req_valid = false;
+  wire20_t mmu_req_vtag = 0;
 
   // Output to memory
-  bool mem_req_valid = false;
-  uint32_t mem_req_addr = 0;
-  uint8_t mem_req_id = 0;
-  bool mem_resp_ready = false;
+  wire1_t mem_req_valid = false;
+  wire32_t mem_req_addr = 0;
+  wire4_t mem_req_id = 0;
+  wire1_t mem_resp_ready = false;
 };
 
 // -----------------------------------------------------------------------------
 // Generalized-IO: table write controls (observable write port)
 // -----------------------------------------------------------------------------
 struct ICacheV2_table_write_t {
-  bool we = false;
-  uint32_t set = 0;
-  uint32_t way = 0;
-  uint32_t data[ICACHE_V2_WORD_NUM] = {0};
-  uint32_t tag = 0;
-  bool valid = false;
+  wire1_t we = false;
+  wire12_t set = 0;
+  wire8_t way = 0;
+  wire32_t data[ICACHE_V2_WORD_NUM] = {0};
+  wire20_t tag = 0;
+  wire1_t valid = false;
 };
 
 struct ICacheV2_IO_t {

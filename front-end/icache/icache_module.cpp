@@ -131,31 +131,7 @@ void ICache::comb() {
   int cnt = 0;
   while (true) {
     // Default register write-back: hold values unless overwritten by comb logic.
-    io.reg_write.pipe_valid_r = io.regs.pipe_valid_r;
-    for (uint32_t way = 0; way < way_cnt; ++way) {
-      for (uint32_t word = 0; word < word_num; ++word) {
-        io.reg_write.pipe_cache_set_data_r[way][word] =
-            io.regs.pipe_cache_set_data_r[way][word];
-      }
-      io.reg_write.pipe_cache_set_tag_r[way] = io.regs.pipe_cache_set_tag_r[way];
-      io.reg_write.pipe_cache_set_valid_r[way] =
-          io.regs.pipe_cache_set_valid_r[way];
-    }
-    io.reg_write.pipe_pc_r = io.regs.pipe_pc_r;
-    io.reg_write.pipe_index_r = io.regs.pipe_index_r;
-    io.reg_write.state = io.regs.state;
-    io.reg_write.mem_axi_state = io.regs.mem_axi_state;
-    io.reg_write.mem_req_sent = io.regs.mem_req_sent;
-    for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
-      io.reg_write.mem_resp_data_r[offset] = io.regs.mem_resp_data_r[offset];
-    }
-    io.reg_write.replace_idx = io.regs.replace_idx;
-    io.reg_write.ppn_r = io.regs.ppn_r;
-    io.reg_write.sram_pending_r = io.regs.sram_pending_r;
-    io.reg_write.sram_delay_r = io.regs.sram_delay_r;
-    io.reg_write.sram_index_r = io.regs.sram_index_r;
-    io.reg_write.sram_pc_r = io.regs.sram_pc_r;
-    io.reg_write.sram_seed_r = io.regs.sram_seed_r;
+    io.reg_write = io.regs;
 
     comb_pipe1();
     comb_pipe2();
@@ -582,33 +558,7 @@ void ICache::seq_pipe1() {
   }
 
   // Apply register write-back (unconditional in seq).
-  io.regs.pipe_valid_r = io.reg_write.pipe_valid_r;
-  for (uint32_t way = 0; way < way_cnt; ++way) {
-    for (uint32_t word = 0; word < word_num; ++word) {
-      io.regs.pipe_cache_set_data_r[way][word] =
-          io.reg_write.pipe_cache_set_data_r[way][word];
-    }
-    io.regs.pipe_cache_set_tag_r[way] = io.reg_write.pipe_cache_set_tag_r[way];
-    io.regs.pipe_cache_set_valid_r[way] =
-        io.reg_write.pipe_cache_set_valid_r[way];
-  }
-  io.regs.pipe_pc_r = io.reg_write.pipe_pc_r;
-  io.regs.pipe_index_r = io.reg_write.pipe_index_r;
-
-  io.regs.state = io.reg_write.state;
-  io.regs.mem_axi_state = io.reg_write.mem_axi_state;
-  io.regs.mem_req_sent = io.reg_write.mem_req_sent;
-  for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
-    io.regs.mem_resp_data_r[offset] = io.reg_write.mem_resp_data_r[offset];
-  }
-  io.regs.replace_idx = io.reg_write.replace_idx;
-  io.regs.ppn_r = io.reg_write.ppn_r;
-
-  io.regs.sram_pending_r = io.reg_write.sram_pending_r;
-  io.regs.sram_delay_r = io.reg_write.sram_delay_r;
-  io.regs.sram_index_r = io.reg_write.sram_index_r;
-  io.regs.sram_pc_r = io.reg_write.sram_pc_r;
-  io.regs.sram_seed_r = io.reg_write.sram_seed_r;
+  io.regs = io.reg_write;
 }
 
 void ICache::log_state() {

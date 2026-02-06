@@ -30,7 +30,7 @@ def main() -> int:
         ],
         po_fields=[
             ("out", "ICache_out_t"),
-            ("reg_write", "ICache_reg_write_t"),
+            ("reg_write", "ICache_regs_t"),
             ("table_write", "ICache_table_write_t"),
         ],
         type_overrides={},
@@ -46,4 +46,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

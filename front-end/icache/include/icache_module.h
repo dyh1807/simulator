@@ -85,6 +85,7 @@ static constexpr uint32_t ICACHE_V1_OFFSET_BITS = __builtin_ctz(ICACHE_LINE_SIZE
 static constexpr uint32_t ICACHE_V1_INDEX_BITS = 12 - ICACHE_V1_OFFSET_BITS;
 static constexpr uint32_t ICACHE_V1_SET_NUM = 1u << ICACHE_V1_INDEX_BITS;
 static constexpr uint32_t ICACHE_V1_WORD_NUM = 1u << (ICACHE_V1_OFFSET_BITS - 2);
+static constexpr uint32_t ICACHE_V1_TAG_BITS = 20;
 
 // i-Cache State
 enum ICacheState {
@@ -106,11 +107,11 @@ struct ICache_lookup_in_t {
   // Transfer-valid for the lookup set view in this cycle.
   // - register-style lookup: typically true every cycle
   // - SRAM-style lookup: asserted only when the read response is ready
-  bool lookup_resp_valid = false;
+  wire1_t lookup_resp_valid = false;
   // Set view (WAYS x LINE_WORDS).
-  uint32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
-  uint32_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
-  bool lookup_set_valid[ICACHE_V1_WAYS] = {false};
+  wire32_t lookup_set_data[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
+  wire20_t lookup_set_tag[ICACHE_V1_WAYS] = {0};
+  wire1_t lookup_set_valid[ICACHE_V1_WAYS] = {false};
 };
 
 // -----------------------------------------------------------------------------
@@ -118,117 +119,89 @@ struct ICache_lookup_in_t {
 // -----------------------------------------------------------------------------
 struct ICache_regs_t {
   // Pipeline registers (between pipe1 and pipe2)
-  bool pipe_valid_r = false;
-  uint32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
-  uint32_t pipe_cache_set_tag_r[ICACHE_V1_WAYS] = {0};
-  bool pipe_cache_set_valid_r[ICACHE_V1_WAYS] = {false};
-  uint32_t pipe_pc_r = 0;
-  uint32_t pipe_index_r = 0;
+  reg1_t pipe_valid_r = false;
+  reg32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
+  reg20_t pipe_cache_set_tag_r[ICACHE_V1_WAYS] = {0};
+  reg1_t pipe_cache_set_valid_r[ICACHE_V1_WAYS] = {false};
+  reg32_t pipe_pc_r = 0;
+  reg7_t pipe_index_r = 0;
 
   // FSM + memory channel registers
-  uint8_t state = static_cast<uint8_t>(IDLE);
-  uint8_t mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
-  bool mem_req_sent = false;
+  reg2_t state = static_cast<reg2_t>(IDLE);
+  reg1_t mem_axi_state = static_cast<reg1_t>(AXI_IDLE);
+  reg1_t mem_req_sent = false;
 
   // Memory response registers
-  uint32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};
+  reg32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};
 
   // Replacement / translation state
-  uint32_t replace_idx = 0;
-  uint32_t ppn_r = 0;
+  reg8_t replace_idx = 0;
+  reg20_t ppn_r = 0;
 
   // SRAM lookup delay model registers (when enabled)
-  bool sram_pending_r = false;
-  uint32_t sram_delay_r = 0;
-  uint32_t sram_index_r = 0;
-  uint32_t sram_pc_r = 0;
-  uint32_t sram_seed_r = 1;
+  reg1_t sram_pending_r = false;
+  reg8_t sram_delay_r = 0;
+  reg7_t sram_index_r = 0;
+  reg32_t sram_pc_r = 0;
+  reg32_t sram_seed_r = 1;
 };
 
-// -----------------------------------------------------------------------------
-// Generalized-IO: register write results (applied unconditionally in seq)
-// -----------------------------------------------------------------------------
-struct ICache_reg_write_t {
-  // Pipeline registers (between pipe1 and pipe2)
-  bool pipe_valid_r = false;
-  uint32_t pipe_cache_set_data_r[ICACHE_V1_WAYS][ICACHE_V1_WORD_NUM] = {{0}};
-  uint32_t pipe_cache_set_tag_r[ICACHE_V1_WAYS] = {0};
-  bool pipe_cache_set_valid_r[ICACHE_V1_WAYS] = {false};
-  uint32_t pipe_pc_r = 0;
-  uint32_t pipe_index_r = 0;
-
-  // FSM + memory channel registers
-  uint8_t state = static_cast<uint8_t>(IDLE);
-  uint8_t mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
-  bool mem_req_sent = false;
-
-  // Memory response registers
-  uint32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};
-
-  // Replacement / translation state
-  uint32_t replace_idx = 0;
-  uint32_t ppn_r = 0;
-
-  // SRAM lookup delay model registers (when enabled)
-  bool sram_pending_r = false;
-  uint32_t sram_delay_r = 0;
-  uint32_t sram_index_r = 0;
-  uint32_t sram_pc_r = 0;
-  uint32_t sram_seed_r = 1;
-};
+// Generalized-IO note:
+// `reg_write` and `regs` share the same structure by design.
+using ICache_reg_write_t = ICache_regs_t;
 
 // -----------------------------------------------------------------------------
 // Generalized-IO: table write controls (observable write port)
 // -----------------------------------------------------------------------------
 struct ICache_table_write_t {
-  bool we = false;
-  uint32_t index = 0;
-  uint32_t way = 0;
-  uint32_t data[ICACHE_LINE_SIZE / 4] = {0};
-  uint32_t tag = 0;
-  bool valid = false;
+  wire1_t we = false;
+  wire7_t index = 0;
+  wire8_t way = 0;
+  wire32_t data[ICACHE_LINE_SIZE / 4] = {0};
+  wire20_t tag = 0;
+  wire1_t valid = false;
 };
 
 struct ICache_in_t {
   // Input from the IFU (Instruction Fetch Unit)
-  uint32_t pc = 0;        // Program Counter
-  bool ifu_req_valid = false;  // Fetch enable signal
-  bool ifu_resp_ready = true;  // actually always true in current design
-  bool refetch = false;        // Refetch signal from Top
+  wire32_t pc = 0;        // Program Counter
+  wire1_t ifu_req_valid = false;  // Fetch enable signal
+  wire1_t ifu_resp_ready = true;  // actually always true in current design
+  wire1_t refetch = false;        // Refetch signal from Top
 
   // Input from MMU (Memory Management Unit)
-  uint32_t ppn = 0;    // Physical Page Number
-  bool ppn_valid = false;  // PPN valid signal
-  bool page_fault = false; // page fault exception signal
+  wire20_t ppn = 0;    // Physical Page Number
+  wire1_t ppn_valid = false;  // PPN valid signal
+  wire1_t page_fault = false; // page fault exception signal
 
   // Input from memory
-  bool mem_req_ready = false;
-  bool mem_resp_valid = false;
+  wire1_t mem_req_ready = false;
+  wire1_t mem_resp_valid = false;
   // For compatibility with ICacheV2 top-level wiring (ignored by V1).
-  uint8_t mem_resp_id = 0;
-  uint32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0}; // Data from memory (Cache line)
+  wire4_t mem_resp_id = 0;
+  wire32_t mem_resp_data[ICACHE_LINE_SIZE / 4] = {0}; // Data from memory (Cache line)
 };
 
 struct ICache_out_t {
   // Output to the IFU (Instruction Fetch Unit)
-  bool miss = false;           // Cache miss signal
-  bool ifu_resp_valid = false; // Indicates if output data is valid
-  bool ifu_req_ready = false;  // Indicates if i-cache is allow to accept next PC
-  uint32_t ifu_resp_pc = 0;    // PC corresponding to ifu_resp
-  uint32_t rd_data[ICACHE_LINE_SIZE / 4] = {0}; // Data read from cache
-  bool ifu_page_fault = false;                 // page fault exception signal
+  wire1_t miss = false;           // Cache miss signal
+  wire1_t ifu_resp_valid = false; // Indicates if output data is valid
+  wire1_t ifu_req_ready = false;  // Indicates if i-cache is allow to accept next PC
+  wire32_t ifu_resp_pc = 0;    // PC corresponding to ifu_resp
+  wire32_t rd_data[ICACHE_LINE_SIZE / 4] = {0}; // Data read from cache
+  wire1_t ifu_page_fault = false;                 // page fault exception signal
 
   // Output to MMU (Memory Management Unit)
-  bool ppn_ready = false; // ready to accept PPN
+  wire1_t ppn_ready = false; // ready to accept PPN
   // MMU request (drive vtag for translation; unify with ICacheV2 top wiring)
-  bool mmu_req_valid = false;
-  uint32_t mmu_req_vtag = 0;
+  wire1_t mmu_req_valid = false;
+  wire20_t mmu_req_vtag = 0;
 
   // Output to memory
-  bool mem_req_valid = false;    // Memory request signal
-  uint32_t mem_req_addr = 0;     // Address for memory access
-  uint8_t mem_req_id = 0;        // For compatibility with ICacheV2 (always 0)
-  bool mem_resp_ready = false;
+  wire1_t mem_req_valid = false;    // Memory request signal
+  wire32_t mem_req_addr = 0;     // Address for memory access
+  wire4_t mem_req_id = 0;        // For compatibility with ICacheV2 (always 0)
+  wire1_t mem_resp_ready = false;
 };
 
 // cache io
