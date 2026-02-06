@@ -13,6 +13,19 @@ inline uint32_t xorshift32(uint32_t x) {
 }
 
 inline uint32_t clamp_latency(uint32_t v) { return (v < 1) ? 1 : v; }
+
+inline bool lookup_latency_enabled() { return ICACHE_LOOKUP_LATENCY > 0; }
+
+inline uint32_t lookup_fixed_latency() {
+  if (!lookup_latency_enabled()) {
+    return 0;
+  }
+  return clamp_latency(ICACHE_LOOKUP_LATENCY);
+}
+
+inline bool lookup_random_delay_enabled() {
+  return lookup_latency_enabled() && (ICACHE_SRAM_RANDOM_DELAY != 0);
+}
 } // namespace
 
 ICache::ICache() {
@@ -44,7 +57,6 @@ ICache::ICache() {
   pipe1_to_pipe2.pc_w = 0;
   pipe2_to_pipe1.ready = true;
 
-#if ICACHE_USE_SRAM_MODEL
   io.regs.sram_pending_r = false;
   sram_pending_next = false;
   io.regs.sram_delay_r = 0;
@@ -56,7 +68,6 @@ ICache::ICache() {
   io.regs.sram_seed_r = 1;
   sram_seed_next = 1;
   sram_load_fire = false;
-#endif
 }
 
 void ICache::reset() {
@@ -76,7 +87,6 @@ void ICache::reset() {
   io.regs.pipe_index_r = 0;
   pipe2_to_pipe1.ready = true;
 
-#if ICACHE_USE_SRAM_MODEL
   io.regs.sram_pending_r = false;
   sram_pending_next = false;
   io.regs.sram_delay_r = 0;
@@ -89,22 +99,22 @@ void ICache::reset() {
   sram_seed_next = 1;
   sram_load_fire = false;
 
-#if ICACHE_SRAM_RANDOM_DELAY
-  uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
-  uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
-  if (max_lat < min_lat) {
-    max_lat = min_lat;
+  if (lookup_latency_enabled()) {
+    if (lookup_random_delay_enabled()) {
+      uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
+      uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
+      if (max_lat < min_lat) {
+        max_lat = min_lat;
+      }
+      std::cout << "[icache] SRAM model: random latency " << min_lat << "-"
+                << max_lat << " cycles" << std::endl;
+    } else {
+      std::cout << "[icache] SRAM model: fixed latency "
+                << lookup_fixed_latency() << " cycles" << std::endl;
+    }
+  } else {
+    std::cout << "[icache] SRAM model: disabled (register lookup)" << std::endl;
   }
-  std::cout << "[icache] SRAM model: random latency " << min_lat << "-"
-            << max_lat << " cycles" << std::endl;
-#else
-  uint32_t fixed_lat = clamp_latency(ICACHE_SRAM_FIXED_LATENCY);
-  std::cout << "[icache] SRAM model: fixed latency " << fixed_lat
-            << " cycles" << std::endl;
-#endif
-#else
-  std::cout << "[icache] SRAM model: disabled (register lookup)" << std::endl;
-#endif
 }
 
 void ICache::invalidate_all() {
@@ -191,9 +201,9 @@ void ICache::export_lookup_set_for_pc(
     uint32_t out_tag[ICACHE_V1_WAYS], bool out_valid[ICACHE_V1_WAYS]) const {
   uint32_t pc_index = (pc >> offset_bits) & (set_num - 1u);
   uint32_t rd_index = pc_index;
-#if ICACHE_USE_SRAM_MODEL
-  rd_index = io.regs.sram_pending_r ? io.regs.sram_index_r : pc_index;
-#endif
+  if (lookup_latency_enabled()) {
+    rd_index = io.regs.sram_pending_r ? io.regs.sram_index_r : pc_index;
+  }
 
   for (uint32_t way = 0; way < way_cnt; ++way) {
     for (uint32_t word = 0; word < word_num; ++word) {
@@ -235,64 +245,67 @@ void ICache::lookup_read_set(uint32_t lookup_index, bool gate_valid_with_req) {
 }
 
 void ICache::lookup(uint32_t index) {
-#if ICACHE_USE_SRAM_MODEL
-  // SRAM delay model: track pending lookup and delay before data is ready.
-  sram_pending_next = io.regs.sram_pending_r;
-  sram_delay_next = io.regs.sram_delay_r;
-  sram_index_next = io.regs.sram_index_r;
+  const bool use_latency = lookup_latency_enabled();
+
+  // Lookup delay model state (used when latency > 0)
+  sram_pending_next = use_latency ? io.regs.sram_pending_r : false;
+  sram_delay_next = use_latency ? io.regs.sram_delay_r : 0;
+  sram_index_next = use_latency ? io.regs.sram_index_r : 0;
   sram_seed_next = io.regs.sram_seed_r;
-  sram_pc_next = io.regs.sram_pc_r;
+  sram_pc_next = use_latency ? io.regs.sram_pc_r : 0;
   sram_load_fire = false;
 
   uint32_t lookup_index =
-      io.regs.sram_pending_r ? io.regs.sram_index_r : index;
-  lookup_read_set(lookup_index, /*gate_valid_with_req=*/false);
+      (use_latency && io.regs.sram_pending_r) ? io.regs.sram_index_r : index;
+  lookup_read_set(lookup_index, /*gate_valid_with_req=*/!use_latency);
   pipe1_to_pipe2.valid = io.in.ifu_req_valid;
-  pipe1_to_pipe2.pc_w = io.regs.sram_pending_r ? io.regs.sram_pc_r : io.in.pc;
+  pipe1_to_pipe2.pc_w =
+      (use_latency && io.regs.sram_pending_r) ? io.regs.sram_pc_r : io.in.pc;
 
   if (io.in.refetch) {
     pipe1_to_pipe2.valid_next = false;
     io.out.ifu_req_ready = false;
     io.out.mmu_req_valid = false;
-    sram_pending_next = false;
-    sram_delay_next = 0;
     io.reg_write.pipe_valid_r = pipe1_to_pipe2.valid_next;
-    io.reg_write.sram_pending_r = sram_pending_next;
-    io.reg_write.sram_delay_r = sram_delay_next;
+    io.reg_write.sram_pending_r = false;
+    io.reg_write.sram_delay_r = 0;
+    io.reg_write.sram_index_r = 0;
+    io.reg_write.sram_pc_r = 0;
+    io.reg_write.sram_seed_r = sram_seed_next;
     return;
   }
 
-  // Accept new request only when no pending SRAM lookup.
-  bool can_accept =
-      io.in.ifu_req_valid && pipe2_to_pipe1.ready && !io.regs.sram_pending_r;
+  bool can_accept = io.in.ifu_req_valid && pipe2_to_pipe1.ready &&
+                    (!use_latency || !io.regs.sram_pending_r);
   if (can_accept) {
-    uint32_t latency = ICACHE_SRAM_FIXED_LATENCY;
-#if ICACHE_SRAM_RANDOM_DELAY
-    uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
-    uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
-    if (max_lat < min_lat) {
-      max_lat = min_lat;
-    }
-    uint32_t seed = xorshift32(io.regs.sram_seed_r);
-    sram_seed_next = seed;
-    uint32_t range = max_lat - min_lat + 1;
-    latency = min_lat + (seed % range);
-#endif
-    latency = clamp_latency(latency); // treat 0 as 1
-    if (latency <= 1) {
-      // Data ready for next cycle
+    if (!use_latency) {
       sram_load_fire = true;
     } else {
-      // Extra delay cycles beyond the base 1-cycle pipeline
-      sram_pending_next = true;
-      sram_delay_next = latency - 1;
-      sram_index_next = index;
-      sram_pc_next = io.in.pc;
+      uint32_t latency = lookup_fixed_latency();
+      if (lookup_random_delay_enabled()) {
+        uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
+        uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
+        if (max_lat < min_lat) {
+          max_lat = min_lat;
+        }
+        uint32_t seed = xorshift32(io.regs.sram_seed_r);
+        sram_seed_next = seed;
+        uint32_t range = max_lat - min_lat + 1;
+        latency = min_lat + (seed % range);
+      }
+      latency = clamp_latency(latency);
+      if (latency <= 1) {
+        sram_load_fire = true;
+      } else {
+        sram_pending_next = true;
+        sram_delay_next = latency - 1;
+        sram_index_next = index;
+        sram_pc_next = io.in.pc;
+      }
     }
   }
 
-  // Progress pending SRAM lookup
-  if (io.regs.sram_pending_r) {
+  if (use_latency && io.regs.sram_pending_r) {
     if (io.regs.sram_delay_r <= 1) {
       sram_load_fire = true;
       sram_pending_next = false;
@@ -312,10 +325,10 @@ void ICache::lookup(uint32_t index) {
 
   // Sequential register write-back (applied in seq)
   io.reg_write.pipe_valid_r = pipe1_to_pipe2.valid_next;
-  io.reg_write.sram_pending_r = sram_pending_next;
-  io.reg_write.sram_delay_r = sram_delay_next;
-  io.reg_write.sram_index_r = sram_index_next;
-  io.reg_write.sram_pc_r = sram_pc_next;
+  io.reg_write.sram_pending_r = use_latency ? sram_pending_next : false;
+  io.reg_write.sram_delay_r = use_latency ? sram_delay_next : 0;
+  io.reg_write.sram_index_r = use_latency ? sram_index_next : 0;
+  io.reg_write.sram_pc_r = use_latency ? sram_pc_next : 0;
   io.reg_write.sram_seed_r = sram_seed_next;
 
   if (sram_load_fire && !io.in.refetch) {
@@ -324,7 +337,8 @@ void ICache::lookup(uint32_t index) {
         io.reg_write.pipe_cache_set_data_r[way][word] =
             pipe1_to_pipe2.cache_set_data_w[way][word];
       }
-      io.reg_write.pipe_cache_set_tag_r[way] = pipe1_to_pipe2.cache_set_tag_w[way];
+      io.reg_write.pipe_cache_set_tag_r[way] =
+          pipe1_to_pipe2.cache_set_tag_w[way];
       io.reg_write.pipe_cache_set_valid_r[way] =
           pipe1_to_pipe2.cache_set_valid_w[way];
     }
@@ -340,61 +354,13 @@ void ICache::lookup(uint32_t index) {
   } else if (io.regs.pipe_valid_r && !io.in.ppn_valid) {
     io.out.mmu_req_valid = true;
     io.out.mmu_req_vtag = io.regs.pipe_pc_r >> 12;
-  } else if (sram_pending_next) {
+  } else if (use_latency && sram_pending_next) {
     io.out.mmu_req_valid = true;
     io.out.mmu_req_vtag = sram_pc_next >> 12;
   }
 
-  io.out.ifu_req_ready = pipe2_to_pipe1.ready && !io.regs.sram_pending_r;
-#else
-  lookup_read_set(index, /*gate_valid_with_req=*/true);
-  pipe1_to_pipe2.valid = io.in.ifu_req_valid;
-  pipe1_to_pipe2.pc_w = io.in.pc;
-
-  if (io.in.refetch) {
-    pipe1_to_pipe2.valid_next = false;
-    io.out.ifu_req_ready = false;
-    io.out.mmu_req_valid = false;
-    io.reg_write.pipe_valid_r = pipe1_to_pipe2.valid_next;
-    return;
-  }
-
-  bool fire = io.in.ifu_req_valid && pipe2_to_pipe1.ready;
-  if (fire) {
-    pipe1_to_pipe2.valid_next = true;
-  } else if (pipe2_to_pipe1.ready) {
-    pipe1_to_pipe2.valid_next = false;
-  } else {
-    pipe1_to_pipe2.valid_next = io.regs.pipe_valid_r;
-  }
-  io.out.ifu_req_ready = pipe2_to_pipe1.ready;
-
-  // Sequential register write-back (applied in seq)
-  io.reg_write.pipe_valid_r = pipe1_to_pipe2.valid_next;
-  if (fire && !io.in.refetch) {
-    for (uint32_t way = 0; way < way_cnt; ++way) {
-      for (uint32_t word = 0; word < word_num; ++word) {
-        io.reg_write.pipe_cache_set_data_r[way][word] =
-            pipe1_to_pipe2.cache_set_data_w[way][word];
-      }
-      io.reg_write.pipe_cache_set_tag_r[way] = pipe1_to_pipe2.cache_set_tag_w[way];
-      io.reg_write.pipe_cache_set_valid_r[way] =
-          pipe1_to_pipe2.cache_set_valid_w[way];
-    }
-    io.reg_write.pipe_pc_r = pipe1_to_pipe2.pc_w;
-    io.reg_write.pipe_index_r = pipe1_to_pipe2.index_w;
-  }
-
-  // MMU request generation (match ICacheV2 top-level wiring).
-  io.out.mmu_req_valid = false;
-  if (fire) {
-    io.out.mmu_req_valid = true;
-    io.out.mmu_req_vtag = io.in.pc >> 12;
-  } else if (io.regs.pipe_valid_r && !io.in.ppn_valid) {
-    io.out.mmu_req_valid = true;
-    io.out.mmu_req_vtag = io.regs.pipe_pc_r >> 12;
-  }
-#endif
+  io.out.ifu_req_ready =
+      pipe2_to_pipe1.ready && (!use_latency || !io.regs.sram_pending_r);
 }
 
 void ICache::comb_pipe1() {

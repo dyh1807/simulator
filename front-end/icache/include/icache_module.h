@@ -28,8 +28,10 @@
 // -----------------------------------------------------------------------------
 // SRAM lookup latency model (ICache)
 // -----------------------------------------------------------------------------
-// Use SRAM-style lookup model (with configurable latency). When disabled,
-// legacy register-based behavior is preserved.
+// Legacy compatibility macro:
+// - 0: register-style lookup
+// - 1: SRAM-style lookup
+// New code should prefer ICACHE_LOOKUP_LATENCY (0 = register, 1..N = SRAM).
 #ifndef ICACHE_USE_SRAM_MODEL
 #define ICACHE_USE_SRAM_MODEL 0
 #endif
@@ -48,6 +50,17 @@
 #endif
 #ifndef ICACHE_SRAM_RANDOM_MAX
 #define ICACHE_SRAM_RANDOM_MAX 4
+#endif
+// Unified lookup latency interface:
+// - 0: register-style lookup (same-cycle set read path)
+// - 1..N: SRAM-style lookup with N-cycle response latency model
+// Default keeps backward compatibility with ICACHE_USE_SRAM_MODEL.
+#ifndef ICACHE_LOOKUP_LATENCY
+#if ICACHE_USE_SRAM_MODEL
+#define ICACHE_LOOKUP_LATENCY ICACHE_SRAM_FIXED_LATENCY
+#else
+#define ICACHE_LOOKUP_LATENCY 0
+#endif
 #endif
 
 // -----------------------------------------------------------------------------
@@ -334,7 +347,7 @@ private:
    */
   uint32_t replace_idx_next = 0;
 
-  // SRAM lookup delay model (used when ICACHE_USE_SRAM_MODEL=1)
+  // Lookup delay model state (used when ICACHE_LOOKUP_LATENCY > 0)
   bool sram_pending_next = false;
   uint32_t sram_delay_next = 0;
   uint32_t sram_index_next = 0;
