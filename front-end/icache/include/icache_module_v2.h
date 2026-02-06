@@ -117,6 +117,7 @@ struct ICacheV2_in_t {
   wire1_t ifu_req_valid = false;
   wire1_t ifu_resp_ready = true;
   wire1_t refetch = false;
+  wire1_t flush = false;
 
   // Input from MMU
   wire20_t ppn = 0;

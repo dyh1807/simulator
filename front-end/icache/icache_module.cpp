@@ -222,6 +222,7 @@ void ICache::lookup_read_set(uint32_t lookup_index, bool gate_valid_with_req) {
 
 void ICache::lookup(uint32_t index) {
   const bool use_latency = lookup_latency_enabled();
+  const bool kill_pipe = io.in.refetch;
 
   // Lookup delay model state (used when latency > 0)
   sram_pending_next = use_latency ? io.regs.sram_pending_r : false;
@@ -238,7 +239,7 @@ void ICache::lookup(uint32_t index) {
   pipe1_to_pipe2.pc_w =
       (use_latency && io.regs.sram_pending_r) ? io.regs.sram_pc_r : io.in.pc;
 
-  if (io.in.refetch) {
+  if (kill_pipe) {
     pipe1_to_pipe2.valid_next = false;
     io.out.ifu_req_ready = false;
     io.out.mmu_req_valid = false;
@@ -307,7 +308,7 @@ void ICache::lookup(uint32_t index) {
   io.reg_write.sram_pc_r = use_latency ? sram_pc_next : 0;
   io.reg_write.sram_seed_r = sram_seed_next;
 
-  if (sram_load_fire && !io.in.refetch) {
+  if (sram_load_fire && !kill_pipe) {
     for (uint32_t way = 0; way < way_cnt; ++way) {
       for (uint32_t word = 0; word < word_num; ++word) {
         io.reg_write.pipe_cache_set_data_r[way][word] =
@@ -370,10 +371,11 @@ void ICache::comb_pipe2() {
   state_next = state;
   mem_axi_state_next = mem_axi_state;
   pipe2_to_pipe1.ready = false; // Default blocked
+  const bool kill_pipe = io.in.refetch;
 
   switch (state) {
   case IDLE:
-    if (io.in.refetch) {
+    if (kill_pipe) {
       state_next = IDLE;
       pipe2_to_pipe1.ready = true;
       break;
@@ -419,7 +421,7 @@ void ICache::comb_pipe2() {
     break;
 
   case SWAP_IN:
-    if (io.in.refetch) {
+    if (kill_pipe) {
       if (mem_axi_state != AXI_IDLE) {
         state_next = DRAIN;
         pipe2_to_pipe1.ready = false;
@@ -468,16 +470,18 @@ void ICache::comb_pipe2() {
   case SWAP_IN_OKEY:
     state_next = IDLE;
 
-    io.table_write.we = true;
-    io.table_write.index = io.regs.pipe_index_r;
-    io.table_write.way = io.regs.replace_idx;
-    for (uint32_t word = 0; word < word_num; ++word) {
-      io.table_write.data[word] = io.regs.mem_resp_data_r[word];
+    if (!io.in.flush) {
+      io.table_write.we = true;
+      io.table_write.index = io.regs.pipe_index_r;
+      io.table_write.way = io.regs.replace_idx;
+      for (uint32_t word = 0; word < word_num; ++word) {
+        io.table_write.data[word] = io.regs.mem_resp_data_r[word];
+      }
+      io.table_write.tag = io.regs.ppn_r;
+      io.table_write.valid = true;
     }
-    io.table_write.tag = io.regs.ppn_r;
-    io.table_write.valid = true;
 
-    if (!io.in.refetch) {
+    if (!io.in.refetch && !io.in.flush) {
       io.out.ifu_resp_valid = true;
       for (uint32_t word = 0; word < word_num; ++word) {
         io.out.rd_data[word] = io.regs.mem_resp_data_r[word];
@@ -544,8 +548,13 @@ void ICache::comb_pipe2() {
 }
 
 void ICache::seq_pipe1() {
+  if (io.in.flush) {
+    // fence.i visibility point: invalidate cache lines at seq boundary.
+    invalidate_all();
+  }
+
   // Apply table write (register-based table backend).
-  if (io.table_write.we) {
+  if (io.table_write.we && !io.in.flush) {
     uint32_t index = io.table_write.index;
     uint32_t way = io.table_write.way;
     if (index < set_num && way < way_cnt) {

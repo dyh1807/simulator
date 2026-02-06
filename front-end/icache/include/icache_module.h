@@ -168,6 +168,7 @@ struct ICache_in_t {
   wire1_t ifu_req_valid = false;  // Fetch enable signal
   wire1_t ifu_resp_ready = true;  // actually always true in current design
   wire1_t refetch = false;        // Refetch signal from Top
+  wire1_t flush = false;          // fence.i flush signal from Top
 
   // Input from MMU (Memory Management Unit)
   wire20_t ppn = 0;    // Physical Page Number

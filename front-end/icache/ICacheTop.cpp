@@ -113,10 +113,12 @@ template <typename HW> void TrueICacheTopT<HW>::comb() {
     cpu.mmu.io.in.mmu_ifu_req.valid = false;
     cpu.mmu.io.in.mmu_ifu_req.vtag = 0;
 #endif
+    icache_hw.io.in.flush = false;
     return;
   }
 
   icache_hw.io.in.refetch = in->refetch;
+  icache_hw.io.in.flush = in->flush;
 
   // IFU request
   icache_hw.io.in.pc = in->fetch_address;
@@ -402,10 +404,12 @@ template <typename HW> void SimDDRICacheTopT<HW>::comb() {
     port.req.total_size = 0;
     port.req.id = 0;
     port.resp.ready = false;
+    icache_hw.io.in.flush = false;
     return;
   }
 
   icache_hw.io.in.refetch = in->refetch;
+  icache_hw.io.in.flush = in->flush;
 
   // IFU request
   icache_hw.io.in.pc = in->fetch_address;

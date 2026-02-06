@@ -901,13 +901,14 @@ void ICacheV2::comb() {
   memreq_latched_id_next_ = memreq_latched_id_r_;
   memreq_latched_mshr_next_ = memreq_latched_mshr_r_;
 
-  // Refetch: kill inflight state and unblock next cycle.
-  if (io.in.refetch) {
+  // Refetch kill path (existing behavior).
+  const bool kill_pipe = io.in.refetch;
+  if (kill_pipe) {
     epoch_next_ = epoch_r_ + 1;
 
-    // If a memory response arrives in the refetch cycle, we will drop the data
-    // (pipeline is killed). Make sure to free the txid now; otherwise, the
-    // interconnect may consume the response (ready=1) and the txid would leak.
+    // If a memory response arrives in the kill cycle, we will drop the data.
+    // Make sure to free the txid now; otherwise, the interconnect may consume
+    // the response (ready=1) and the txid would leak.
     if (io.in.mem_resp_valid) {
       uint8_t rid = static_cast<uint8_t>(io.in.mem_resp_id & 0xF);
       if (txid_inflight_next_[rid]) {
@@ -919,7 +920,7 @@ void ICacheV2::comb() {
     // - If the request was already accepted by memory (MSHR in WAIT_RESP),
     //   keep txid inflight and mark canceled so the eventual response frees it.
     // - If the request was never accepted (ALLOC/SENDING or unbound), free txid
-    //   immediately (otherwise refetch can leak all txids over time).
+    //   immediately (otherwise kill can leak all txids over time).
     for (int id = 0; id < 16; ++id) {
       if (!txid_inflight_next_[id]) {
         continue;
@@ -1510,8 +1511,13 @@ void ICacheV2::seq() {
     }
   }
 
+  // fence.i visibility point: invalidate cache lines at seq boundary.
+  if (io.in.flush) {
+    std::fill(cache_valid_.begin(), cache_valid_.end(), 0);
+  }
+
   // Apply cache fill (single line) via explicit table-write output.
-  if (io.table_write.we) {
+  if (io.table_write.we && !io.in.flush) {
     cache_write_line(io.table_write.set, io.table_write.way, io.table_write.data);
     cache_set_tag_valid(io.table_write.set, io.table_write.way, io.table_write.tag,
                         io.table_write.valid);

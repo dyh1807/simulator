@@ -13,11 +13,15 @@ icache_module_v2_n::ICacheV2 icache_v2;
 
 void icache_top(struct icache_in *in, struct icache_out *out) {
   ICacheTop *instance = get_icache_instance();
-  if (flush_pending) {
-    instance->flush();
+
+  icache_in merged_in = *in;
+  if (flush_pending && !in->run_comb_only) {
+    // Consume fence.i flush on the real comb+seq step.
+    merged_in.flush = true;
     flush_pending = false;
   }
-  instance->setIO(in, out);
+
+  instance->setIO(&merged_in, out);
   instance->setContext(&cpu.ctx);
   instance->step();
 }

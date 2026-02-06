@@ -40,6 +40,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     // get icache_read_ready signal for this cycle
     icache_in.reset = in->reset;
     icache_in.refetch = in->refetch;
+    icache_in.flush = false; // reserved for fence.i wiring, currently disabled
     icache_in.run_comb_only = true;
     icache_in.icache_read_valid = false;
     // Match real backpressure when probing `icache_read_ready`; otherwise the
@@ -62,6 +63,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     icache_in.reset = in->reset;
     icache_in.run_comb_only = false;
     icache_in.refetch = in->refetch;
+    icache_in.flush = false; // reserved for fence.i wiring, currently disabled
     icache_in.icache_read_valid =
         bpu_out.icache_read_valid && fetch_allow;
     icache_in.fetch_address = bpu_out.fetch_address;
@@ -161,6 +163,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     // set icache input
     icache_in.reset = in->reset;
     icache_in.refetch = false;
+    icache_in.flush = false; // reserved for fence.i wiring, currently disabled
     icache_in.run_comb_only = false;
     icache_in.icache_read_valid = false;
     icache_in.fetch_address = bpu_out.fetch_address;
@@ -225,6 +228,7 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
       // icache_in.reset = true;
       icache_in.reset = false;
       icache_in.refetch = true;
+      icache_in.flush = false;
       icache_in.icache_read_valid = false;
       icache_in.icache_resp_ready = false;
       icache_top(&icache_in, &icache_out);
