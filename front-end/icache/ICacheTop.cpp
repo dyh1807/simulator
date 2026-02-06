@@ -6,24 +6,20 @@
 #include "config.h" // For SimContext
 #include "cvt.h"
 #include "include/icache_module.h"
-#ifdef USE_ICACHE_V2
 #include "include/icache_module_v2.h"
-#endif
 #ifdef CONFIG_MMU
 #include "mmu_io.h"
 #include <MMU.h>
 #endif
 #include <SimCpu.h>
+#include <array>
 #include <cstdio>
 #include <iostream>
+#include <memory>
 
 // External dependencies
 extern SimCpu cpu;
 extern uint32_t *p_memory;
-extern icache_module_n::ICache icache; // Defined in icache.cpp
-#ifdef USE_ICACHE_V2
-extern icache_module_v2_n::ICacheV2 icache_v2; // Defined in icache.cpp
-#endif
 
 // Initialize static member
 bool ICacheTop::debug_enable = false;
@@ -44,13 +40,63 @@ void ICacheTop::syncPerf() {
   miss_delta = 0;
 }
 
+namespace {
+
+icache_module_n::ICache g_icache;
+icache_module_v2_n::ICacheV2 g_icache_v2;
+
+// Implementation using the Simple ICache Model (Ideal P-Memory Access)
+class SimpleICacheTop : public ICacheTop {
+public:
+  void comb() override;
+  void seq() override;
+  void flush() override {}
+};
+
+// Implementation using the True ICache Module (Detailed Simulation)
+template <typename HW> class TrueICacheTopT : public ICacheTop {
+private:
+  // Simple non-AXI memory model with multiple outstanding transactions (0..15)
+  std::array<uint8_t, 16> mem_valid{};
+  std::array<uint32_t, 16> mem_addr{};
+  std::array<uint32_t, 16> mem_age{};
+
+  HW &icache_hw;
+
+  // When CONFIG_MMU is disabled, ICacheTop provides a minimal translation stub
+  // using va2pa() (if paging is enabled) or identity mapping. The stub returns
+  // translation results one cycle after the request.
+  bool mmu_stub_req_valid_r = false;
+  uint32_t mmu_stub_req_vtag_r = 0;
+
+public:
+  explicit TrueICacheTopT(HW &hw) : icache_hw(hw) {}
+  void comb() override;
+  void seq() override;
+  void flush() override { icache_hw.invalidate_all(); }
+};
+
+#ifdef USE_SIM_DDR
+// Implementation using TrueICache + AXI-Interconnect + SimDDR
+template <typename HW> class SimDDRICacheTopT : public ICacheTop {
+private:
+  HW &icache_hw;
+
+  bool mmu_stub_req_valid_r = false;
+  uint32_t mmu_stub_req_vtag_r = 0;
+
+public:
+  explicit SimDDRICacheTopT(HW &hw) : icache_hw(hw) {}
+  void comb() override;
+  void seq() override;
+  void flush() override { icache_hw.invalidate_all(); }
+};
+#endif
+
+} // namespace
+
 // --- TrueICacheTop Implementation ---
-
-TrueICacheTop::TrueICacheTop(ICacheHW &hw) : icache_hw(hw) {}
-
-void TrueICacheTop::flush() { icache_hw.invalidate_all(); }
-
-void TrueICacheTop::comb() {
+template <typename HW> void TrueICacheTopT<HW>::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
     out->icache_read_complete = false;
@@ -181,7 +227,7 @@ void TrueICacheTop::comb() {
   out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
 }
 
-void TrueICacheTop::seq() {
+template <typename HW> void TrueICacheTopT<HW>::seq() {
   if (in->reset) {
     // Sequential reset: clear internal state at the cycle boundary.
     icache_hw.reset();
@@ -332,11 +378,7 @@ void SimpleICacheTop::seq() {
 // --- SimDDRICacheTop Implementation ---
 #include <MemorySubsystem.h>
 
-SimDDRICacheTop::SimDDRICacheTop(ICacheHW &hw) : icache_hw(hw) {}
-
-void SimDDRICacheTop::flush() { icache_hw.invalidate_all(); }
-
-void SimDDRICacheTop::comb() {
+template <typename HW> void SimDDRICacheTopT<HW>::comb() {
   if (in->reset) {
     DEBUG_LOG("[icache_top] reset\n");
     out->icache_read_complete = false;
@@ -493,7 +535,7 @@ void SimDDRICacheTop::comb() {
   out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
 }
 
-void SimDDRICacheTop::seq() {
+template <typename HW> void SimDDRICacheTopT<HW>::seq() {
   if (in->reset) {
     icache_hw.reset();
     mmu_stub_req_valid_r = false;
@@ -529,15 +571,20 @@ ICacheTop *get_icache_instance() {
     instance = std::make_unique<SimpleICacheTop>();
 #elif defined(USE_SIM_DDR)
 #ifdef USE_ICACHE_V2
-    instance = std::make_unique<SimDDRICacheTop>(icache_v2);
+    instance =
+        std::make_unique<SimDDRICacheTopT<icache_module_v2_n::ICacheV2>>(
+            g_icache_v2);
 #else
-    instance = std::make_unique<SimDDRICacheTop>(icache);
+    instance = std::make_unique<SimDDRICacheTopT<icache_module_n::ICache>>(
+        g_icache);
 #endif
 #elif defined(USE_TRUE_ICACHE)
 #ifdef USE_ICACHE_V2
-    instance = std::make_unique<TrueICacheTop>(icache_v2);
+    instance = std::make_unique<TrueICacheTopT<icache_module_v2_n::ICacheV2>>(
+        g_icache_v2);
 #else
-    instance = std::make_unique<TrueICacheTop>(icache);
+    instance = std::make_unique<TrueICacheTopT<icache_module_n::ICache>>(
+        g_icache);
 #endif
 #else
     instance = std::make_unique<SimpleICacheTop>();

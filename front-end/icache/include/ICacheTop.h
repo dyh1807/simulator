@@ -2,21 +2,10 @@
 #define ICACHE_TOP_H
 
 #include "../../front_IO.h" // For icache_in, icache_out
-#include "../include/icache_module.h"
-#ifdef USE_ICACHE_V2
-#include "../include/icache_module_v2.h"
-#endif
-#include <array>
-#include <memory>
+
+#include <cstdint>
 
 class SimContext; // Forward declaration
-
-// Select which icache module instance to wrap in ICacheTop.
-#ifdef USE_ICACHE_V2
-using ICacheHW = icache_module_v2_n::ICacheV2;
-#else
-using ICacheHW = icache_module_n::ICache;
-#endif
 
 // Abstract Base Class for ICache Top-level Logic
 class ICacheTop {
@@ -63,54 +52,6 @@ public:
 
   virtual ~ICacheTop() {}
 };
-
-// Implementation using the True ICache Module (Detailed Simulation)
-class TrueICacheTop : public ICacheTop {
-private:
-  // Simple non-AXI memory model with multiple outstanding transactions (0..15)
-  std::array<uint8_t, 16> mem_valid{};
-  std::array<uint32_t, 16> mem_addr{};
-  std::array<uint32_t, 16> mem_age{};
-
-  ICacheHW &icache_hw;
-
-  // When CONFIG_MMU is disabled, ICacheTop provides a minimal translation stub
-  // using va2pa() (if paging is enabled) or identity mapping. The stub returns
-  // translation results one cycle after the request.
-  bool mmu_stub_req_valid_r = false;
-  uint32_t mmu_stub_req_vtag_r = 0;
-
-public:
-  TrueICacheTop(ICacheHW &hw);
-  void comb() override;
-  void seq() override;
-  void flush() override;
-};
-
-// Implementation using the Simple ICache Model (Ideal P-Memory Access)
-class SimpleICacheTop : public ICacheTop {
-public:
-  void comb() override;
-  void seq() override;
-  void flush() override {}
-};
-
-#ifdef USE_SIM_DDR
-// Implementation using TrueICache + AXI-Interconnect + SimDDR
-class SimDDRICacheTop : public ICacheTop {
-private:
-  ICacheHW &icache_hw;
-
-  bool mmu_stub_req_valid_r = false;
-  uint32_t mmu_stub_req_vtag_r = 0;
-
-public:
-  SimDDRICacheTop(ICacheHW &hw);
-  void comb() override;
-  void seq() override;
-  void flush() override;
-};
-#endif
 
 // Factory function to get the singleton instance
 ICacheTop *get_icache_instance();
