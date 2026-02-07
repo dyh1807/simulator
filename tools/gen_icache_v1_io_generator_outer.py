@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 # Import generator helpers from the same folder.
@@ -13,6 +14,11 @@ from gen_io_generator_outer import generate_outer_header  # noqa: E402
 
 def main() -> int:
     repo_root = os.path.normpath(os.path.join(THIS_DIR, os.pardir))
+
+    subprocess.run(
+        [sys.executable, os.path.join(THIS_DIR, "gen_icache_v1_pi_po.py")],
+        check=True,
+    )
 
     out_path = os.path.join(repo_root, "io_generator_outer.h")
 
@@ -35,4 +41,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

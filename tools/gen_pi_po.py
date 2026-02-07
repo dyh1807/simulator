@@ -63,14 +63,19 @@ def parse_fields(struct_body: str) -> List[Field]:
         s = stmt.strip()
         if not s:
             continue
-        # Skip function declarations or nested type declarations.
-        if "(" in s or ")" in s:
-            continue
         if s.startswith("struct ") or s.startswith("enum ") or s.startswith("using "):
             continue
         # Drop default initializer.
         if "=" in s:
             s = s.split("=", 1)[0].strip()
+        if not s:
+            continue
+        # Skip function declarations or nested type declarations.
+        # NOTE: this check must happen after stripping initializers; otherwise
+        # fields initialized by expressions like static_cast<...>(...) are
+        # incorrectly dropped.
+        if "(" in s or ")" in s:
+            continue
 
         # Example: `uint32_t cache_data[ICACHE_V1_SET_NUM][ICACHE_V1_WAYS]`
         m = re.match(
@@ -185,7 +190,13 @@ def generate_header(
         text = strip_comments(f.read())
 
     struct_fields: Dict[str, List[Field]] = {}
-    needed_structs = {s for _, s in list(pi_fields) + list(po_fields)}
+    needed_structs: List[str] = []
+    seen_structs = set()
+    for _, struct_name in list(pi_fields) + list(po_fields):
+        if struct_name in seen_structs:
+            continue
+        seen_structs.add(struct_name)
+        needed_structs.append(struct_name)
     for struct_name in needed_structs:
         body = find_struct_body(text, struct_name)
         struct_fields[struct_name] = parse_fields(body)

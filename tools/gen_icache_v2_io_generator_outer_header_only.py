@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 # Import generator helpers from the same folder.
@@ -13,6 +14,11 @@ from gen_io_generator_outer_header_only import generate_outer_header_only  # noq
 
 def main() -> int:
     repo_root = os.path.normpath(os.path.join(THIS_DIR, os.pardir))
+
+    subprocess.run(
+        [sys.executable, os.path.join(THIS_DIR, "gen_icache_v2_pi_po.py")],
+        check=True,
+    )
 
     out_path = os.path.join(repo_root, "io_generator_outer.h")
     impl_cpp_path = os.path.join(
