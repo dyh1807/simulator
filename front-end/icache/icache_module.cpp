@@ -1,5 +1,4 @@
 #include "include/icache_module.h"
-#include <cstring>
 #include <iostream>
 
 using namespace icache_module_n;
@@ -27,7 +26,6 @@ ICache::ICache() {
   state_next = IDLE;
   io.regs.mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
   mem_axi_state_next = AXI_IDLE;
-  io.regs.mem_req_sent = false;
   io.regs.replace_idx = 0;
   replace_idx_next = 0;
   io.regs.ppn_r = 0;
@@ -51,7 +49,6 @@ void ICache::reset() {
   state_next = IDLE;
   io.regs.mem_axi_state = static_cast<uint8_t>(AXI_IDLE);
   mem_axi_state_next = AXI_IDLE;
-  io.regs.mem_req_sent = false;
   io.regs.replace_idx = 0;
   replace_idx_next = 0;
   io.regs.ppn_r = 0;
@@ -474,22 +471,6 @@ void ICache::comb_pipe2() {
     io.reg_write.replace_idx = replace_idx_next;
   }
 
-  // Track outstanding memory request status.
-  bool mem_req_sent_next = io.regs.mem_req_sent;
-  if (state == SWAP_IN && mem_axi_state == AXI_IDLE && io.out.mem_req_valid &&
-      io.in.mem_req_ready) {
-    mem_req_sent_next = true;
-  }
-  if (state == SWAP_IN && state_next == SWAP_IN_OKEY) {
-    mem_req_sent_next = false;
-  }
-  if (state == DRAIN && io.in.mem_resp_valid) {
-    mem_req_sent_next = false;
-  }
-  if (state == IDLE) {
-    mem_req_sent_next = false;
-  }
-  io.reg_write.mem_req_sent = mem_req_sent_next;
 }
 
 void ICache::seq_pipe1() {

@@ -129,7 +129,6 @@ struct ICache_regs_t {
   // FSM + memory channel registers
   reg2_t state = static_cast<reg2_t>(IDLE);
   reg1_t mem_axi_state = static_cast<reg1_t>(AXI_IDLE);
-  reg1_t mem_req_sent = false;
 
   // Memory response registers
   reg32_t mem_resp_data_r[ICACHE_LINE_SIZE / 4] = {0};

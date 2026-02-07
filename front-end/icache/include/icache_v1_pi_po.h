@@ -97,7 +97,7 @@ for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_resp_ready = static_cast<wire1_t>(tmp); }
 }
 
-static constexpr size_t ICache_regs_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS)) + (32 * 1) + (7 * 1) + (1 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (8 * 1) + (20 * 1);
+static constexpr size_t ICache_regs_t_BITS = (1 * 1) + (32 * (ICACHE_V1_WAYS) * (ICACHE_V1_WORD_NUM)) + (20 * (ICACHE_V1_WAYS)) + (1 * (ICACHE_V1_WAYS)) + (32 * 1) + (7 * 1) + (32 * (ICACHE_LINE_SIZE / 4)) + (8 * 1) + (20 * 1);
 inline void pack_ICache_regs_t(const icache_module_n::ICache_regs_t &v, bool *bits, size_t &idx) {
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pipe_valid_r) >> b) & 1u) != 0; }
 for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
@@ -113,7 +113,6 @@ for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pipe_ca
 }
 for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pipe_pc_r) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 7; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pipe_index_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.mem_req_sent) >> b) & 1u) != 0; }
 for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 for (size_t b = 0; b < 32; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.mem_resp_data_r[i0]) >> b) & 1u) != 0; }
 }
@@ -136,7 +135,6 @@ for (size_t i0 = 0; i0 < (ICACHE_V1_WAYS); ++i0) {
 }
 { uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.pipe_pc_r = static_cast<reg32_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 7; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.pipe_index_r = static_cast<reg7_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_req_sent = static_cast<reg1_t>(tmp); }
 for (size_t i0 = 0; i0 < (ICACHE_LINE_SIZE / 4); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 32; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.mem_resp_data_r[i0] = static_cast<reg32_t>(tmp); }
 }
