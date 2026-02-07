@@ -97,7 +97,7 @@ inline uint32_t top_advance_seed(uint32_t seed) {
 #endif
 }
 
-template <typename HW> inline constexpr bool top_managed_lookup_latency_v = false;
+template <typename HW> inline constexpr bool top_managed_lookup_latency_v = true;
 
 inline void fill_lookup_input(icache_module_n::ICache &hw, bool resp_valid,
                               uint32_t pc) {
@@ -154,64 +154,33 @@ inline void fill_lookup_input(icache_module_v2_n::ICacheV2 &hw, bool resp_valid,
 template <typename HW>
 inline void setup_lookup_request_for_comb(HW &icache_hw, const icache_in &input,
                                           const TopLookupSramState &state,
-                                          uint32_t &req_pc, bool &req_valid,
-                                          bool &req_deferred) {
+                                          uint32_t &req_pc, bool &req_valid) {
   req_pc = input.fetch_address;
   req_valid = input.icache_read_valid;
-  req_deferred = false;
-  if constexpr (!top_managed_lookup_latency_v<HW>) {
-    fill_lookup_input(icache_hw, req_valid, req_pc);
-    return;
-  }
-  if (!top_lookup_latency_enabled()) {
-    fill_lookup_input(icache_hw, req_valid, req_pc);
-    return;
-  }
+  bool resp_valid = req_valid;
+  uint32_t resp_pc = req_pc;
 
-  if (state.pending) {
-    if (input.reset || input.flush || input.refetch) {
-      req_pc = input.fetch_address;
-      req_valid = false;
-      fill_lookup_input(icache_hw, req_valid, req_pc);
-      return;
-    }
-    req_pc = state.pc;
-    req_valid = (state.delay == 0u) && !input.run_comb_only;
-    req_deferred = true;
-    fill_lookup_input(icache_hw, req_valid, req_pc);
-    return;
-  }
-
-  if (input.run_comb_only) {
-    req_valid = false;
-    fill_lookup_input(icache_hw, req_valid, req_pc);
-    return;
-  }
-
-  if (req_valid) {
-    uint32_t latency = top_peek_lookup_latency(state.seed);
-    if (latency > 1u) {
-      req_valid = false;
-      req_deferred = true;
+  if (top_lookup_latency_enabled()) {
+    resp_valid = false;
+    bool allow_resp =
+        !input.run_comb_only && !input.reset && !input.refetch;
+    if (state.pending && state.delay == 0u && allow_resp) {
+      resp_valid = true;
+      resp_pc = state.pc;
+    } else if (!state.pending && req_valid && allow_resp &&
+               (top_peek_lookup_latency(state.seed) <= 1u)) {
+      // latency<=1 behaves as same-cycle lookup response (legacy behavior).
+      resp_valid = true;
+      resp_pc = req_pc;
     }
   }
-  fill_lookup_input(icache_hw, req_valid, req_pc);
+
+  fill_lookup_input(icache_hw, resp_valid, resp_pc);
 }
 
 template <typename HW>
 inline void update_lookup_state_in_seq(const icache_in &input, const HW &icache_hw,
                                        TopLookupSramState &state) {
-  if constexpr (!top_managed_lookup_latency_v<HW>) {
-    (void)input;
-    (void)icache_hw;
-    state.pending = false;
-    state.delay = 0;
-    state.index = 0;
-    state.pc = 0;
-    state.seed = 1;
-    return;
-  }
-
   if (!top_lookup_latency_enabled()) {
     state.pending = false;
     state.delay = 0;
@@ -221,7 +190,7 @@ inline void update_lookup_state_in_seq(const icache_in &input, const HW &icache_
     return;
   }
 
-  if (input.reset || input.refetch || input.flush) {
+  if (input.reset || input.refetch) {
     state.pending = false;
     state.delay = 0;
     state.index = 0;
@@ -231,39 +200,33 @@ inline void update_lookup_state_in_seq(const icache_in &input, const HW &icache_
   }
 
   bool hw_fire = icache_hw.io.in.ifu_req_valid && icache_hw.io.out.ifu_req_ready;
+  bool resp_fire = state.pending && (state.delay == 0u) && !input.run_comb_only;
 
   if (state.pending) {
     if (state.delay > 0u) {
       state.delay--;
-    } else if (hw_fire) {
+    } else if (resp_fire) {
       state.pending = false;
       state.delay = 0;
       state.index = 0;
       state.pc = 0;
     }
-    return;
   }
 
-  if (!input.icache_read_valid) {
+  if (state.pending || !hw_fire) {
     return;
   }
 
   uint32_t latency = top_peek_lookup_latency(state.seed);
   state.seed = top_advance_seed(state.seed);
   if (latency <= 1u) {
-    if (!hw_fire) {
-      state.pending = true;
-      state.delay = 0;
-      state.pc = input.fetch_address;
-      state.index = top_lookup_index_from_pc(input.fetch_address);
-    }
     return;
   }
 
   state.pending = true;
   state.delay = latency - 1u;
-  state.pc = input.fetch_address;
-  state.index = top_lookup_index_from_pc(input.fetch_address);
+  state.pc = icache_hw.io.in.pc;
+  state.index = top_lookup_index_from_pc(icache_hw.io.in.pc);
 }
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
@@ -347,9 +310,8 @@ template <typename HW> void TrueICacheTopT<HW>::comb() {
   // IFU request
   uint32_t lookup_req_pc = in->fetch_address;
   bool lookup_req_valid = in->icache_read_valid;
-  bool lookup_req_deferred = false;
   setup_lookup_request_for_comb(icache_hw, *in, lookup_sram_state, lookup_req_pc,
-                                lookup_req_valid, lookup_req_deferred);
+                                lookup_req_valid);
   icache_hw.io.in.pc = lookup_req_pc;
   icache_hw.io.in.ifu_req_valid = lookup_req_valid;
   icache_hw.io.in.ifu_resp_ready = in->icache_resp_ready;
@@ -455,12 +417,6 @@ template <typename HW> void TrueICacheTopT<HW>::comb() {
 
   out->icache_read_complete = ifu_resp_valid && ifu_resp_ready;
   out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
-  if constexpr (top_managed_lookup_latency_v<HW>) {
-    if (top_lookup_latency_enabled() &&
-        (lookup_sram_state.pending || lookup_req_deferred)) {
-      out->icache_read_ready = false;
-    }
-  }
 }
 
 template <typename HW> void TrueICacheTopT<HW>::seq() {
@@ -653,9 +609,8 @@ template <typename HW> void SimDDRICacheTopT<HW>::comb() {
   // IFU request
   uint32_t lookup_req_pc = in->fetch_address;
   bool lookup_req_valid = in->icache_read_valid;
-  bool lookup_req_deferred = false;
   setup_lookup_request_for_comb(icache_hw, *in, lookup_sram_state, lookup_req_pc,
-                                lookup_req_valid, lookup_req_deferred);
+                                lookup_req_valid);
   icache_hw.io.in.pc = lookup_req_pc;
   icache_hw.io.in.ifu_req_valid = lookup_req_valid;
   icache_hw.io.in.ifu_resp_ready = in->icache_resp_ready;
@@ -780,12 +735,6 @@ template <typename HW> void SimDDRICacheTopT<HW>::comb() {
 
   out->icache_read_complete = ifu_resp_valid && ifu_resp_ready;
   out->icache_read_ready = icache_hw.io.out.ifu_req_ready;
-  if constexpr (top_managed_lookup_latency_v<HW>) {
-    if (top_lookup_latency_enabled() &&
-        (lookup_sram_state.pending || lookup_req_deferred)) {
-      out->icache_read_ready = false;
-    }
-  }
 }
 
 template <typename HW> void SimDDRICacheTopT<HW>::seq() {

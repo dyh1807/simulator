@@ -237,7 +237,8 @@ void ICacheV2::cache_set_tag_valid(uint32_t set, uint32_t way, uint32_t tag,
 }
 
 void ICacheV2::lookup_read_set(uint32_t set) {
-  constexpr bool lookup_from_input = (ICACHE_V2_LOOKUP_FROM_INPUT != 0);
+  bool lookup_from_input =
+      (ICACHE_V2_LOOKUP_FROM_INPUT != 0) || lookup_latency_enabled_v2();
   if (lookup_from_input) {
     bool resp_valid = io.lookup_in.lookup_resp_valid;
     for (uint32_t way = 0; way < cfg_.ways; ++way) {
@@ -306,41 +307,18 @@ bool ICacheV2::lookup(uint32_t pc_index, bool ifu_fire, uint32_t new_rob_idx) {
     }
   } else {
     if (ifu_fire && !sram_pending_r_) {
-      uint32_t latency = clamp_latency(ICACHE_SRAM_FIXED_LATENCY);
-      if (ICACHE_SRAM_RANDOM_DELAY != 0) {
-        uint32_t min_lat = clamp_latency(ICACHE_SRAM_RANDOM_MIN);
-        uint32_t max_lat = ICACHE_SRAM_RANDOM_MAX;
-        if (max_lat < min_lat) {
-          max_lat = min_lat;
-        }
-        uint32_t seed = xorshift32(sram_seed_r_);
-        sram_seed_next_ = seed;
-        uint32_t range = max_lat - min_lat + 1u;
-        latency = min_lat + (seed % range);
-      }
-      latency = clamp_latency(latency);
-      if (latency <= 1u) {
-        lookup_load_fire = true;
-      } else {
-        sram_pending_next_ = true;
-        sram_delay_next_ = latency - 1u;
-        sram_pc_next_ = io.in.pc;
-        sram_index_next_ = pc_index;
-        sram_rob_idx_next_ = new_rob_idx;
-      }
+      sram_pending_next_ = true;
+      sram_pc_next_ = io.in.pc;
+      sram_index_next_ = pc_index;
+      sram_rob_idx_next_ = new_rob_idx;
     }
 
-    if (sram_pending_r_) {
-      if (sram_delay_r_ <= 1u) {
-        lookup_load_fire = true;
-        load_pc = sram_pc_r_;
-        load_index = sram_index_r_;
-        load_rob_idx = sram_rob_idx_r_;
-        sram_pending_next_ = false;
-        sram_delay_next_ = 0;
-      } else {
-        sram_delay_next_ = sram_delay_r_ - 1u;
-      }
+    if (sram_pending_r_ && io.lookup_in.lookup_resp_valid) {
+      lookup_load_fire = true;
+      load_pc = sram_pc_r_;
+      load_index = sram_index_r_;
+      load_rob_idx = sram_rob_idx_r_;
+      sram_pending_next_ = false;
     }
   }
 
@@ -499,12 +477,10 @@ void ICacheV2::load_regs_from_io() {
   lookup_rob_idx_r_ =
       (cfg_.rob_depth == 0) ? 0 : (r.lookup_rob_idx_r % cfg_.rob_depth);
   sram_pending_r_ = r.sram_pending_r;
-  sram_delay_r_ = r.sram_delay_r;
   sram_pc_r_ = r.sram_pc_r;
   sram_index_r_ = (set_num_ == 0) ? 0 : (r.sram_index_r % set_num_);
   sram_rob_idx_r_ =
       (cfg_.rob_depth == 0) ? 0 : (r.sram_rob_idx_r % cfg_.rob_depth);
-  sram_seed_r_ = r.sram_seed_r;
   for (uint32_t way = 0; way < cfg_.ways; ++way) {
     set_tag_r_[way] = r.set_tag_r[way];
     set_valid_r_[way] = r.set_valid_r[way] ? 1 : 0;
@@ -580,11 +556,9 @@ void ICacheV2::sync_regs_to_io() {
   r.lookup_index_r = lookup_index_r_;
   r.lookup_rob_idx_r = lookup_rob_idx_r_;
   r.sram_pending_r = sram_pending_r_;
-  r.sram_delay_r = sram_delay_r_;
   r.sram_pc_r = sram_pc_r_;
   r.sram_index_r = sram_index_r_;
   r.sram_rob_idx_r = sram_rob_idx_r_;
-  r.sram_seed_r = sram_seed_r_;
   for (uint32_t way = 0; way < cfg_.ways; ++way) {
     r.set_tag_r[way] = set_tag_r_[way];
     r.set_valid_r[way] = set_valid_r_[way] != 0;
@@ -657,11 +631,9 @@ void ICacheV2::publish_reg_write_from_next() {
   rw.lookup_index_r = lookup_index_next_;
   rw.lookup_rob_idx_r = lookup_rob_idx_next_;
   rw.sram_pending_r = sram_pending_next_;
-  rw.sram_delay_r = sram_delay_next_;
   rw.sram_pc_r = sram_pc_next_;
   rw.sram_index_r = sram_index_next_;
   rw.sram_rob_idx_r = sram_rob_idx_next_;
-  rw.sram_seed_r = sram_seed_next_;
   for (uint32_t way = 0; way < cfg_.ways; ++way) {
     rw.set_tag_r[way] = set_load_fire_ ? set_tag_w_[way] : set_tag_r_[way];
     rw.set_valid_r[way] =
@@ -761,16 +733,12 @@ void ICacheV2::reset() {
   lookup_rob_idx_next_ = 0;
   sram_pending_r_ = false;
   sram_pending_next_ = false;
-  sram_delay_r_ = 0;
-  sram_delay_next_ = 0;
   sram_pc_r_ = 0;
   sram_pc_next_ = 0;
   sram_index_r_ = 0;
   sram_index_next_ = 0;
   sram_rob_idx_r_ = 0;
   sram_rob_idx_next_ = 0;
-  sram_seed_r_ = 1;
-  sram_seed_next_ = 1;
 
   std::fill(set_data_r_.begin(), set_data_r_.end(), 0);
   std::fill(set_tag_r_.begin(), set_tag_r_.end(), 0);
@@ -871,11 +839,9 @@ void ICacheV2::comb() {
   lookup_index_next_ = lookup_index_r_;
   lookup_rob_idx_next_ = lookup_rob_idx_r_;
   sram_pending_next_ = sram_pending_r_;
-  sram_delay_next_ = sram_delay_r_;
   sram_pc_next_ = sram_pc_r_;
   sram_index_next_ = sram_index_r_;
   sram_rob_idx_next_ = sram_rob_idx_r_;
-  sram_seed_next_ = sram_seed_r_;
 
   mshr_state_next_ = mshr_state_r_;
   mshr_line_addr_next_ = mshr_line_addr_r_;
@@ -950,7 +916,6 @@ void ICacheV2::comb() {
               static_cast<uint8_t>(RobState::EMPTY));
     lookup_valid_next_ = false;
     sram_pending_next_ = false;
-    sram_delay_next_ = 0;
     sram_pc_next_ = 0;
     sram_index_next_ = 0;
     sram_rob_idx_next_ = 0;
@@ -1540,11 +1505,9 @@ void ICacheV2::seq() {
   lookup_index_r_ = lookup_index_next_;
   lookup_rob_idx_r_ = lookup_rob_idx_next_;
   sram_pending_r_ = sram_pending_next_;
-  sram_delay_r_ = sram_delay_next_;
   sram_pc_r_ = sram_pc_next_;
   sram_index_r_ = sram_index_next_;
   sram_rob_idx_r_ = sram_rob_idx_next_;
-  sram_seed_r_ = sram_seed_next_;
 
   mshr_state_r_ = mshr_state_next_;
   mshr_line_addr_r_ = mshr_line_addr_next_;
