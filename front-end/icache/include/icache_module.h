@@ -137,6 +137,13 @@ struct ICache_regs_t {
   // Replacement / translation state
   reg8_t replace_idx = 0;
   reg20_t ppn_r = 0;
+
+  // Internal lookup-latency state (0 = register-style, 1..N = SRAM-style).
+  reg1_t sram_pending_r = false;
+  reg32_t sram_delay_r = 0;
+  reg7_t sram_index_r = 0;
+  reg32_t sram_pc_r = 0;
+  reg32_t sram_seed_r = 1;
 };
 
 // Generalized-IO note:
@@ -316,6 +323,11 @@ private:
 
   // Comb-only flag: load cache set into pipe1_to_pipe2 registers this cycle
   bool sram_load_fire = false;
+  bool sram_pending_next = false;
+  uint32_t sram_delay_next = 0;
+  uint32_t sram_index_next = 0;
+  uint32_t sram_pc_next = 0;
+  uint32_t sram_seed_next = 1;
 
   // Lookup helpers (stage1 read)
   void lookup(uint32_t index);
