@@ -97,8 +97,6 @@ inline uint32_t top_advance_seed(uint32_t seed) {
 #endif
 }
 
-template <typename HW> inline constexpr bool top_managed_lookup_latency_v = true;
-
 inline void fill_lookup_input(icache_module_n::ICache &hw, bool resp_valid,
                               uint32_t pc) {
   hw.io.lookup_in.lookup_resp_valid = resp_valid;
