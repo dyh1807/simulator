@@ -814,6 +814,7 @@ void ICacheV2::comb() {
   io.out = {};
   io.out.mem_resp_ready = true; // always drain
   io.table_write = {};
+  io.reg_write = {};
   set_load_fire_ = false;
   cache_fill_fire_ = false;
 

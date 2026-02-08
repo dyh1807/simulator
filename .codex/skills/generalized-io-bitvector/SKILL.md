@@ -38,6 +38,20 @@ Recommended aggregation (keeps ordering stable for packing):
 - **Generalized input**: `ExtIn` + `Regs` + `LookupIn`
 - **Generalized output**: `ExtOut` + `RegWrite` + `TableWrite`
 
+## 1.5) Comb-phase output initialization (important)
+
+At the beginning of each `comb()` call, initialize generalized outputs to deterministic defaults:
+
+- `ExtOut`: initialize default valid/ready/data fields
+- `RegWrite`: initialize to a deterministic baseline
+  - common pattern: `reg_write = regs` (hold-by-default next-state)
+- `TableWrite`: initialize to no-write (`we=0`, addresses/data cleared)
+
+For modules with multi-phase comb or convergence loops:
+
+- Prefer **one-time initialization per `comb()` call**, not per inner iteration.
+- If outputs are produced across multiple comb sub-functions (for example phase1 writes MMU request and phase2 writes cache/memory signals), repeated clearing inside the loop can erase phase1 outputs and change behavior.
+
 ## 2) Deterministic flattening to `bool* pi` / `bool* po`
 
 Goal: provide a *stable* bit ordering so any harness can drive/read the module via raw `bool` vectors.

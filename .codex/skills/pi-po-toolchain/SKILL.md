@@ -27,6 +27,14 @@ This skill is module-generic. It works for icache and any module that follows th
 
 1) Update module structs (`ExtIn + Regs + LookupIn`, `ExtOut + RegWrite + TableWrite`).
 
+0) Ensure `comb()` initializes generalized outputs deterministically:
+- Initialize at `comb()` entry (one-time per call), not inside convergence sub-iterations.
+- Recommended defaults:
+  - `out = {}` (or explicit field defaults)
+  - `reg_write = regs` for hold-by-default pipelines, otherwise `reg_write = {}`
+  - `table_write = {}`
+- If a module emits outputs in multiple comb phases, repeated clearing can break handshake semantics; keep initialization at outer comb entry.
+
 2) Re-generate PI/PO headers:
 ```bash
 python tools/gen_icache_v1_pi_po.py

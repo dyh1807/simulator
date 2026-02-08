@@ -86,6 +86,21 @@ void ICache::invalidate_all() {
 }
 
 void ICache::comb() {
+  // Initialize generalized outputs at the start of comb().
+  io.out = {};
+  io.table_write = {};
+  io.out.ifu_resp_pc = io.regs.pipe_pc_r;
+  io.out.mem_req_id = 0;
+  io.out.mem_req_addr =
+      (io.regs.ppn_r << 12) | (io.regs.pipe_index_r << offset_bits);
+  if (io.regs.lookup_pending_r) {
+    io.out.mmu_req_vtag = io.regs.lookup_pc_r >> 12;
+  } else if (io.regs.pipe_valid_r) {
+    io.out.mmu_req_vtag = io.regs.pipe_pc_r >> 12;
+  } else {
+    io.out.mmu_req_vtag = io.in.pc >> 12;
+  }
+
   pipe1_to_pipe2_t pipe1_to_pipe2_last = pipe1_to_pipe2;
   pipe2_to_pipe1_t pipe2_to_pipe1_last = pipe2_to_pipe1;
   int cnt = 0;
