@@ -19,3 +19,9 @@ user.log
 
 # Ignore agent workflows
 # .agent/
+
+# Generated generalized-IO bit maps
+front-end/icache/include/icache_*_pi_map.csv
+front-end/icache/include/icache_*_po_map.csv
+front-end/icache/include/icache_*_pi_bits.csv
+front-end/icache/include/icache_*_po_bits.csv

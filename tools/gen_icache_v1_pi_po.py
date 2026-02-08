@@ -9,6 +9,7 @@ THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, THIS_DIR)
 
 from gen_pi_po import generate_header  # noqa: E402
+from gen_pi_po_bit_map import generate_bit_maps  # noqa: E402
 
 
 def main() -> int:
@@ -16,6 +17,18 @@ def main() -> int:
 
     header_path = os.path.join(repo_root, "front-end", "icache", "include", "icache_module.h")
     out_path = os.path.join(repo_root, "front-end", "icache", "include", "icache_v1_pi_po.h")
+    map_prefix = os.path.join(repo_root, "front-end", "icache", "include", "icache_v1")
+
+    pi_fields = [
+        ("in", "ICache_in_t"),
+        ("regs", "ICache_regs_t"),
+        ("lookup_in", "ICache_lookup_in_t"),
+    ]
+    po_fields = [
+        ("out", "ICache_out_t"),
+        ("reg_write", "ICache_regs_t"),
+        ("table_write", "ICache_table_write_t"),
+    ]
 
     text = generate_header(
         header_path=header_path,
@@ -23,16 +36,8 @@ def main() -> int:
         ns="icache_module_n",
         out_ns="icache_v1_pi_po",
         wrapper_type="ICache_IO_t",
-        pi_fields=[
-            ("in", "ICache_in_t"),
-            ("regs", "ICache_regs_t"),
-            ("lookup_in", "ICache_lookup_in_t"),
-        ],
-        po_fields=[
-            ("out", "ICache_out_t"),
-            ("reg_write", "ICache_regs_t"),
-            ("table_write", "ICache_table_write_t"),
-        ],
+        pi_fields=pi_fields,
+        po_fields=po_fields,
         type_overrides={},
     )
 
@@ -40,7 +45,25 @@ def main() -> int:
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(text)
 
+    bit_map_result = generate_bit_maps(
+        header_path=header_path,
+        namespace="icache_module_n",
+        pi_fields=pi_fields,
+        po_fields=po_fields,
+        type_overrides={},
+        out_prefix=map_prefix,
+        include_dirs=[
+            os.path.join(repo_root, "front-end"),
+            os.path.join(repo_root, "back-end", "include"),
+            os.path.join(repo_root, "include"),
+        ],
+    )
+
     print(out_path)
+    print(bit_map_result["pi_map_path"])
+    print(bit_map_result["po_map_path"])
+    print(f"PI_WIDTH={bit_map_result['pi_width']}")
+    print(f"PO_WIDTH={bit_map_result['po_width']}")
     return 0
 
 
