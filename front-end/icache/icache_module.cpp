@@ -101,48 +101,14 @@ void ICache::comb() {
     io.out.mmu_req_vtag = io.in.pc >> 12;
   }
 
-  pipe1_to_pipe2_t pipe1_to_pipe2_last = pipe1_to_pipe2;
-  pipe2_to_pipe1_t pipe2_to_pipe1_last = pipe2_to_pipe1;
-  int cnt = 0;
-  while (true) {
-    // Default register write-back: hold values unless overwritten by comb logic.
-    io.reg_write = io.regs;
+  // Default register write-back: hold values unless overwritten by comb logic.
+  io.reg_write = io.regs;
 
-    comb_pipe1();
-    comb_pipe2();
-
-    bool pipe1_equal =
-        pipe1_to_pipe2_last.valid == pipe1_to_pipe2.valid &&
-        pipe1_to_pipe2_last.index_w == pipe1_to_pipe2.index_w &&
-        pipe1_to_pipe2_last.valid_next == pipe1_to_pipe2.valid_next;
-
-    bool pipe2_equal = pipe2_to_pipe1_last.ready == pipe2_to_pipe1.ready;
-
-    for (uint32_t way = 0; way < way_cnt; ++way) {
-      for (uint32_t word = 0; word < word_num; ++word) {
-        pipe1_equal =
-            pipe1_equal && (pipe1_to_pipe2_last.cache_set_data_w[way][word] ==
-                            pipe1_to_pipe2.cache_set_data_w[way][word]);
-      }
-      pipe1_equal = pipe1_equal &&
-                    (pipe1_to_pipe2_last.cache_set_tag_w[way] ==
-                     pipe1_to_pipe2.cache_set_tag_w[way]) &&
-                    (pipe1_to_pipe2_last.cache_set_valid_w[way] ==
-                     pipe1_to_pipe2.cache_set_valid_w[way]);
-    }
-
-    if (pipe1_equal && pipe2_equal) {
-      break;
-    }
-    pipe1_to_pipe2_last = pipe1_to_pipe2;
-    pipe2_to_pipe1_last = pipe2_to_pipe1;
-
-    if (++cnt > 20) {
-      std::cerr << "Warning: ICache combinational logic did not converge."
-                << std::endl;
-      exit(1);
-    }
-  }
+  // Ordered comb interaction:
+  // 1) pipe2 computes ready/state outputs from registered pipeline state.
+  // 2) pipe1 consumes pipe2.ready and computes next lookup/pipe registers.
+  comb_pipe2();
+  comb_pipe1();
 }
 
 void ICache::seq() { seq_pipe1(); }
