@@ -382,11 +382,13 @@ void ICacheV2::plru_update(uint32_t set, uint32_t way) {
 }
 
 uint32_t ICacheV2::choose_victim_way(uint32_t set) {
+#if !ICACHE_V2_LOOKUP_FROM_INPUT
   for (uint32_t way = 0; way < cfg_.ways; ++way) {
     if (!cache_valid_at(set, way)) {
       return way;
     }
   }
+#endif
 
   if (cfg_.repl == ReplPolicy::PLRU && !plru_bits_r_.empty()) {
     return plru_choose(set);
@@ -869,6 +871,7 @@ void ICacheV2::comb() {
 
   // Refetch kill path (existing behavior).
   const bool kill_pipe = io.in.refetch;
+  const bool strict_lookup_from_input = (ICACHE_V2_LOOKUP_FROM_INPUT != 0);
   if (kill_pipe) {
     epoch_next_ = epoch_r_ + 1;
 
@@ -963,6 +966,9 @@ void ICacheV2::comb() {
   };
 
   auto cache_line_present = [&](uint32_t ppn, uint32_t set) -> bool {
+    if (strict_lookup_from_input) {
+      return false;
+    }
     for (uint32_t way = 0; way < cfg_.ways; ++way) {
       if (!cache_valid_at(set, way)) {
         continue;
@@ -1079,7 +1085,7 @@ void ICacheV2::comb() {
                 rob_mshr_idx_next_[rob_idx] = mi;
 
                 // Next-line prefetch (simple next-line)
-                if (cfg_.prefetch_enable) {
+                if (cfg_.prefetch_enable && !strict_lookup_from_input) {
                   uint32_t free_cnt = 0;
                   for (uint32_t j = 0; j < cfg_.mshr_num; ++j) {
                     if (static_cast<MshrState>(mshr_state_next_[j]) ==
@@ -1190,11 +1196,13 @@ void ICacheV2::comb() {
 
     bool hit = false;
     uint32_t hit_way = 0;
-    for (uint32_t way = 0; way < cfg_.ways; ++way) {
-      if (cache_valid_at(set, way) && cache_tag_at(set, way) == ppn) {
-        hit = true;
-        hit_way = way;
-        break;
+    if (!strict_lookup_from_input) {
+      for (uint32_t way = 0; way < cfg_.ways; ++way) {
+        if (cache_valid_at(set, way) && cache_tag_at(set, way) == ppn) {
+          hit = true;
+          hit_way = way;
+          break;
+        }
       }
     }
     if (hit) {
