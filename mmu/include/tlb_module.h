@@ -24,7 +24,6 @@ namespace tlb_module_n {
 
 static constexpr uint32_t kTlbEntryNum = MMU_TLB_ENTRY_NUM;
 static constexpr uint32_t kLsuPorts = MAX_LSU_REQ_NUM;
-static constexpr uint32_t kPlruTreeSize = kTlbEntryNum - 1;
 
 struct TLB_in_t {
   wire1_t is_itlb = true;
@@ -62,37 +61,24 @@ struct TLB_in_t {
 };
 
 struct TLB_regs_t {
-  reg1_t entry_pte_valid[kTlbEntryNum] = {false};
-  reg10_t entry_vpn1[kTlbEntryNum] = {0};
-  reg10_t entry_vpn0[kTlbEntryNum] = {0};
-  reg12_t entry_ppn1[kTlbEntryNum] = {0};
-  reg10_t entry_ppn0[kTlbEntryNum] = {0};
-  reg9_t entry_asid[kTlbEntryNum] = {0};
-  reg1_t entry_megapage[kTlbEntryNum] = {false};
-  reg1_t entry_dirty[kTlbEntryNum] = {false};
-  reg1_t entry_accessed[kTlbEntryNum] = {false};
-  reg1_t entry_global[kTlbEntryNum] = {false};
-  reg1_t entry_user[kTlbEntryNum] = {false};
-  reg1_t entry_execute[kTlbEntryNum] = {false};
-  reg1_t entry_write[kTlbEntryNum] = {false};
-  reg1_t entry_read[kTlbEntryNum] = {false};
-  reg1_t entry_valid[kTlbEntryNum] = {false};
-
-  reg1_t plru_tree[kPlruTreeSize] = {false};
+  // Replacement/resource state is internal, while table entries are external.
   reg6_t replace_idx_r = 0;
 
+  // In-flight lookup state (for delayed/SRAM-style lookup response).
   reg1_t ifu_pending_r = false;
-  reg8_t ifu_delay_r = 0;
   reg20_t ifu_vtag_r = 0;
   reg2_t ifu_op_type_r = 0;
 
   reg1_t lsu_pending_r[kLsuPorts] = {false};
-  reg8_t lsu_delay_r[kLsuPorts] = {0};
   reg20_t lsu_vtag_r[kLsuPorts] = {0};
   reg2_t lsu_op_type_r[kLsuPorts] = {0};
 };
 
 struct TLB_lookup_in_t {
+  // Optional hint from external table backend for PTW refill victim.
+  wire1_t refill_victim_valid = false;
+  wire6_t refill_victim_index = 0;
+
   wire1_t ifu_lookup_resp_valid = false;
   wire1_t ifu_lookup_hit = false;
   wire6_t ifu_lookup_hit_index = 0;
@@ -178,6 +164,7 @@ struct TLB_out_t {
 using TLB_reg_write_t = TLB_regs_t;
 
 struct TLB_table_write_t {
+  // Refill write port.
   wire1_t we = false;
   wire6_t index = 0;
   wire10_t vpn1 = 0;
@@ -195,6 +182,11 @@ struct TLB_table_write_t {
   wire1_t read = false;
   wire1_t valid_bit = false;
   wire1_t pte_valid = false;
+
+  // Flush command forwarded to external table backend.
+  wire1_t flush_valid = false;
+  wire20_t flush_vpn = 0;
+  wire9_t flush_asid = 0;
 };
 
 struct TLB_IO_t {
@@ -216,4 +208,3 @@ public:
 };
 
 } // namespace tlb_module_n
-

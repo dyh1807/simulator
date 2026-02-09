@@ -25,3 +25,7 @@ front-end/icache/include/icache_*_pi_map.csv
 front-end/icache/include/icache_*_po_map.csv
 front-end/icache/include/icache_*_pi_bits.csv
 front-end/icache/include/icache_*_po_bits.csv
+mmu/include/*_pi_map.csv
+mmu/include/*_po_map.csv
+mmu/include/*_pi_bits.csv
+mmu/include/*_po_bits.csv

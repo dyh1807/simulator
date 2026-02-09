@@ -81,66 +81,14 @@ for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ptw_write_pte_valid = static_cast<wire1_t>(tmp); }
 }
 
-static constexpr size_t TLB_regs_t_BITS = (1 * (kTlbEntryNum)) + (10 * (kTlbEntryNum)) + (10 * (kTlbEntryNum)) + (12 * (kTlbEntryNum)) + (10 * (kTlbEntryNum)) + (9 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kTlbEntryNum)) + (1 * (kPlruTreeSize)) + (6 * 1) + (1 * 1) + (8 * 1) + (20 * 1) + (2 * 1) + (1 * (kLsuPorts)) + (8 * (kLsuPorts)) + (20 * (kLsuPorts)) + (2 * (kLsuPorts));
+static constexpr size_t TLB_regs_t_BITS = (6 * 1) + (1 * 1) + (20 * 1) + (2 * 1) + (1 * (kLsuPorts)) + (20 * (kLsuPorts)) + (2 * (kLsuPorts));
 inline void pack_TLB_regs_t(const tlb_module_n::TLB_regs_t &v, bool *bits, size_t &idx) {
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_pte_valid[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 10; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_vpn1[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 10; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_vpn0[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 12; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_ppn1[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 10; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_ppn0[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 9; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_asid[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_megapage[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_dirty[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_accessed[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_global[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_user[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_execute[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_write[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_read[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.entry_valid[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kPlruTreeSize); ++i0) {
-for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.plru_tree[i0]) >> b) & 1u) != 0; }
-}
 for (size_t b = 0; b < 6; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.replace_idx_r) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_pending_r) >> b) & 1u) != 0; }
-for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_delay_r) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_vtag_r) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 2; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_op_type_r) >> b) & 1u) != 0; }
 for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lsu_pending_r[i0]) >> b) & 1u) != 0; }
-}
-for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
-for (size_t b = 0; b < 8; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lsu_delay_r[i0]) >> b) & 1u) != 0; }
 }
 for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lsu_vtag_r[i0]) >> b) & 1u) != 0; }
@@ -151,64 +99,12 @@ for (size_t b = 0; b < 2; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lsu_op_
 }
 
 inline void unpack_TLB_regs_t(const bool *bits, size_t &idx, tlb_module_n::TLB_regs_t &v) {
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_pte_valid[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 10; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_vpn1[i0] = static_cast<reg10_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 10; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_vpn0[i0] = static_cast<reg10_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 12; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_ppn1[i0] = static_cast<reg12_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 10; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_ppn0[i0] = static_cast<reg10_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 9; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_asid[i0] = static_cast<reg9_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_megapage[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_dirty[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_accessed[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_global[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_user[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_execute[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_write[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_read[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kTlbEntryNum); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.entry_valid[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kPlruTreeSize); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.plru_tree[i0] = static_cast<reg1_t>(tmp); }
-}
 { uint64_t tmp = 0; for (size_t b = 0; b < 6; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.replace_idx_r = static_cast<reg6_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_pending_r = static_cast<reg1_t>(tmp); }
-{ uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_delay_r = static_cast<reg8_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_vtag_r = static_cast<reg20_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 2; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_op_type_r = static_cast<reg2_t>(tmp); }
 for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lsu_pending_r[i0] = static_cast<reg1_t>(tmp); }
-}
-for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
-{ uint64_t tmp = 0; for (size_t b = 0; b < 8; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lsu_delay_r[i0] = static_cast<reg8_t>(tmp); }
 }
 for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 { uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.lsu_vtag_r[i0] = static_cast<reg20_t>(tmp); }
@@ -218,8 +114,10 @@ for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 }
 }
 
-static constexpr size_t TLB_lookup_in_t_BITS = (1 * 1) + (1 * 1) + (6 * 1) + (10 * 1) + (10 * 1) + (12 * 1) + (10 * 1) + (9 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (6 * (kLsuPorts)) + (10 * (kLsuPorts)) + (10 * (kLsuPorts)) + (12 * (kLsuPorts)) + (10 * (kLsuPorts)) + (9 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts));
+static constexpr size_t TLB_lookup_in_t_BITS = (1 * 1) + (6 * 1) + (1 * 1) + (1 * 1) + (6 * 1) + (10 * 1) + (10 * 1) + (12 * 1) + (10 * 1) + (9 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (6 * (kLsuPorts)) + (10 * (kLsuPorts)) + (10 * (kLsuPorts)) + (12 * (kLsuPorts)) + (10 * (kLsuPorts)) + (9 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts)) + (1 * (kLsuPorts));
 inline void pack_TLB_lookup_in_t(const tlb_module_n::TLB_lookup_in_t &v, bool *bits, size_t &idx) {
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.refill_victim_valid) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 6; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.refill_victim_index) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_lookup_resp_valid) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_lookup_hit) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 6; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.ifu_lookup_hit_index) >> b) & 1u) != 0; }
@@ -295,6 +193,8 @@ for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.lsu_loo
 }
 
 inline void unpack_TLB_lookup_in_t(const bool *bits, size_t &idx, tlb_module_n::TLB_lookup_in_t &v) {
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.refill_victim_valid = static_cast<wire1_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 6; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.refill_victim_index = static_cast<wire6_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_lookup_resp_valid = static_cast<wire1_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_lookup_hit = static_cast<wire1_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 6; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.ifu_lookup_hit_index = static_cast<wire6_t>(tmp); }
@@ -528,7 +428,7 @@ for (size_t i0 = 0; i0 < (kLsuPorts); ++i0) {
 }
 }
 
-static constexpr size_t TLB_table_write_t_BITS = (1 * 1) + (6 * 1) + (10 * 1) + (10 * 1) + (12 * 1) + (10 * 1) + (9 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1);
+static constexpr size_t TLB_table_write_t_BITS = (1 * 1) + (6 * 1) + (10 * 1) + (10 * 1) + (12 * 1) + (10 * 1) + (9 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (1 * 1) + (20 * 1) + (9 * 1);
 inline void pack_TLB_table_write_t(const tlb_module_n::TLB_table_write_t &v, bool *bits, size_t &idx) {
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.we) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 6; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.index) >> b) & 1u) != 0; }
@@ -547,6 +447,9 @@ for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.write) 
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.read) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.valid_bit) >> b) & 1u) != 0; }
 for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.pte_valid) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 1; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.flush_valid) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 20; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.flush_vpn) >> b) & 1u) != 0; }
+for (size_t b = 0; b < 9; ++b) { bits[idx++] = ((static_cast<uint64_t>(v.flush_asid) >> b) & 1u) != 0; }
 }
 
 inline void unpack_TLB_table_write_t(const bool *bits, size_t &idx, tlb_module_n::TLB_table_write_t &v) {
@@ -567,6 +470,9 @@ inline void unpack_TLB_table_write_t(const bool *bits, size_t &idx, tlb_module_n
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.read = static_cast<wire1_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.valid_bit = static_cast<wire1_t>(tmp); }
 { uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.pte_valid = static_cast<wire1_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 1; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.flush_valid = static_cast<wire1_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 20; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.flush_vpn = static_cast<wire20_t>(tmp); }
+{ uint64_t tmp = 0; for (size_t b = 0; b < 9; ++b) { if (bits[idx++]) tmp |= (uint64_t(1) << b); } v.flush_asid = static_cast<wire9_t>(tmp); }
 }
 
 static constexpr size_t PI_WIDTH = TLB_in_t_BITS + TLB_regs_t_BITS + TLB_lookup_in_t_BITS;
