@@ -23,7 +23,7 @@ bool is_page_fault(uint32_t pte_raw, uint32_t op_type, bool stage_1,
   bool accessed = pte_bit(pte_raw, 6);
   bool dirty = pte_bit(pte_raw, 7);
   uint32_t ppn0 = pte_ppn0(pte_raw);
-  is_megapage = stage_1 && (read || execute);
+  is_megapage = false;
 
   if (!valid) {
     return true;
@@ -38,6 +38,11 @@ bool is_page_fault(uint32_t pte_raw, uint32_t op_type, bool stage_1,
   bool mprv = ((mstatus >> 17) & 0x1u) != 0;
   uint32_t mpp = (mstatus >> 11) & 0x3u;
 
+  // Non-leaf PTE: continue page walk, not a page fault.
+  if (!(read || execute)) {
+    return false;
+  }
+
   if (!((op_type == mmu_n::OP_FETCH && execute) ||
         (op_type == mmu_n::OP_LOAD && (read || (mxr && execute))) ||
         (op_type == mmu_n::OP_STORE && write))) {
@@ -47,10 +52,12 @@ bool is_page_fault(uint32_t pte_raw, uint32_t op_type, bool stage_1,
   if (privilege == mmu_n::S_MODE && !sum_m && user && !sum_s) {
     return true;
   }
-  if (privilege != mmu_n::S_MODE && mprv && mpp == mmu_n::S_MODE && !sum_m && user &&
-      !sum_s) {
+  if (privilege != mmu_n::S_MODE && mprv && mpp == mmu_n::S_MODE && !sum_m &&
+      user && !sum_s) {
     return true;
   }
+
+  is_megapage = stage_1;
   if (is_megapage && ppn0 != 0) {
     return true;
   }
@@ -157,8 +164,9 @@ void PTWModule::comb() {
   case CACHE_1: {
     io.reg_write.state_r = CACHE_1;
     if (dcache_state == DCACHE_IDLE) {
+      uint32_t satp_ppn = static_cast<uint32_t>(io.in.satp_ppn) & 0xFFFFFu;
       io.out.dcache_req_valid = true;
-      io.out.dcache_req_paddr = (io.in.satp_ppn << 12) | (io.regs.vpn1_r << 2);
+      io.out.dcache_req_paddr = (satp_ppn << 12) | (io.regs.vpn1_r << 2);
       if (io.out.dcache_req_valid && io.in.dcache_req_ready) {
         io.reg_write.dcache_state_r = DCACHE_BUSY;
       }
@@ -182,8 +190,9 @@ void PTWModule::comb() {
   case MEM_1: {
     io.reg_write.state_r = MEM_1;
     if (dcache_state == DCACHE_IDLE) {
+      uint32_t satp_ppn = static_cast<uint32_t>(io.in.satp_ppn) & 0xFFFFFu;
       io.out.mem_req_valid = true;
-      io.out.mem_req_paddr = (io.in.satp_ppn << 12) | (io.regs.vpn1_r << 2);
+      io.out.mem_req_paddr = (satp_ppn << 12) | (io.regs.vpn1_r << 2);
       if (io.out.mem_req_valid && io.in.mem_req_ready) {
         io.reg_write.dcache_state_r = DCACHE_BUSY;
       }
@@ -260,4 +269,3 @@ void PTWModule::seq() {
 }
 
 } // namespace ptw_module_n
-

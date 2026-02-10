@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <getopt.h>
+#include <iostream>
 
 #ifdef USE_SIM_DDR
 #include <MemorySubsystem.h>

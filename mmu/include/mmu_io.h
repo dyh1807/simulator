@@ -5,7 +5,6 @@
  * module connections and external interfaces.
  */
 #pragma once
-#include <TLBEntry.h>
 #include <config.h>
 #include <cstdint>
 
@@ -61,22 +60,11 @@ enum TLB_DEST {
  *  - PTW: Page Table Walker
  *  - TLB: Translation Lookaside Buffer
  */
-struct PTW_to_TLB {
-  bool write_valid; // PTW 命中，需要写入 MMU // 设计时，保证下一拍写入
-  TLBEntry entry;   // 准备填入的 TLB 条目
-  mmu_n::TLB_DEST dest_id; // 目标 TLB ID
-};
-
 struct TLB_to_PTW {
   bool tlb_miss;              // TLB 未命中，需要访问页表（PTW）
   uint32_t vpn1;              // 虚拟页号一级索引
   uint32_t vpn0;              // 虚拟页号二级索引
   mmu_n::MMU_OP_TYPE op_type; // TLB 失效对应的操作类型（读/写/INST）
-};
-
-struct TLB_IO_PTW {
-  TLB_to_PTW *tlb2ptw; // TLB 到 PTW 的接口
-  PTW_to_TLB *ptw2tlb; // PTW 到 TLB 的接口
 };
 
 /*

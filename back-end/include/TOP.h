@@ -16,6 +16,7 @@
 #include <WriteBuffer.h>
 #include <config.h>
 #include <cstdint>
+#include <string>
 
 class SimContext;
 
