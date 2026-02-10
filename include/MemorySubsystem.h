@@ -7,7 +7,7 @@
  * Provides single integration point for main simulation loop.
  */
 
-// Default to AXI3 (256-bit). Define USE_SIM_DDR_AXI4 to select legacy AXI4 (32-bit).
+// Build defaults to AXI4 (32-bit). Define USE_SIM_DDR_AXI3 to select AXI3 (256-bit).
 #ifndef USE_SIM_DDR_AXI4
 #include "AXI_Interconnect_AXI3.h"
 #include "AXI_Router_AXI3.h"

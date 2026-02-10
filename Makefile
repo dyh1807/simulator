@@ -2,7 +2,7 @@
 
 # Enable SimDDR by default; override with USE_SIM_DDR=0 if needed.
 USE_SIM_DDR ?= 1
-# Default backend is AXI3 (256-bit). Define USE_SIM_DDR_AXI4=1 to select AXI4.
+# Default backend is AXI4 (32-bit). Set USE_SIM_DDR_AXI3=1 to select AXI3.
 USE_SIM_DDR_AXI3 ?= 0
 USE_SIM_DDR_AXI4 ?= 0
 
@@ -39,8 +39,10 @@ endif
 endif
 ifeq ($(USE_SIM_DDR_AXI3),1)
 CXXFLAGS += -DUSE_SIM_DDR_AXI3
-endif
-ifeq ($(USE_SIM_DDR_AXI4),1)
+else ifeq ($(USE_SIM_DDR_AXI4),1)
+CXXFLAGS += -DUSE_SIM_DDR_AXI4
+else
+# Default backend when neither is explicitly enabled.
 CXXFLAGS += -DUSE_SIM_DDR_AXI4
 endif
 endif
