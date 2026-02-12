@@ -26,6 +26,53 @@ for lat in latencies:
 
 binaries = []
 
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def maybe_run_determinism_check() -> None:
+    if not _truthy_env("ENABLE_DETERMINISM_CHECK", "0"):
+        return
+
+    samples = int(os.environ.get("DETERMINISM_SAMPLES", "16"))
+    warmup = int(os.environ.get("DETERMINISM_WARMUP", "4"))
+    seed = int(os.environ.get("DETERMINISM_SEED", "12345"))
+    profiles_raw = os.environ.get("DETERMINISM_PROFILES", "internal,external")
+    profiles = [p.strip() for p in profiles_raw.split(",") if p.strip()]
+    if not profiles:
+        profiles = ["internal", "external"]
+
+    cmd = [
+        "python3",
+        "tools/check_comb_determinism.py",
+        "--samples",
+        str(samples),
+        "--warmup",
+        str(warmup),
+        "--seed",
+        str(seed),
+    ]
+    for profile in profiles:
+        if profile not in ("internal", "external"):
+            print(
+                f"[regression-check] invalid DETERMINISM_PROFILES item: {profile}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        cmd.extend(["--profile", profile])
+
+    print("[regression-check] running determinism gate:")
+    print("  " + " ".join(cmd))
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print(
+            f"[regression-check] determinism gate failed (rc={result.returncode})",
+            file=sys.stderr,
+        )
+        sys.exit(result.returncode)
+    print("[regression-check] determinism gate passed")
+
+
 def get_binary_name(lat):
     return f"sim_ptw_lat_{lat}"
 
@@ -165,6 +212,8 @@ def print_progress(completed, total, length=40):
     sys.stdout.flush()
 
 def main():
+    maybe_run_determinism_check()
+
     compile_binaries()
     
     tasks = []
