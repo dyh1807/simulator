@@ -117,16 +117,7 @@ public:
     }
   }
 
-  // 特殊唤醒：Load 依赖清除
-  void clear_store_mask(int stq_idx, bool is_addr) {
-    for (int i = 0; i < size; i++) {
-      if (entry_1[i].valid) {
-        AutoType<STQ_NUM> mask = (1ULL << stq_idx);
-        if (is_addr)
-          entry_1[i].uop.pre_sta_mask &= ~mask;
-      }
-    }
-  }
+
 
   // Flush
   void flush_br(mask_t br_mask) {
@@ -218,10 +209,6 @@ private:
     const auto &op = ent.uop;
     bool ops_ok =
         (!op.src1_en || !op.src1_busy) && (!op.src2_en || !op.src2_busy);
-    bool mem_ok = true;
-    if (op.op == UOP_LOAD) { // 假设 op_type
-      mem_ok = (op.pre_sta_mask == 0);
-    }
-    return ops_ok && mem_ok;
+    return ops_ok ;
   }
 };

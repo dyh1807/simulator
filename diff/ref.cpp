@@ -167,7 +167,7 @@ void RefCpu::exec() {
   uint32_t p_addr = state.pc;
 
   if ((state.csr[csr_satp] & 0x80000000) && privilege != 3) {
-    page_fault_inst = !va2pa_fixed(p_addr, state.pc, 0);
+    page_fault_inst = !va2pa(p_addr, state.pc, 0);
 
     if (page_fault_inst) {
       exception(state.pc);
@@ -181,12 +181,8 @@ void RefCpu::exec() {
 
   if (Instruction == INST_EBREAK) {
     state.pc += 4;
-    if (!strict_mmu_check) {
-      cout << "sim_time: " << sim_time << endl;
-      sim_end = true;
-      exit(0);
-      return;
-    }
+    sim_end = true;
+    cout << "sim_time: " << sim_time << endl;
     return;
   }
 
@@ -485,7 +481,8 @@ void RefCpu::RISCV() {
   // WFI 检查 (简单处理)
   if (Instruction == INST_WFI && !asy && !page_fault_inst && !page_fault_load &&
       !page_fault_store) {
-    Assert(0 && "WFI instruction encountered in Reference Model (Exit intended)");
+    Assert(0 &&
+           "WFI instruction encountered in Reference Model (Exit intended)");
     // state.pc += 4;
     // return;
   }
@@ -855,9 +852,9 @@ void RefCpu::RV32A() {
     bool page_fault;
 
     if (funct5 == 2) {
-      page_fault = !va2pa_fixed(p_addr, v_addr, 1);
+      page_fault = !va2pa(p_addr, v_addr, 1);
     } else {
-      page_fault = !va2pa_fixed(p_addr, v_addr, 2);
+      page_fault = !va2pa(p_addr, v_addr, 2);
     }
 
     if (page_fault) {
@@ -1047,14 +1044,16 @@ void RefCpu::RV32IM() {
     uint32_t v_addr = reg_rdata1 + immI(Instruction);
     uint32_t p_addr = v_addr;
     if ((state.csr[csr_satp] & 0x80000000) && privilege != 3) {
-      page_fault_load = !va2pa_fixed(p_addr, v_addr, 1);
+      page_fault_load = !va2pa(p_addr, v_addr, 1);
     }
 
     if (page_fault_load) {
       exception(v_addr);
       return;
     } else {
-      uint32_t alignment_mask = (funct3 & 0x3) == 0 ? 0 : (funct3 & 0x3) == 1 ? 1 : 3;
+      uint32_t alignment_mask = (funct3 & 0x3) == 0   ? 0
+                                : (funct3 & 0x3) == 1 ? 1
+                                                      : 3;
       Assert((p_addr & alignment_mask) == 0 && "Load address misaligned!");
       if (((p_addr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
           ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE)) {
@@ -1075,8 +1074,8 @@ void RefCpu::RV32IM() {
       } else {
         data = (uint32_t)(data64 >> ((p_addr & 0b11) * 8));
       }
-    uint32_t size = funct3 & 0b11;
-    uint32_t sign = 0, mask;
+      uint32_t size = funct3 & 0b11;
+      uint32_t sign = 0, mask;
       if (size == 0) {
         mask = 0xFF;
         if (data & 0x80)
@@ -1105,14 +1104,16 @@ void RefCpu::RV32IM() {
     uint32_t v_addr = reg_rdata1 + immS(Instruction);
     uint32_t p_addr = v_addr;
     if ((state.csr[csr_satp] & 0x80000000) && privilege != 3) {
-      page_fault_store = !va2pa_fixed(p_addr, v_addr, 2);
+      page_fault_store = !va2pa(p_addr, v_addr, 2);
     }
 
     if (page_fault_store) {
       exception(v_addr);
       return;
     } else {
-      uint32_t alignment_mask = (funct3 & 0x3) == 0 ? 0 : (funct3 & 0x3) == 1 ? 1 : 3;
+      uint32_t alignment_mask = (funct3 & 0x3) == 0   ? 0
+                                : (funct3 & 0x3) == 1 ? 1
+                                                      : 3;
       Assert((p_addr & alignment_mask) == 0 && "Store address misaligned!");
       if (((p_addr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
           ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE)) {
@@ -1173,11 +1174,13 @@ void RefCpu::RV32IM() {
     case 5: { // srli, srai
       switch (funct7) {
       case 0: { // srli
-        state.gpr[reg_d_index] = (uint32_t)reg_rdata1 >> (immI(Instruction) & 0x1F);
+        state.gpr[reg_d_index] =
+            (uint32_t)reg_rdata1 >> (immI(Instruction) & 0x1F);
         break;
       }
       case 32: { // srai
-        state.gpr[reg_d_index] = (int32_t)reg_rdata1 >> (immI(Instruction) & 0x1F);
+        state.gpr[reg_d_index] =
+            (int32_t)reg_rdata1 >> (immI(Instruction) & 0x1F);
         break;
       }
       }
@@ -1509,59 +1512,4 @@ bool RefCpu::va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
   }
 
   return false; // 如果 Level 2 还不是叶子节点，则是非法页表
-}
-
-/*
- * va2pa_fixed: a fixed version of va2pa
- *
- * 基本功能几乎与 va2pa() 相同；但当 dut.cpu 检测到 page fault 时，
- * 以 dut.cpu 的结果为准，
- *
- * 目的：当 SFENCE.VMA 还没有执行、存在两种合法的页表映射时，保证
- * DUT 与参考模型的页表映射一致，避免 difftest 失败。
- */
-bool RefCpu::va2pa_fixed(uint32_t &p_addr, uint32_t v_addr, uint32_t type) {
-  bool ret = va2pa(p_addr, v_addr, type);
-#ifndef CONFIG_LOOSE_VA2PA
-  return ret;
-#endif
-
-  if (!strict_mmu_check) {
-    return ret;
-  }
-
-  extern int ren_commit_idx; // extern from Ren.cpp, for difftest debug
-  InstEntry ren_commit_entry = cpu.back.out.commit_entry[ren_commit_idx];
-  bool dut_page_fault_inst = ren_commit_entry.uop.page_fault_inst;
-  bool dut_page_fault_load = ren_commit_entry.uop.page_fault_load;
-  bool dut_page_fault_store = ren_commit_entry.uop.page_fault_store;
-
-  // 1. dut page_fault, ref no page_fault -> allow, ret = false
-  // 2. dut no page_fault, ref page_fault -> ERROR
-  switch (type) {
-  case 0: // instruction fetch
-    if (dut_page_fault_inst) {
-      ret = false; // 以 DUT MMU 为准
-    } else if (!dut_page_fault_inst && !ret) {
-      Assert(0 && "[va2pa_fixed] Error: va2pa_fixed instruction fetch page fault mismatch!");
-    }
-    break;
-  case 1: // load
-    if (dut_page_fault_load) {
-      ret = false;
-    } else if (!dut_page_fault_load && !ret) {
-      Assert(0 && "[va2pa_fixed] Error: va2pa_fixed load page fault mismatch!");
-    }
-    break;
-  case 2: // store
-    if (dut_page_fault_store) {
-      ret = false;
-    } else if (!dut_page_fault_store && !ret) {
-      Assert(0 && "[va2pa_fixed] Error: va2pa_fixed store page fault mismatch!");
-    }
-    break;
-  default:
-    Assert(0 && "[va2pa_fixed] Error: unknown access type!");
-  }
-  return ret;
 }

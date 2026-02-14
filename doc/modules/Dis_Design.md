@@ -50,7 +50,9 @@ Dispatch 负责将架构指令（Macro-Op）拆解为后端执行所需的微指
 
 ### 4.1 `comb_alloc` (资源预分配)
 - **功能描述**：为指令流分配 ROB ID 和 LSU 队列条目。
-- **LSU 分配**：按序扫描 Packet 中的 Load/Store 指令，检查 LDQ/STQ 空间及每周期分配端口限制 (`MAX_STQ_DISPATCH_WIDTH`)。若资源不足，标记该指令无效。
+- **LSU 分配**：按序扫描 Packet 中的 Load/Store 指令，检查 LDQ/STQ 空间。
+  - **Store**: 分配 STQ 条目，推进 `stq_tail`。
+  - **Load**: 记录当前的 `stq_tail` 快照 (`stq_idx`)，用于后续 LSU 阶段的依赖检查。不再生成 `pre_sta_mask`。
 - **ROB ID**：为所有有效指令生成对应的 ROB 索引。
 
 ### 4.2 `comb_wake` (分派阶段唤醒)

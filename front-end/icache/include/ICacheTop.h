@@ -6,6 +6,9 @@
 #include <memory>
 
 class SimContext; // Forward declaration
+class AbstractMmu;
+class PtwMemPort;
+class PtwWalkPort;
 
 // Abstract Base Class for ICache Top-level Logic
 class ICacheTop {
@@ -28,6 +31,8 @@ public:
 
   virtual void comb() = 0;
   virtual void seq() = 0;
+  virtual void set_ptw_mem_port(PtwMemPort *port) { (void)port; }
+  virtual void set_ptw_walk_port(PtwWalkPort *port) { (void)port; }
 
   void syncPerf();
 
@@ -55,6 +60,15 @@ private:
   int mem_latency_cnt = 0;
   uint32_t current_vaddr_reg = 0;
   bool valid_reg = false;
+  AbstractMmu *mmu_model = nullptr;
+  uint32_t last_satp = 0;
+  bool satp_seen = false;
+  bool tlb_pending = false;
+  uint32_t tlb_pending_vaddr = 0;
+  bool tlb_set_pending_comb = false;
+  bool tlb_clear_pending_comb = false;
+  PtwMemPort *ptw_mem_port = nullptr;
+  PtwWalkPort *ptw_walk_port = nullptr;
 
   ICache &icache_hw;
 
@@ -62,13 +76,28 @@ public:
   TrueICacheTop(ICache &hw);
   void comb() override;
   void seq() override;
+  void set_ptw_mem_port(PtwMemPort *port) override;
+  void set_ptw_walk_port(PtwWalkPort *port) override;
 };
 
 // Implementation using the Simple ICache Model (Ideal P-Memory Access)
 class SimpleICacheTop : public ICacheTop {
+private:
+  AbstractMmu *mmu_model = nullptr;
+  uint32_t last_satp = 0;
+  bool satp_seen = false;
+  bool pending_req_valid = false;
+  uint32_t pending_fetch_addr = 0;
+  bool pend_on_retry_comb = false;
+  bool resp_fire_comb = false;
+  PtwMemPort *ptw_mem_port = nullptr;
+  PtwWalkPort *ptw_walk_port = nullptr;
+
 public:
   void comb() override;
   void seq() override;
+  void set_ptw_mem_port(PtwMemPort *port) override;
+  void set_ptw_walk_port(PtwWalkPort *port) override;
 };
 
 // Factory function to get the singleton instance

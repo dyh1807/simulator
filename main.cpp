@@ -1,6 +1,6 @@
 #include "diff.h"
-#include <SimCpu.h>
-#include <config.h>
+#include "SimCpu.h"
+#include "config.h"
 #include <cstdint>
 #include <cstdlib>
 #include <getopt.h>
@@ -167,7 +167,6 @@ int main(int argc, char *argv[]) {
               << config.fast_forward_count << " cycles..." << std::endl;
 
     cpu.back.load_image(config.target_file);
-    ref_cpu.strict_mmu_check = false;
     ref_cpu.uart_print = true;
 
     for (uint64_t i = 0; i < config.fast_forward_count; i++) {
@@ -176,7 +175,6 @@ int main(int argc, char *argv[]) {
 
     cpu.back.restore_from_ref();
     cpu.restore_pc(cpu.back.number_PC); // 强制同步前端 PC
-    ref_cpu.strict_mmu_check = true;
     ref_cpu.uart_print = false;
 
     std::cout << "[Step 2] Run O3 CPU ... " << endl;
@@ -185,7 +183,6 @@ int main(int argc, char *argv[]) {
     std::cout << "[File] " << config.target_file << std::endl;
     cpu.back.load_image(config.target_file);
     ref_cpu.uart_print = true;
-    ref_cpu.strict_mmu_check = false;
 
     std::cout << "[Debug] Running Reference Model Standalone..." << std::endl;
 
@@ -193,6 +190,10 @@ int main(int argc, char *argv[]) {
     while (sim_time < (long long)MAX_SIM_TIME) { // Or a large limit
       difftest_step(false);
       sim_time++;
+      if (ref_cpu.sim_end) {
+        cpu.ctx.exit_reason = ExitReason::EBREAK;
+        break;
+      }
       if (sim_time % 10000000 == 0) {
         cout << dec << sim_time << endl;
       }
@@ -216,8 +217,9 @@ int main(int argc, char *argv[]) {
 
     cpu.cycle();
 
-    if (cpu.ctx.exit_reason != ExitReason::NONE)
+    if (cpu.ctx.exit_reason != ExitReason::NONE) {
       break;
+    }
 
     if (cpu.ctx.perf.commit_num >= MAX_COMMIT_INST) {
       cpu.ctx.exit_reason = ExitReason::SIMPOINT;

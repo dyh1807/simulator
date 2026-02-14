@@ -61,7 +61,6 @@ constexpr uint8_t MAXU = 0b11100;
 // [Structs & Classes]
 // ==========================================
 
-
 typedef struct InstInfo {
   wire<32>
       instruction; // Debug only: raw instruction bits (not for hardware logic)
@@ -91,7 +90,7 @@ typedef struct InstInfo {
   wire<CSR_IDX_WIDTH> csr_idx;
   wire<ROB_IDX_WIDTH> rob_idx;
   wire<STQ_IDX_WIDTH> stq_idx;
-  wire<STQ_NUM> pre_sta_mask;
+  wire<STQ_IDX_WIDTH> ldq_idx;
 
   // ROB 信息
   wire<2> uop_num;
@@ -148,7 +147,7 @@ typedef struct MicroOp {
   wire<CSR_IDX_WIDTH> csr_idx;
   wire<ROB_IDX_WIDTH> rob_idx;
   wire<STQ_IDX_WIDTH> stq_idx;
-  wire<STQ_NUM> pre_sta_mask;
+  wire<STQ_IDX_WIDTH> ldq_idx;
 
   // ROB 信息
   wire<2> uop_num;
@@ -201,7 +200,7 @@ typedef struct MicroOp {
     this->csr_idx = info.csr_idx;
     this->rob_idx = info.rob_idx;
     this->stq_idx = info.stq_idx;
-    this->pre_sta_mask = info.pre_sta_mask;
+    this->ldq_idx = info.ldq_idx;
     this->uop_num = info.uop_num;
     this->rob_flag = info.rob_flag;
     this->page_fault_inst = info.page_fault_inst;
@@ -235,10 +234,14 @@ typedef struct {
 
 // Added to support Remote icache
 enum class ExitReason { NONE, EBREAK, WFI, SIMPOINT };
+class SimCpu;
 
 class SimContext {
 public:
   PerfCount perf;
   ExitReason exit_reason = ExitReason::NONE;
   bool is_ckpt;
+  SimCpu *cpu = nullptr;
+  void run_commit_inst(InstEntry *inst_entry);
+  void run_difftest_inst(InstEntry *inst_entry);
 };

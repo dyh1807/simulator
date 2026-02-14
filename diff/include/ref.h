@@ -100,7 +100,6 @@ public:
   bool S_external_interrupt;
 
   bool sim_end = false;
-  bool strict_mmu_check = false;
   bool uart_print = false;
   uint64_t oracle_timer = 0;
 
@@ -114,7 +113,6 @@ public:
   void exception(uint32_t trap_val);
   void store_data();
   bool va2pa(uint32_t &p_addr, uint32_t v_addr, uint32_t type);
-  bool va2pa_fixed(uint32_t &p_addr, uint32_t v_addr, uint32_t type);
 
   bool is_br;
   bool br_taken;

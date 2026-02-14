@@ -1,20 +1,42 @@
 #include "config.h"
-#include <Dispatch.h>
-#include <SimCpu.h>
-#include <util.h>
+#include "Dispatch.h"
+#include "SimCpu.h"
+#include "util.h"
+
+void Dispatch::init() {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
+    inst_r[i] = {};
+    inst_r_1[i] = {};
+    inst_alloc[i] = {};
+    dispatch_success_flags[i] = false;
+    dispatch_cache[i].count = 0;
+    for (int k = 0; k < MAX_UOPS_PER_INST; k++) {
+      dispatch_cache[i].iq_ids[k] = 0;
+    }
+  }
+  for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
+    stq_port_mask[k] = 0;
+  }
+  for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
+    ldq_port_mask[k] = 0;
+  }
+}
 
 void Dispatch::comb_alloc() {
   int store_alloc_count = 0; // 当前周期已分配的 store 数量
   int load_alloc_count = 0;  // 当前周期已分配的 load 数量
-  wire<64> current_cycle_store_mask = 0;
 
   // 初始化输出
   for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
     out.dis2lsu->alloc_req[k] = false;
     stq_port_mask[k] = 0;
   }
+  for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
+    out.dis2lsu->ldq_alloc_req[k] = false;
+    ldq_port_mask[k] = 0;
+  }
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     inst_alloc[i] = inst_r[i];
     out.dis2rob->valid[i] = inst_r[i].valid;
 
@@ -25,11 +47,15 @@ void Dispatch::comb_alloc() {
 
     // Load 需要知道之前的 Store
     if (inst_r[i].valid && is_load(inst_r[i].uop)) {
-      inst_alloc[i].uop.pre_sta_mask = current_cycle_store_mask;
+      inst_alloc[i].uop.stq_idx = (in.lsu2dis->stq_tail + store_alloc_count) % STQ_NUM;
 
       // 检查 Load 队列限制和端口限制
       if (load_alloc_count < in.lsu2dis->ldq_free &&
-          load_alloc_count < GLOBAL_IQ_CONFIG[IQ_LD].dispatch_width) {
+          load_alloc_count < GLOBAL_IQ_CONFIG[IQ_LD].dispatch_width &&
+          load_alloc_count < MAX_LDQ_DISPATCH_WIDTH &&
+          in.lsu2dis->ldq_alloc_idx[load_alloc_count] >= 0) {
+        inst_alloc[i].uop.ldq_idx = in.lsu2dis->ldq_alloc_idx[load_alloc_count];
+        ldq_port_mask[load_alloc_count] = (1 << i);
         load_alloc_count++;
       } else {
         out.dis2rob->valid[i] = false;
@@ -49,8 +75,6 @@ void Dispatch::comb_alloc() {
         // 填充 STQ 请求
         out.dis2lsu->tag[store_alloc_count] = inst_r[i].uop.tag;
 
-        // 记录 Mask
-        current_cycle_store_mask |= (1ULL << allocated_idx);
         stq_port_mask[store_alloc_count] =
             (1 << i); // 记录这条指令占用了这个端口
 
@@ -68,7 +92,7 @@ void Dispatch::comb_alloc() {
 void Dispatch::comb_wake() {
   for (int w = 0; w < LSU_LOAD_WB_WIDTH; w++) {
     if (in.prf_awake->wake[w].valid) {
-      for (int i = 0; i < FETCH_WIDTH; i++) {
+      for (int i = 0; i < DECODE_WIDTH; i++) {
         if (inst_alloc[i].uop.src1_preg == in.prf_awake->wake[w].preg) {
           inst_alloc[i].uop.src1_busy = false;
           inst_r_1[i].uop.src1_busy = false;
@@ -83,7 +107,7 @@ void Dispatch::comb_wake() {
 
   for (int i = 0; i < MAX_WAKEUP_PORTS; i++) {
     if (in.iss_awake->wake[i].valid) {
-      for (int j = 0; j < FETCH_WIDTH; j++) {
+      for (int j = 0; j < DECODE_WIDTH; j++) {
         if (inst_alloc[j].uop.src1_preg == in.iss_awake->wake[i].preg) {
           inst_alloc[j].uop.src1_busy = false;
           inst_r_1[j].uop.src1_busy = false;
@@ -107,7 +131,7 @@ void Dispatch::comb_dispatch() {
 
   int iq_usage[IQ_NUM] = {0};
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     dispatch_success_flags[i] = false;
     dispatch_cache[i].count = 0; // 重置计数
 
@@ -169,7 +193,7 @@ void Dispatch::comb_fire() {
       in.rob_bcast->flush || in.dec_bcast->mispred || in.rob2dis->stall;
 
   // === 步骤 1: 计算 Fire 信号 (确认分派) ===
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     bool basic_fire = out.dis2rob->valid[i] &&
                       dispatch_success_flags[i] && // IQ 检查通过
                       in.rob2dis->ready &&         // ROB 有空间
@@ -196,7 +220,7 @@ void Dispatch::comb_fire() {
   // === 步骤 2: 撤销无效的 IQ 请求 (回滚) ===
   int iq_slot_idx[IQ_NUM] = {0};
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (!inst_r[i].valid)
       continue;
     if (!dispatch_success_flags[i])
@@ -239,14 +263,28 @@ void Dispatch::comb_fire() {
     }
   }
 
+  // === 步骤 4: 更新 LDQ 的 Fire 信号 ===
+  for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
+    if (ldq_port_mask[k] != 0) {
+      int inst_idx = __builtin_ctz(ldq_port_mask[k]);
+      if (out.dis2rob->dis_fire[inst_idx]) {
+        out.dis2lsu->ldq_alloc_req[k] = true;
+        out.dis2lsu->ldq_idx[k] = out.dis2rob->uop[inst_idx].ldq_idx;
+        out.dis2lsu->ldq_tag[k] = out.dis2rob->uop[inst_idx].tag;
+        out.dis2lsu->ldq_rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
+        out.dis2lsu->ldq_rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
+      }
+    }
+  }
+
 #ifdef CONFIG_PERF_COUNTER
-  bool is_core_bound_rob[FETCH_WIDTH] = {false};
-  bool is_core_bound_iq[FETCH_WIDTH] = {false};
-  bool is_mem_l1_bound[FETCH_WIDTH] = {false};
-  bool is_mem_ext_bound[FETCH_WIDTH] = {false};
+  bool is_core_bound_rob[DECODE_WIDTH] = {false};
+  bool is_core_bound_iq[DECODE_WIDTH] = {false};
+  bool is_mem_l1_bound[DECODE_WIDTH] = {false};
+  bool is_mem_ext_bound[DECODE_WIDTH] = {false};
 
   // Analyze stall reasons for each slot
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (!out.dis2rob->dis_fire[i] && inst_r[i].valid) {
 
       // Priority: ROB > LSU > IQ
@@ -282,7 +320,7 @@ void Dispatch::comb_fire() {
     }
   }
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (out.dis2rob->dis_fire[i]) {
       ctx->perf.slots_issued++;
     } else if (inst_r[i].valid) {
@@ -303,18 +341,44 @@ void Dispatch::comb_fire() {
         ctx->perf.slots_core_bound_iq++;
       }
     } else {
-      ctx->perf.slots_frontend_bound++;
-      if (ctx->perf.icache_busy)
-        ctx->perf.slots_fetch_latency++;
-      else
-        ctx->perf.slots_fetch_bandwidth++;
+      if (ctx->perf.pending_squash_slots > 0) {
+        ctx->perf.slots_squash_waste++;
+        ctx->perf.pending_squash_slots--;
+      } else {
+        ctx->perf.slots_frontend_bound++;
+        if (ctx->perf.icache_busy)
+          ctx->perf.slots_fetch_latency++;
+        else
+          ctx->perf.slots_fetch_bandwidth++;
+      }
     }
   }
 #endif
 }
 
 void Dispatch::comb_pipeline() {
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  if (in.rob_bcast->flush || in.dec_bcast->mispred) {
+#ifdef CONFIG_PERF_COUNTER
+    uint64_t killed = 0;
+    for (int i = 0; i < DECODE_WIDTH; i++) {
+      if (inst_r[i].valid) {
+        killed++;
+      }
+    }
+    if (killed > 0) {
+      if (in.rob_bcast->flush) {
+        ctx->perf.squash_flush_dis += killed;
+        ctx->perf.squash_flush_total += killed;
+      } else {
+        ctx->perf.squash_mispred_dis += killed;
+        ctx->perf.squash_mispred_total += killed;
+      }
+      ctx->perf.pending_squash_slots += killed;
+    }
+#endif
+  }
+
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (in.rob_bcast->flush || in.dec_bcast->mispred) {
       inst_r_1[i].valid = false;
     } else if (out.dis2ren->ready) {
@@ -327,7 +391,7 @@ void Dispatch::comb_pipeline() {
 }
 
 void Dispatch::seq() {
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     inst_r[i] = inst_r_1[i];
   }
 }
@@ -486,12 +550,6 @@ int Dispatch::decompose_inst(const InstEntry &inst, UopPacket *out_uops) {
       if ((src_uop.func7 >> 2) == AmoOp::SWAP) {
         out_uops[2].uop.src1_busy =
             false; // Swap doesn't need Load result (Old Val) for Store
-        // DEBUG
-        if (src_uop.pc == 0xc03870f4) {
-          printf("[Dispatch Fix] Triggered for Target PC %x. Clearing "
-                 "src1_busy.\n",
-                 src_uop.pc);
-        }
       } else {
         out_uops[2].uop.src1_busy = true;
       }
@@ -546,7 +604,7 @@ DispatchIO Dispatch::get_hardware_io() {
   DispatchIO hardware;
 
   // --- Inputs ---
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     hardware.from_ren.valid[i] = in.ren2dis->valid[i];
     hardware.from_ren.uop[i] = RenDisUop::filter(in.ren2dis->uop[i]);
   }
@@ -559,7 +617,7 @@ DispatchIO Dispatch::get_hardware_io() {
 
   // --- Outputs ---
   hardware.to_ren.ready = out.dis2ren->ready;
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     hardware.to_rob.valid[i] = out.dis2rob->valid[i];
     hardware.to_rob.uop[i] = RobUop::filter(out.dis2rob->uop[i]);
   }

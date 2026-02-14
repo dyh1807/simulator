@@ -247,11 +247,11 @@ class BruUnit : public FixedLatencyFU {
   static constexpr int BGE = 0b101;
   static constexpr int BLTU = 0b110;
   static constexpr int BGEU = 0b111;
-  FTQ *ftq;
+  FTQLookupIO *ftq_lookup;
 
 public:
-  BruUnit(std::string name, int port_idx, FTQ *ftq)
-      : FixedLatencyFU(name, port_idx, 1), ftq(ftq) {}
+  BruUnit(std::string name, int port_idx, FTQLookupIO *ftq_lookup)
+      : FixedLatencyFU(name, port_idx, 1), ftq_lookup(ftq_lookup) {}
 
 protected:
   void impl_compute(MicroOp &inst) override {
@@ -299,22 +299,14 @@ protected:
     bool pred_taken = false;
     uint32_t pred_target = 0;
 
-    FTQEntry &ftq_entry = ftq->get(inst.ftq_idx);
+    FTQEntry &ftq_entry = ftq_lookup->entries[inst.ftq_idx];
     if (ftq_entry.valid) {
       pred_taken = ftq_entry.pred_taken_mask[inst.ftq_offset];
       if (pred_taken) {
-        // If predicted taken, the target MUST be the block's next_pc ??? 
-        // Logic: specific branch target logic
-        // If it's a conditional branch inside the block, and predicted taken,
-        // it usually implies it's the last instruction of the block or redirects flow.
-        // Simplified: if pred_taken, we expect target to be ftq_entry.next_pc?
-        // Or do we store targets?
-        // Current design: FTQ stores next_pc of the BLOCK.
-        // If there are multiple branches, only one is taken?
-        // Assuming block ends at the taken branch.
-        pred_target = ftq_entry.next_pc; 
+        // FTQ stores next_pc of the fetch block.
+        pred_target = ftq_entry.next_pc;
       } else {
-        pred_target = inst.pc + 4; // Check if compressed?
+        pred_target = inst.pc + 4;
       }
     }
 

@@ -1,22 +1,21 @@
 #ifndef FRONTEND_H
 #define FRONTEND_H
-#include <config.h>
+#include "config.h"
+
+// 是否开启2ahead
+// #define ENABLE_2AHEAD
 
 #define RESET_PC 0x00000000
 #define PMEM_OFFSET RESET_PC
 
-/* Whether to use true icache model */
-#define USE_IDEAL_ICACHE // use true icache model by default
-#ifndef USE_IDEAL_ICACHE
+/* ICache model selection:
+ * - default: True ICache
+ * - define USE_IDEAL_ICACHE for ideal model (performance upper-bound)
+ */
+// #define USE_IDEAL_ICACHE
 
-#ifndef USE_TRUE_ICACHE
-#define USE_TRUE_ICACHE
-#endif
-
-#endif
-
-#ifndef ICACHE_LINE_SIZE
-#define ICACHE_LINE_SIZE 64 // Size of a cache line in bytes
+#ifndef ICACHE_MISS_LATENCY
+#define ICACHE_MISS_LATENCY 100 // Latency of an icache miss in cycles
 #endif
 
 /*#define IO_version*/
@@ -48,6 +47,19 @@
 #define DEBUG_LOG_SMALL_3(fmt, ...)                                            \
   do {                                                                         \
     if (DEBUG_PRINT_SMALL_3)                                                   \
+      printf(fmt, ##__VA_ARGS__);                                              \
+  } while (0)
+
+#define DEBUG_PRINT_SMALL_4 0
+#define DEBUG_LOG_SMALL_4(fmt, ...)                                            \
+  do {                                                                         \
+    if (DEBUG_PRINT_SMALL_4)                                                   \
+      printf(fmt, ##__VA_ARGS__);                                              \
+  } while (0)
+#define DEBUG_PRINT_SMALL_5 0
+#define DEBUG_LOG_SMALL_5(fmt, ...)                                            \
+  do {                                                                         \
+    if (DEBUG_PRINT_SMALL_5)                                                   \
       printf(fmt, ##__VA_ARGS__);                                              \
   } while (0)
 // #define IO_GEN_MODE

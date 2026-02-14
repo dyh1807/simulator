@@ -1,6 +1,6 @@
 #pragma once
-#include <IO.h>
-#include <config.h>
+#include "IO.h"
+#include "config.h"
 
 class RobOut {
 public:
@@ -23,7 +23,6 @@ class Rob {
 public:
   Rob(SimContext *ctx) { this->ctx = ctx; }
   SimContext *ctx;
-  class AbstractLsu *lsu = nullptr;
   void init();
   void seq();
   void comb_ready();

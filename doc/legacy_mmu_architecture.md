@@ -2,11 +2,11 @@
 
 ## 概述
 
-旧版 MMU 子系统（位于 `mmu/` 目录下）实现了一个支持 RISC-V Sv32 分页机制的虚实地址转换单元。其当前采用**统一 TLB** 设计，即由单个 `TLB` 实例同时服务于前端（指令取指）和后端（Load/Store）请求，并由单个 `PTW`（页表漫游器）提供缺失后的回填支持。
+旧版 MMU 子系统（位于 `legacy/mmu/` 目录下）实现了一个支持 RISC-V Sv32 分页机制的虚实地址转换单元。其当前采用**统一 TLB** 设计，即由单个 `TLB` 实例同时服务于前端（指令取指）和后端（Load/Store）请求，并由单个 `PTW`（页表漫游器）提供缺失后的回填支持。
 
 ## 模块层级
 
-- **MMU** (`mmu/MMU.cpp`)
+- **MMU** (`legacy/mmu/MMU.cpp`)
   - 顶层封装模块。
   - 管理前端（`mmu_ifu_req/resp`）和后端（`mmu_lsu_req/resp`）的 IO 接口。
   - 包含：
@@ -14,7 +14,7 @@
     - **PTW** (`ptw` 实例)
   - 实现前端和后端 TLB 缺失请求到 PTW 之间的仲裁。
 
-- **TLB** (`mmu/TLB.cpp`)
+- **TLB** (`legacy/mmu/TLB.cpp`)
   - **统一 TLB**：单一结构 `entries[TLB_SIZE]`（默认 32 项）。
   - **端口**：
     - `ifu_io`：指令取指读端口。
@@ -26,7 +26,7 @@
     - `comb_replacement()`：更新替换策略状态（PLRU/Random）。
     - `comb_write()`：处理来自 PTW 的回填。
 
-- **PTW** (`mmu/PTW.cpp`)
+- **PTW** (`legacy/mmu/PTW.cpp`)
   - **状态机**：实现硬件页表漫游（Sv32 二级页表查询）。
   - **状态**：`IDLE` -> `CACHE_1` -> `MEM_1` -> `CACHE_2` -> `MEM_2`。
   - **接口**：

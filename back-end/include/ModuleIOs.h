@@ -93,6 +93,7 @@ typedef struct DisIssUop {
   wire<PRF_IDX_WIDTH> dest_preg, src1_preg, src2_preg;
   wire<ROB_IDX_WIDTH> rob_idx;       // ROB 索引
   wire<STQ_IDX_WIDTH> stq_idx;       // LD/ST 队列索引
+  wire<STQ_IDX_WIDTH> ldq_idx;       // LDQ 索引
   wire<CSR_IDX_WIDTH> csr_idx;       // CSR 索引 (Critical Fix)
   wire<BR_TAG_WIDTH>  tag;           // Branch Tag (Critical Fix)
   wire<3>   func3;         // 辅助功能码 (funct3)
@@ -110,6 +111,7 @@ typedef struct DisIssUop {
     slim.src2_preg = full.src2_preg;
     slim.rob_idx   = full.rob_idx;
     slim.stq_idx   = full.stq_idx;
+    slim.ldq_idx   = full.ldq_idx;
     slim.csr_idx   = full.csr_idx;
     slim.tag       = full.tag;
     slim.func3     = full.func3;
@@ -258,8 +260,8 @@ typedef struct IduIO {
   } to_front;
 
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    DecRenUop   uop[FETCH_WIDTH]; // Decoded instructions
+    wire<1>     valid[DECODE_WIDTH];
+    DecRenUop   uop[DECODE_WIDTH]; // Decoded instructions
   } to_ren;
 
   struct {
@@ -273,8 +275,8 @@ typedef struct IduIO {
 typedef struct RenIO {
   // --- Inputs ---
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    DecRenUop   uop[FETCH_WIDTH];
+    wire<1>     valid[DECODE_WIDTH];
+    DecRenUop   uop[DECODE_WIDTH];
   } from_dec;
 
   struct {
@@ -302,8 +304,8 @@ typedef struct RenIO {
   } to_dec;
 
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    RenDisUop   uop[FETCH_WIDTH]; // Renamed instructions
+    wire<1>     valid[DECODE_WIDTH];
+    RenDisUop   uop[DECODE_WIDTH]; // Renamed instructions
   } to_dis;
 } RenIO;
 
@@ -311,8 +313,8 @@ typedef struct RenIO {
 typedef struct DispatchIO {
   // --- Inputs ---
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    RenDisUop   uop[FETCH_WIDTH];
+    wire<1>     valid[DECODE_WIDTH];
+    RenDisUop   uop[DECODE_WIDTH];
   } from_ren;
 
   struct {
@@ -334,8 +336,8 @@ typedef struct DispatchIO {
   } to_ren;
 
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    RobUop      uop[FETCH_WIDTH]; // Instructions dispatched to ROB
+    wire<1>     valid[DECODE_WIDTH];
+    RobUop      uop[DECODE_WIDTH]; // Instructions dispatched to ROB
   } to_rob;
 
   struct {
@@ -397,8 +399,8 @@ typedef struct ExuIO {
 typedef struct RobIO {
   // --- Inputs ---
   struct {
-    wire<1>     valid[FETCH_WIDTH];
-    RobUop      uop[FETCH_WIDTH]; // Instructions from Dispatch
+    wire<1>     valid[DECODE_WIDTH];
+    RobUop      uop[DECODE_WIDTH]; // Instructions from Dispatch
   } from_dis;
 
   struct {

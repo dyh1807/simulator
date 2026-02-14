@@ -1,12 +1,13 @@
 #include "front_fifo.h"
-#include "util.h"
 #include <array>
-// #include <assert.h>
+#include <assert.h>
 #include <iostream>
 #include <queue>
+#include "frontend.h"
 
 struct FIFO_entry {
   std::array<uint32_t, FETCH_WIDTH> instructions;
+  std::array<uint32_t, FETCH_WIDTH> pc; // THIS IS ONLY FOR DEBUG!!! 
   std::array<bool, FETCH_WIDTH> page_fault_inst;
   std::array<bool, FETCH_WIDTH> inst_valid;
   std::array<uint8_t, FETCH_WIDTH> predecode_type; // for predecode result
@@ -32,23 +33,28 @@ void instruction_FIFO_top(struct instruction_FIFO_in *in,
     while (!fifo.empty()) {
       fifo.pop();
     }
+    DEBUG_LOG_SMALL_4("inst FIFO refetch\n");
     out->full = false;
     out->empty = true;
-    // [Fix] Allow writing after clear
   }
-  if (fifo.size() > INSTRUCTION_FIFO_SIZE)
-    Assert(0);
+  if (fifo.size() > INSTRUCTION_FIFO_SIZE){
+    printf("[INSTRUCTION_FIFO_TOP] ERROR!!: fifo.size() > INSTRUCTION_FIFO_SIZE\n");
+    exit(1); // should not reach here
+  }
 
   // std::cout << "FIFO size:" << fifo.size() << std::endl;
 
   // if FIFO is not full and icache has new data
   if (in->write_enable) {
     if (fifo.size() >= INSTRUCTION_FIFO_SIZE) {
-      Assert(0); // should not reach here
+      printf("[INSTRUCTION_FIFO_TOP] ERROR!!: fifo.size() >= INSTRUCTION_FIFO_SIZE\n");
+      exit(1); // should not reach here
     }
     FIFO_entry entry;
     for (int i = 0; i < FETCH_WIDTH; i++) {
       entry.instructions[i] = in->fetch_group[i];
+      entry.pc[i] = in->pc[i];
+      DEBUG_LOG_SMALL_4("inst FIFO in: pc[%d]: %x\n", i, in->pc[i]);
       entry.page_fault_inst[i] = in->page_fault_inst[i];
       entry.inst_valid[i] = in->inst_valid[i];
       entry.predecode_type[i] = in->predecode_type[i];
@@ -58,21 +64,18 @@ void instruction_FIFO_top(struct instruction_FIFO_in *in,
     fifo.push(entry);
   }
 
-  // output data (Peek)
-  if (!fifo.empty()) {
+  // output data
+  if (in->read_enable && !fifo.empty()) {
     for (int i = 0; i < FETCH_WIDTH; i++) {
       out->instructions[i] = fifo.front().instructions[i];
+      out->pc[i] = fifo.front().pc[i];
+      DEBUG_LOG_SMALL_4("inst FIFO out: pc[%d]: %x\n", i, fifo.front().pc[i]);
       out->page_fault_inst[i] = fifo.front().page_fault_inst[i];
       out->inst_valid[i] = fifo.front().inst_valid[i];
       out->predecode_type[i] = fifo.front().predecode_type[i];
-      out->predecode_target_address[i] =
-          fifo.front().predecode_target_address[i];
+      out->predecode_target_address[i] = fifo.front().predecode_target_address[i];
     }
     out->seq_next_pc = fifo.front().seq_next_pc;
-  }
-
-  // Pop logic
-  if (in->read_enable && !fifo.empty()) {
     fifo.pop();
     out->FIFO_valid = true;
   } else {

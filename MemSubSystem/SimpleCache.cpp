@@ -1,6 +1,11 @@
 #include "SimpleCache.h"
+#include "PeripheralModel.h"
+#include "oracle.h"
 #include <cstdint>
 #include <cstdlib>
+#include <algorithm>
+
+extern uint32_t *p_memory;
 
 // 辅助函数：获取PLRU树中特定位的值
 bool get_plru_bit(uint8_t tree[], int bit_index) {
@@ -116,7 +121,7 @@ int SimpleCache::cache_access(uint32_t addr) {
   ctx->perf.dcache_access_num++;
   uint32_t tag;
   int i;
-  
+
   for (i = 0; i < WAY_NUM; i++) {
     tag = cache_tag[i][get_index(addr)];
     if (cache_valid[i][get_index(addr)] && tag == (uint32_t)get_tag(addr)) {
@@ -139,3 +144,113 @@ int SimpleCache::cache_access(uint32_t addr) {
 
   return HIT_LATENCY;
 }
+
+bool SimpleCache::should_write_ready() const {
+  if (!stress_mode) {
+    return true;
+  }
+  return (rand() % 100) < write_ready_pct;
+}
+
+void SimpleCache::handle_write_req(const MemReqIO &req) {
+  if (!req.en || !req.wen) {
+    return;
+  }
+
+  cache_access(req.addr);
+
+  uint32_t paddr = req.addr;
+  uint32_t old_val = p_memory[paddr >> 2];
+  uint32_t wdata = req.wdata;
+  uint32_t wmask = 0;
+  for (int i = 0; i < 4; i++) {
+    if (req.wstrb & (1 << i)) {
+      wmask |= (0xFFu << (i * 8));
+    }
+  }
+  uint32_t new_val = (old_val & ~wmask) | (wdata & wmask);
+  p_memory[paddr >> 2] = new_val;
+
+  if (peripheral_model != nullptr) {
+    peripheral_model->on_mem_store_effective(paddr, new_val);
+  }
+}
+
+void SimpleCache::accept_req(const MemReqIO &req) {
+  if (!req.en) {
+    return;
+  }
+
+  int latency = cache_access(req.addr);
+  PendingReq pending{};
+  pending.req = req;
+  pending.req.uop.is_cache_miss = (latency >= MISS_LATENCY);
+  pending.complete_time = sim_time + latency;
+  pending_reqs.push_back(pending);
+}
+
+void SimpleCache::drive_resp(MemRespIO &resp) const { resp = pending_resp; }
+
+void SimpleCache::init() {}
+
+void SimpleCache::comb() {
+  bool wready = should_write_ready();
+  if (lsu_wready_io != nullptr) {
+    lsu_wready_io->ready = wready;
+  }
+
+  if (wready && lsu_wreq_io != nullptr) {
+    handle_write_req(*lsu_wreq_io);
+  }
+
+  if (lsu_req_io != nullptr) {
+    accept_req(*lsu_req_io);
+  }
+
+  pending_resp = {};
+
+  if (pending_reqs.empty()) {
+    if (lsu_resp_io != nullptr) {
+      *lsu_resp_io = pending_resp;
+    }
+    return;
+  }
+
+  const PendingReq &front = pending_reqs.front();
+  if (sim_time < front.complete_time) {
+    if (lsu_resp_io != nullptr) {
+      *lsu_resp_io = pending_resp;
+    }
+    return;
+  }
+
+  const uint32_t p_addr = front.req.addr;
+  pending_resp.valid = true;
+  pending_resp.wen = front.req.wen;
+  pending_resp.addr = p_addr;
+  pending_resp.uop = front.req.uop;
+
+  uint32_t mem_val = p_memory[p_addr >> 2];
+  if (p_addr == 0x1fd0e000) {
+#ifdef CONFIG_BPU
+    mem_val = sim_time;
+#else
+    mem_val = get_oracle_timer();
+#endif
+    pending_resp.uop.difftest_skip = true;
+  } else if (p_addr == 0x1fd0e004) {
+    mem_val = 0;
+    pending_resp.uop.difftest_skip = true;
+  } else {
+    pending_resp.uop.difftest_skip = false;
+  }
+  pending_resp.data = mem_val;
+
+  pending_reqs.pop_front();
+
+  if (lsu_resp_io != nullptr) {
+    *lsu_resp_io = pending_resp;
+  }
+}
+
+void SimpleCache::seq() {}

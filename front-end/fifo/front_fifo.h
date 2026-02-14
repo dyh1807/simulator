@@ -3,10 +3,13 @@
 
 #include "../front_IO.h"
 #include "../frontend.h"
+#include "../BPU/BPU_configs.h"
 
-#define INSTRUCTION_FIFO_SIZE 4
-#define PTAB_SIZE 5 // we set PTAB a little bit larger to avoid PTAB full write error
+#define INSTRUCTION_FIFO_SIZE 32
+#define PTAB_SIZE 32
 
-#define FRONT2BACK_FIFO_SIZE 8
+#define FETCH_ADDR_FIFO_SIZE 32
+
+#define FRONT2BACK_FIFO_SIZE 64
 
 #endif

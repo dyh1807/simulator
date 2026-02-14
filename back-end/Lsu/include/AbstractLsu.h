@@ -3,6 +3,8 @@
 
 class Csr;
 class SimContext;
+class PtwMemPort;
+class PtwWalkPort;
 
 // ==========================================
 // LSU IO 接口定义
@@ -16,6 +18,8 @@ typedef struct {
   CsrStatusIO *csr_status;
   DisLsuIO *dis2lsu;
   ExeLsuIO *exe2lsu;
+  MemRespIO *dcache_resp;
+  MemReadyIO *dcache_wready;
 } LsuIn;
 
 // 输出信号 (发送给各个流水级)
@@ -23,6 +27,8 @@ typedef struct {
   LsuDisIO *lsu2dis;
   LsuRobIO *lsu2rob;
   LsuExeIO *lsu2exe;
+  MemReqIO *dcache_req;
+  MemReqIO *dcache_wreq;
 } LsuOut;
 
 // STQ 条目结构
@@ -54,14 +60,14 @@ public:
   LsuIn in;
   LsuOut out;
   SimContext *ctx;
+  PtwMemPort *ptw_mem_port = nullptr;
+  PtwWalkPort *ptw_walk_port = nullptr;
 
   // 组合逻辑 (按数据流向分为不同阶段)
   virtual void init() = 0;
   virtual void comb_lsu2dis_info() = 0; // -> lsu2dis (Dispatch Stage)
-  virtual void comb_stq_alloc() = 0;    // -> dis2lsu (Dispatch Stage)
   virtual void comb_recv() = 0;         // -> Internal State (Execute Stage)
   virtual void comb_load_res() = 0;     // -> lsu2exe (Writeback Stage)
-  virtual void comb_commit() = 0;       // -> Internal STQ State (Commit Stage)
   virtual void comb_flush() = 0;        // -> Internal State Reset (Exception)
 
   // 时序逻辑
@@ -72,9 +78,13 @@ public:
   virtual uint32_t get_load_addr(int rob_idx) = 0;
 
   virtual void set_csr(Csr *csr) {}
+  virtual void set_ptw_mem_port(PtwMemPort *port) { ptw_mem_port = port; }
+  virtual void set_ptw_walk_port(PtwWalkPort *port) { ptw_walk_port = port; }
 
   // 一致性访存接口 (供 MMU 使用)
   virtual uint32_t coherent_read(uint32_t p_addr) = 0;
+  // sfence.vma 提交门控：是否存在“已提交但尚未从 STQ retire”的 store
+  virtual bool has_committed_store_pending() const = 0;
 
   // 辅助函数
   int get_mem_width(int func3) {

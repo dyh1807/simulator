@@ -43,7 +43,7 @@ public:
   RenIO get_hardware_io(); // 获取硬件级别 IO (Hardware Reference)
 
   // register
-  InstEntry inst_r[FETCH_WIDTH];
+  InstEntry inst_r[DECODE_WIDTH];
   reg<PRF_IDX_WIDTH> arch_RAT[ARF_NUM + 1];
   reg<PRF_IDX_WIDTH> spec_RAT[ARF_NUM + 1];
   reg<PRF_IDX_WIDTH> RAT_checkpoint[MAX_BR_NUM][ARF_NUM + 1];
@@ -52,7 +52,7 @@ public:
   reg<1> busy_table[PRF_NUM];
   reg<1> spec_alloc[PRF_NUM]; // 处于speculative状态分配的寄存器
 
-  InstEntry inst_r_1[FETCH_WIDTH];
+  InstEntry inst_r_1[DECODE_WIDTH];
   wire<PRF_IDX_WIDTH> arch_RAT_1[ARF_NUM + 1];
   wire<PRF_IDX_WIDTH> spec_RAT_1[ARF_NUM + 1];
   wire<PRF_IDX_WIDTH> RAT_checkpoint_1[MAX_BR_NUM][ARF_NUM + 1];

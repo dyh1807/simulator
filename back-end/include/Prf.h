@@ -1,7 +1,7 @@
 #pragma once
 #include "config.h"
-#include <Exu.h>
-#include <IO.h>
+#include "Exu.h"
+#include "IO.h"
 
 class PrfOut {
 public:
@@ -33,11 +33,6 @@ public:
   void comb_pipeline();
   void init();
   void seq();
-
-#ifdef CONFIG_CACHE
-  void comb_load();
-  uint32_t load_data;
-#endif
 
   reg<32> reg_file[PRF_NUM];
   UopEntry inst_r[ISSUE_WIDTH];

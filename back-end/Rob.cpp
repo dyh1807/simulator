@@ -1,12 +1,11 @@
 #include "IO.h"
-#include <RISCV.h>
-#include <Rob.h>
+#include "RISCV.h"
+#include "Rob.h"
 #include <cmath>
-#include <config.h>
+#include "config.h"
 #include <cstdlib>
 #include <iostream>
-#include <util.h>
-#include <AbstractLsu.h>
+#include "util.h"
 
 void Rob::init() {
   deq_ptr = deq_ptr_1 = 0;
@@ -86,7 +85,8 @@ void Rob::comb_commit() {
 
   static int stall_cycle = 0; // 检查是否卡死
   out.rob_bcast->flush = out.rob_bcast->exception = out.rob_bcast->mret =
-      out.rob_bcast->sret = out.rob_bcast->ecall = false;
+      out.rob_bcast->sret = out.rob_bcast->ecall = out.rob_bcast->fence =
+          out.rob_bcast->fence_i = false;
 
   out.rob_bcast->interrupt = out.rob2csr->interrupt_resp;
 
@@ -123,6 +123,10 @@ void Rob::comb_commit() {
             entry[i][deq_ptr].uop.cplt_num != entry[i][deq_ptr].uop.uop_num) {
           single_commit = false;
         }
+        if (entry[i][deq_ptr].uop.type == SFENCE_VMA && in.lsu2rob != nullptr &&
+            in.lsu2rob->committed_store_pending) {
+          single_commit = false;
+        }
         break;
       }
     }
@@ -137,9 +141,14 @@ void Rob::comb_commit() {
     for (int i = 0; i < ROB_BANK_NUM; i++) {
       if (entry[i][deq_ptr].valid) {
         const auto &uop = entry[i][deq_ptr].uop;
-        if (is_load(uop)) {
-          uint32_t alignment_mask = (uop.func3 & 0x3) == 0 ? 0 : (uop.func3 & 0x3) == 1 ? 1 : 3;
-          Assert((uop.diag_val & alignment_mask) == 0 && "DUT: Load address misaligned at commit!");
+        // 仅在 Load 已完成且非异常语义时检查地址对齐，避免中断单提交/异常路径下
+        // 将 diag_val 的其他语义（如指令字、异常地址）误当作物理地址检查。
+        if (is_load(uop) && (uop.cplt_num == uop.uop_num) && !is_page_fault(uop)) {
+          uint32_t alignment_mask = (uop.func3 & 0x3) == 0   ? 0
+                                    : (uop.func3 & 0x3) == 1 ? 1
+                                                             : 3;
+          Assert((uop.diag_val & alignment_mask) == 0 &&
+                 "DUT: Load address misaligned at commit!");
         }
       }
       out.rob_commit->commit_entry[i].valid = entry[i][deq_ptr].valid;
@@ -163,9 +172,13 @@ void Rob::comb_commit() {
 
     if (entry[single_idx][deq_ptr].valid) {
       const auto &uop = entry[single_idx][deq_ptr].uop;
-      if (is_load(uop)) {
-        uint32_t alignment_mask = (uop.func3 & 0x3) == 0 ? 0 : (uop.func3 & 0x3) == 1 ? 1 : 3;
-        Assert((uop.diag_val & alignment_mask) == 0 && "DUT: Load address misaligned at single commit!");
+      // 中断触发 single_commit 时，首条指令可能尚未完成，diag_val 可能不是地址语义。
+      if (is_load(uop) && (uop.cplt_num == uop.uop_num) && !is_page_fault(uop)) {
+        uint32_t alignment_mask = (uop.func3 & 0x3) == 0   ? 0
+                                  : (uop.func3 & 0x3) == 1 ? 1
+                                                           : 3;
+        Assert((uop.diag_val & alignment_mask) == 0 &&
+               "DUT: Load address misaligned at single commit!");
       }
     }
 
@@ -188,7 +201,7 @@ void Rob::comb_commit() {
         out.rob_bcast->sret = true;
       } else if (entry[single_idx][deq_ptr].uop.page_fault_store) {
         out.rob_bcast->page_fault_store = true;
-        out.rob_bcast->trap_val = lsu->get_stq_entry(entry[single_idx][deq_ptr].uop.stq_idx).addr;
+        out.rob_bcast->trap_val = entry[single_idx][deq_ptr].uop.diag_val;
       } else if (entry[single_idx][deq_ptr].uop.page_fault_load) {
         out.rob_bcast->page_fault_load = true;
         out.rob_bcast->trap_val = entry[single_idx][deq_ptr].uop.diag_val;
@@ -225,7 +238,7 @@ void Rob::comb_commit() {
   out.rob2dis->rob_flag = enq_flag;
 
   stall_cycle++;
-  if (stall_cycle > 500) {
+  if (stall_cycle > 1000) {
     cout << dec << ctx->perf.cycle << endl;
     cout << "卡死了" << endl;
 
@@ -240,18 +253,18 @@ void Rob::comb_commit() {
       if (entry[i][deq_ptr].valid) {
         printf("0x%08x: 0x%08x cplt_num: %d  uop_num: %d rob_idx:%d "
                "is_page_fault: %d inst_idx: %lld type: %d\n",
-                entry[i][deq_ptr].uop.pc, entry[i][deq_ptr].uop.diag_val,
-                entry[i][deq_ptr].uop.cplt_num, entry[i][deq_ptr].uop.uop_num,
-                (i + (deq_ptr * ROB_BANK_NUM)),
-                is_page_fault(entry[i][deq_ptr].uop),
-                (long long)entry[i][deq_ptr].uop.inst_idx,
-                entry[i][deq_ptr].uop.type);
+               entry[i][deq_ptr].uop.pc, entry[i][deq_ptr].uop.diag_val,
+               entry[i][deq_ptr].uop.cplt_num, entry[i][deq_ptr].uop.uop_num,
+               (i + (deq_ptr * ROB_BANK_NUM)),
+               is_page_fault(entry[i][deq_ptr].uop),
+               (long long)entry[i][deq_ptr].uop.inst_idx,
+               entry[i][deq_ptr].uop.type);
       } else {
         printf("[Bank %d] INVALID\n", i);
       }
     }
 
-    Assert(0 && "ROB Deadlock detected (stall_cycle > 500)");
+    Assert(0 && "ROB Deadlock detected (stall_cycle > 1000)");
   }
 }
 
@@ -267,8 +280,9 @@ void Rob::comb_complete() {
       for (int k = 0; k < LSU_LDU_COUNT; k++) {
         if (i == IQ_LD_PORT_BASE + k) {
           // 保存物理地址，用于 Commit 时的对齐检查
-          entry_1[bank_idx][line_idx].uop.diag_val = in.exu2rob->entry[i].uop.diag_val;
-          
+          entry_1[bank_idx][line_idx].uop.diag_val =
+              in.exu2rob->entry[i].uop.diag_val;
+
           if (is_page_fault(in.exu2rob->entry[i].uop)) {
             entry_1[bank_idx][line_idx].uop.diag_val =
                 in.exu2rob->entry[i].uop.result;
@@ -347,7 +361,7 @@ void Rob::comb_fire() {
   // 入队
   wire<1> enq = false;
   if (out.rob2dis->ready) {
-    for (int i = 0; i < FETCH_WIDTH; i++) {
+    for (int i = 0; i < DECODE_WIDTH; i++) {
       if (in.dis2rob->dis_fire[i]) {
         entry_1[i][enq_ptr].valid = true;
         entry_1[i][enq_ptr].uop = in.dis2rob->uop[i];
@@ -397,7 +411,7 @@ RobIO Rob::get_hardware_io() {
   RobIO hardware;
 
   // --- Inputs ---
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     hardware.from_dis.valid[i] = in.dis2rob->valid[i];
     hardware.from_dis.uop[i] = RobUop::filter(in.dis2rob->uop[i]);
   }

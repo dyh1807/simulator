@@ -33,13 +33,15 @@ class Dispatch {
 private:
   int decompose_inst(const InstEntry &original_inst, UopPacket *out_uops);
 
-  InstEntry inst_alloc[FETCH_WIDTH];
+  InstEntry inst_alloc[DECODE_WIDTH];
 
   // 记录每条指令 Dispatch 是否成功 (comb_dispatch -> comb_fire)
-  bool dispatch_success_flags[FETCH_WIDTH];
+  bool dispatch_success_flags[DECODE_WIDTH];
 
   // 辅助 Mask，用于追踪每条指令占用了哪个 STQ 端口
-  wire<FETCH_WIDTH> stq_port_mask[MAX_STQ_DISPATCH_WIDTH];
+  wire<DECODE_WIDTH> stq_port_mask[MAX_STQ_DISPATCH_WIDTH];
+  // 辅助 Mask，用于追踪每条指令占用了哪个 LDQ 端口
+  wire<DECODE_WIDTH> ldq_port_mask[MAX_LDQ_DISPATCH_WIDTH];
 
   struct DispatchCache {
     int count;                     // 拆分数量
@@ -47,7 +49,7 @@ private:
   };
 
   // 用于在 comb_dispatch 和 comb_fire 之间传递数据
-  DispatchCache dispatch_cache[FETCH_WIDTH];
+  DispatchCache dispatch_cache[DECODE_WIDTH];
 
 public:
   Dispatch(SimContext *ctx) { this->ctx = ctx; }
@@ -55,6 +57,7 @@ public:
   DIS_IN in;
   DIS_OUT out;
 
+  void init();
   void comb_alloc();
   void comb_dispatch();
   void comb_wake();
@@ -63,6 +66,6 @@ public:
   void seq();
 
   DispatchIO get_hardware_io(); // Hardware Reference
-  InstEntry inst_r[FETCH_WIDTH];
-  InstEntry inst_r_1[FETCH_WIDTH];
+  InstEntry inst_r[DECODE_WIDTH];
+  InstEntry inst_r_1[DECODE_WIDTH];
 };

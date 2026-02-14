@@ -1,245 +1,32 @@
 #include "BackTop.h"
 #include "Csr.h"
 #include "IO.h"
+#include "MemSubsystem.h"
 #include "SimpleLsu.h"
 #include "config.h"
 #include "diff.h"
+#include "front_module.h"
 #include "oracle.h"
 #include "ref.h"
+#include "util.h"
 
 #include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <zlib.h>
 
-extern RefCpu ref_cpu;
-
 void init_diff_ckpt(CPU_state ckpt_state, uint32_t *ckpt_memory);
 
-void BackTop::difftest_cycle() {
-#ifdef CONFIG_DIFFTEST
-  int commit_indices[COMMIT_WIDTH];
-  int commit_num = 0;
-  bool skip = false;
-
-  for (int i = 0; i < COMMIT_WIDTH; i++) {
-    if (rob->out.rob_commit->commit_entry[i].valid) {
-      commit_indices[commit_num] = i;
-      commit_num++;
-      if (rob->out.rob_commit->commit_entry[i].uop.difftest_skip) {
-        skip = true;
-      }
-    }
-  }
-
-  if (commit_num > 0) {
-    for (int i = 0; i < commit_num; i++) {
-      InstInfo *inst =
-          &rob->out.rob_commit->commit_entry[commit_indices[i]].uop;
-
-      // 1. difftest副作用：性能计数器 中断
-      difftest_sync(inst);
-
-      // 2. 如果是最后一条指令，填充完整的 dut_cpu 状态用于比对
-      if (i == commit_num - 1) {
-        for (int j = 0; j < ARF_NUM; j++) {
-          dut_cpu.gpr[j] = prf->reg_file[rename->arch_RAT_1[j]];
-        }
-        for (int k = 0; k < CSR_NUM; k++) {
-          dut_cpu.csr[k] = csr->CSR_RegFile_1[k];
-        }
-
-        if (is_store(*inst)) {
-          StqEntry e = lsu->get_stq_entry(inst->stq_idx);
-          Assert(e.addr_valid && e.data_valid);
-          dut_cpu.store = true;
-          dut_cpu.store_addr = e.p_addr;
-          if (e.func3 == 0b00)
-            dut_cpu.store_data = e.data & 0xFF;
-          else if (e.func3 == 0b01)
-            dut_cpu.store_data = e.data & 0xFFFF;
-          else
-            dut_cpu.store_data = e.data;
-          dut_cpu.store_data = dut_cpu.store_data
-                               << (dut_cpu.store_addr & 0b11) * 8;
-        } else {
-          dut_cpu.store = false;
-        }
-
-        // For branches/JAL/flush, PC is in the union (set by BRU or comb
-        // flush).
-        dut_cpu.pc = (is_branch(inst->type) || inst->type == JAL ||
-                      rob->out.rob_bcast->flush)
-                         ? rob->out.rob_commit->commit_entry[commit_indices[i]]
-                               .uop.diag_val
-                         : inst->pc + 4;
-        dut_cpu.instruction = inst->instruction;
-        dut_cpu.page_fault_inst = inst->page_fault_inst;
-        dut_cpu.page_fault_load = inst->page_fault_load;
-        dut_cpu.page_fault_store = inst->page_fault_store;
-        dut_cpu.inst_idx = inst->inst_idx;
-
-        if (skip)
-          difftest_skip();
-        else
-          difftest_step(true);
-      } else {
-        // 中间指令只步进模型，不触发 checkregs
-        difftest_step(false);
-      }
-    }
-  }
-#endif
-}
-
-void BackTop::difftest_sync(InstInfo *inst) {
-  if (inst->type == JALR) {
-    if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
-      ctx->perf.ret_br_num++;
-    } else {
-      ctx->perf.jalr_br_num++;
-    }
-  } else if (inst->type == BR) {
-    ctx->perf.cond_br_num++;
-  }
-
-  if (inst->mispred) {
-    if (inst->type == JALR) {
-      if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
-        ctx->perf.ret_mispred_num++;
-        bool pred_taken = false;
-        if (ftq) {
-          FTQEntry &entry = ftq->get(inst->ftq_idx);
-          if (entry.valid) {
-            pred_taken = entry.pred_taken_mask[inst->ftq_offset];
-          }
-        }
-        if (!pred_taken) {
-          ctx->perf.ret_dir_mispred++;
-        } else {
-          ctx->perf.ret_addr_mispred++;
-        }
-      } else {
-        ctx->perf.jalr_mispred_num++;
-        bool pred_taken = false;
-        if (ftq) {
-          FTQEntry &entry = ftq->get(inst->ftq_idx);
-          if (entry.valid) {
-            pred_taken = entry.pred_taken_mask[inst->ftq_offset];
-          }
-        }
-        if (!pred_taken) {
-          ctx->perf.jalr_dir_mispred++;
-        } else {
-          ctx->perf.jalr_addr_mispred++;
-        }
-      }
-    } else if (inst->type == BR) {
-      bool pred_taken = false;
-      if (ftq) {
-        FTQEntry &entry = ftq->get(inst->ftq_idx);
-        if (entry.valid) {
-          pred_taken = entry.pred_taken_mask[inst->ftq_offset];
-        }
-      }
-      if (pred_taken != inst->br_taken) {
-        ctx->perf.cond_dir_mispred++;
-      } else {
-        ctx->perf.cond_addr_mispred++;
-      }
-      ctx->perf.cond_mispred_num++;
-    }
-  }
-
-  if (is_store(*inst)) {
-    StqEntry e = lsu->get_stq_entry(inst->stq_idx);
-
-    // --- UART/PLIC Cheat Synchronization (matching ref.cpp) ---
-    if (e.p_addr == UART_ADDR_BASE) {
-      p_memory[UART_ADDR_BASE / 4] = p_memory[UART_ADDR_BASE / 4] & 0xffffff00;
-    }
-
-    if (e.p_addr == UART_ADDR_BASE + 1) {
-      uint8_t cmd = e.data & 0xff;
-      if (cmd == 7) {
-        csr->CSR_RegFile_1[csr_mip] = csr->CSR_RegFile[csr_mip] | (1 << 9);
-        csr->CSR_RegFile_1[csr_sip] = csr->CSR_RegFile[csr_sip] | (1 << 9);
-        p_memory[PLIC_CLAIM_ADDR / 4] = 0xa;
-        p_memory[UART_ADDR_BASE / 4] =
-            p_memory[UART_ADDR_BASE / 4] & 0xfff0ffff;
-      } else if (cmd == 5) {
-        p_memory[UART_ADDR_BASE / 4] =
-            (p_memory[UART_ADDR_BASE / 4] & 0xfff0ffff) | 0x00030000;
-      }
-    }
-
-    if (e.p_addr == PLIC_CLAIM_ADDR && (e.data & 0x000000ff) == 0xa) {
-      csr->CSR_RegFile_1[csr_mip] = csr->CSR_RegFile[csr_mip] & ~(1 << 9);
-      csr->CSR_RegFile_1[csr_sip] = csr->CSR_RegFile[csr_sip] & ~(1 << 9);
-      p_memory[PLIC_CLAIM_ADDR / 4] = 0x0;
-    }
-  }
-}
-
-void BackTop::difftest_inst(InstEntry *inst_entry) {
-  InstInfo *inst = &inst_entry->uop;
-  difftest_sync(inst);
-
-#ifdef CONFIG_DIFFTEST
-  for (int i = 0; i < ARF_NUM; i++) {
-    dut_cpu.gpr[i] = prf->reg_file[rename->arch_RAT_1[i]];
-  }
-
-  if (is_store(*inst)) {
-    StqEntry e = lsu->get_stq_entry(inst->stq_idx);
-    Assert(e.addr_valid && e.data_valid);
-
-    dut_cpu.store = true;
-    dut_cpu.store_addr = e.p_addr;
-    if (e.func3 == 0b00)
-      dut_cpu.store_data = e.data & 0xFF;
-    else if (e.func3 == 0b01)
-      dut_cpu.store_data = e.data & 0xFFFF;
-    else
-      dut_cpu.store_data = e.data;
-
-    dut_cpu.store_data = dut_cpu.store_data << (dut_cpu.store_addr & 0b11) * 8;
-  } else
-    dut_cpu.store = false;
-
-  for (int i = 0; i < CSR_NUM; i++) {
-    dut_cpu.csr[i] = csr->CSR_RegFile_1[i];
-  }
-  dut_cpu.pc =
-      (is_branch(inst->type) || inst->type == JAL || rob->out.rob_bcast->flush)
-          ? inst_entry->uop.diag_val
-          : inst->pc + 4;
-  dut_cpu.instruction = inst->instruction;
-  dut_cpu.page_fault_inst = inst->page_fault_inst;
-  dut_cpu.page_fault_load = inst->page_fault_load;
-  dut_cpu.page_fault_store = inst->page_fault_store;
-  dut_cpu.inst_idx = inst->inst_idx;
-
-  if (inst->difftest_skip) {
-    difftest_skip();
-  } else {
-    difftest_step(true);
-  }
-#endif
-}
-
 void BackTop::init() {
-  ftq = new FTQ();
-  idu = new Idu(ctx, ftq, MAX_BR_PER_CYCLE);
+  idu = new Idu(ctx, MAX_BR_PER_CYCLE);
   rename = new Ren(ctx);
   dis = new Dispatch(ctx);
   isu = new Isu(ctx);
   prf = new Prf(ctx);
-  exu = new Exu(ctx, ftq);
+  exu = new Exu(ctx, idu->out.ftq_lookup);
   csr = new Csr();
   rob = new Rob(ctx);
   lsu = new SimpleLsu(ctx);
-  rob->lsu = lsu;
   lsu->set_csr(csr);
 
   idu->out.dec2front = &dec2front;
@@ -334,13 +121,18 @@ void BackTop::init() {
   lsu->in.rob_bcast = &rob_bcast;
   lsu->in.dec_bcast = &dec_bcast;
   lsu->in.rob_commit = &rob_commit;
+  lsu->in.dcache_resp = &dcache2lsu_resp;
+  lsu->in.dcache_wready = &dcache2lsu_wready;
 
   lsu->out.lsu2exe = &lsu2exe;
   lsu->out.lsu2dis = &lsu2dis;
   lsu->out.lsu2rob = &lsu2rob;
+  lsu->out.dcache_req = &lsu2dcache_req;
+  lsu->out.dcache_wreq = &lsu2dcache_wreq;
 
   idu->init();
   rename->init();
+  dis->init();
   isu->init();
   prf->init();
   exu->init();
@@ -358,7 +150,8 @@ void BackTop::comb_csr_status() {
 }
 
 void BackTop::comb() {
-  comb_csr_status(); // Update CSR Status (SATP, Privilege) for MMU
+  // CSR 状态由 SimCpu::cycle() 在进入 front/back 组合逻辑前统一刷新。
+  idu->comb_ftq_begin();
   // 输出提交的指令
   for (int i = 0; i < FETCH_WIDTH; i++) {
     idu->in.front2dec->valid[i] = in.valid[i];
@@ -373,6 +166,7 @@ void BackTop::comb() {
     idu->in.front2dec->page_fault_inst[i] = in.page_fault_inst[i];
     for (int j = 0; j < 4; j++) { // TN_MAX = 4
       idu->in.front2dec->tage_idx[i][j] = in.tage_idx[i][j];
+      idu->in.front2dec->tage_tag[i][j] = in.tage_tag[i][j];
     }
   }
 
@@ -394,7 +188,6 @@ void BackTop::comb() {
 
   idu->comb_release_tag();
   dis->comb_alloc();
-  lsu->comb_commit();
   lsu->comb_load_res();
 
   exu->comb_to_csr();
@@ -421,8 +214,6 @@ void BackTop::comb() {
   rob->comb_fire();
   idu->comb_fire();
 
-  lsu->comb_stq_alloc();
-
   // 用于调试
   // 修正pc_next 以及difftest对应的pc_next
   out.flush = rob->out.rob_bcast->flush;
@@ -442,10 +233,7 @@ void BackTop::comb() {
     } else {
       out.redirect_pc = rob->out.rob_bcast->pc + 4;
     }
-    if (LOG) {
-      cout << "flush" << endl;
-      cout << "redirect_pc: " << hex << out.redirect_pc << endl;
-    }
+    BE_LOG("flush redirect_pc=0x%08x", (uint32_t)out.redirect_pc);
   }
 
   for (int i = 0; i < COMMIT_WIDTH; i++) {
@@ -467,6 +255,7 @@ void BackTop::comb() {
   idu->comb_flush();
   isu->comb_flush();
   lsu->comb_flush();
+  idu->comb_ftq_commit_reclaim();
   rob->comb_branch();
   prf->comb_branch();
   rename->comb_branch();
@@ -477,14 +266,6 @@ void BackTop::comb() {
 }
 
 void BackTop::seq() {
-  // FTQ Reclamation
-  for (int i = 0; i < COMMIT_WIDTH; i++) {
-    if (out.commit_entry[i].valid && out.commit_entry[i].uop.ftq_is_last) {
-      if (ftq)
-        ftq->pop();
-    }
-  }
-
   // rename -> isu/stq/rob
   // exu -> prf
   rename->seq();
@@ -535,7 +316,15 @@ void BackTop::load_image(const std::string &filename) {
   p_memory[uint32_t(0x4 / 4)] = 0x83e005b7;
   p_memory[uint32_t(0x8 / 4)] = 0x800002b7;
   p_memory[uint32_t(0xc / 4)] = 0x00028067;
-  p_memory[0x10000004 / 4] = 0x00006000; // 和进入 OpenSBI 相关
+  p_memory[0x10000004 / 4] = 0x00006000;           // 和进入 OpenSBI 相关
+  p_memory[uint32_t(0x00001000 / 4)] = 0x00000297; // auipc t0,0
+  p_memory[uint32_t(0x00001004 / 4)] = 0x02828613; // addi a2,t0,40
+  p_memory[uint32_t(0x00001008 / 4)] = 0xf1402573; // csrrs a0,mhartid,zero
+  p_memory[uint32_t(0x0000100c / 4)] = 0x0202a583; // lw a1,32(t0)
+  p_memory[uint32_t(0x00001010 / 4)] = 0x0182a283; // lw t0,24(t0)
+  p_memory[uint32_t(0x00001014 / 4)] = 0x00028067; // jr              t0
+  p_memory[uint32_t(0x00001018 / 4)] = 0x80000000;
+  p_memory[uint32_t(0x00001020 / 4)] = 0x8fe00000;
 
 #ifdef CONFIG_DIFFTEST
   init_difftest(size);
@@ -562,6 +351,10 @@ void BackTop::restore_from_ref() {
     csr->CSR_RegFile[i] = state.csr[i];
     csr->CSR_RegFile_1[i] = state.csr[i];
   }
+
+  // Ensure the pipeline starts with a refetch from the restored PC
+  out.flush = true;
+  out.redirect_pc = state.pc;
 }
 
 void BackTop::restore_checkpoint(const std::string &filename) {
@@ -612,6 +405,8 @@ void BackTop::restore_checkpoint(const std::string &filename) {
   state.inst_idx = 0;
 
   number_PC = state.pc;
+  // 约束：当前 checkpoint 生成流程要求快照时处于 U 态，因此恢复时固定回到 U 态。
+  // 若未来支持在 S/M 态打点，需要把特权级一并写入并按快照值恢复。
   csr->privilege = csr->privilege_1 = RISCV_MODE_U;
 
   for (int i = 0; i < ARF_NUM; i++) {
@@ -623,6 +418,14 @@ void BackTop::restore_checkpoint(const std::string &filename) {
     csr->CSR_RegFile[i] = state.csr[i];
     csr->CSR_RegFile_1[i] = state.csr[i];
   }
+
+  // Populate global dut_cpu for Oracle state comparison
+  memcpy(dut_cpu.gpr, state.gpr, sizeof(dut_cpu.gpr));
+  memcpy(dut_cpu.csr, state.csr, sizeof(dut_cpu.csr));
+  dut_cpu.pc = state.pc;
+  dut_cpu.store = state.store;
+  dut_cpu.store_addr = state.store_addr;
+  dut_cpu.store_data = state.store_data;
 
   // 2. 恢复内存
   if (p_memory == nullptr) {
@@ -657,4 +460,11 @@ void BackTop::restore_checkpoint(const std::string &filename) {
   std::cout << "Checkpoint restored from " << final_name << std::endl;
 
   init_diff_ckpt(state, p_memory);
+#ifndef CONFIG_BPU
+  init_oracle_ckpt(state, p_memory);
+#endif
+
+  // Ensure the pipeline starts with a refetch from the restored PC
+  out.flush = true;
+  out.redirect_pc = state.pc;
 }

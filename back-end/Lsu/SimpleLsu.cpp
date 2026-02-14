@@ -1,24 +1,55 @@
 #include "SimpleLsu.h"
 #include "AbstractLsu.h"
+#include "TlbMmu.h"
 #include "config.h"
-#include "oracle.h"
 #include "util.h"
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 // 外部辅助函数声明
 extern uint32_t *p_memory;
+static constexpr int64_t REQ_WAIT_RETRY = 0x7FFFFFFFFFFFFFFF;
+static constexpr int64_t REQ_WAIT_SEND = 0x7FFFFFFFFFFFFFFD;
+static constexpr int64_t REQ_WAIT_RESP = 0x7FFFFFFFFFFFFFFE;
+static constexpr int64_t REQ_WAIT_EXEC = 0x7FFFFFFFFFFFFFFC;
+static constexpr bool LDQ_TRACE = false;
 
-SimpleLsu::SimpleLsu(SimContext *ctx) : AbstractLsu(ctx), cache(ctx) {
+static inline void ldq_trace(const char *evt, int idx, const MicroOp &uop) {
+  if (!LDQ_TRACE) {
+    return;
+  }
+  std::printf("[LDQ][t=%lld] %s idx=%d rob=%u tag=%u pc=0x%08x\n",
+              (long long)sim_time, evt, idx, (uint32_t)uop.rob_idx,
+              (uint32_t)uop.tag, (uint32_t)uop.pc);
+}
+
+SimpleLsu::SimpleLsu(SimContext *ctx) : AbstractLsu(ctx) {
   // Initialize MMU
+#ifdef CONFIG_TLB_MMU
+  mmu = new TlbMmu(ctx, nullptr, DTLB_ENTRIES);
+#else
   mmu = new SimpleMmu(ctx, this);
+#endif
 
+  init();
+}
+
+void SimpleLsu::init() {
   stq_head = 0;
   stq_tail = 0;
   stq_commit = 0;
   stq_count = 0;
+  ldq_count = 0;
+  ldq_alloc_tail = 0;
+  finished_loads.clear();
+  finished_sta_reqs.clear();
+  pending_sta_addr_reqs.clear();
+  if (mmu != nullptr) {
+    mmu->flush();
+  }
 
-  // 初始化所有 STQ 条目，防止未初始化内存导致的破坏
+  // 初始化所有 STQ LDQ 条目，防止未初始化内存导致的破坏
   for (int i = 0; i < STQ_NUM; i++) {
     stq[i].valid = false;
     stq[i].addr_valid = false;
@@ -31,48 +62,76 @@ SimpleLsu::SimpleLsu(SimContext *ctx) : AbstractLsu(ctx), cache(ctx) {
     stq[i].rob_flag = 0;
     stq[i].func3 = 0;
   }
-}
 
-void SimpleLsu::init() {}
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    ldq[i].valid = false;
+    ldq[i].killed = false;
+    ldq[i].sent = false;
+    ldq[i].waiting_resp = false;
+    ldq[i].tlb_retry = false;
+    ldq[i].uop = {};
+  }
+}
 
 // =========================================================
 // 1. Dispatch 阶段: STQ 分配反馈
 // =========================================================
 
 void SimpleLsu::comb_lsu2dis_info() {
-  // 这里的逻辑很简单：只读当前状态，绝不写 next_ 状态
-  // 就像我在微信上告诉你：“土土，今晚有空。”（我还没决定去哪）
   out.lsu2dis->stq_tail = this->stq_tail;
-
-  // 注意：这里的 count 必须是当前周期的准确值
   out.lsu2dis->stq_free = STQ_NUM - this->stq_count;
-  out.lsu2dis->ldq_free = MAX_INFLIGHT_LOADS - this->inflight_loads.size();
+  out.lsu2dis->ldq_free = MAX_INFLIGHT_LOADS - this->ldq_count;
+
+  for (auto &v : out.lsu2dis->ldq_alloc_idx) {
+    v = -1;
+  }
+  int scan_pos = ldq_alloc_tail;
+  int produced = 0;
+  for (int n = 0; n < MAX_INFLIGHT_LOADS && produced < MAX_LDQ_DISPATCH_WIDTH;
+       n++) {
+    if (!ldq[scan_pos].valid) {
+      out.lsu2dis->ldq_alloc_idx[produced++] = scan_pos;
+    }
+    scan_pos = (scan_pos + 1) % MAX_INFLIGHT_LOADS;
+  }
 
   // Populate miss_mask (Phase 4)
   uint64_t mask = 0;
-  for (const auto &it : inflight_loads) {
-    if (it.is_cache_miss) {
-      mask |= (1ULL << it.rob_idx);
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    const auto &entry = ldq[i];
+    if (entry.valid && !entry.killed && entry.uop.is_cache_miss) {
+      mask |= (1ULL << entry.uop.rob_idx);
     }
   }
   out.lsu2rob->miss_mask = mask;
-}
-
-void SimpleLsu::comb_stq_alloc() {
-  // 计算分配增量：遍历所有可能的请求端口
-  int alloc_count = 0;
-  for (int i = 0; i < MAX_STQ_DISPATCH_WIDTH; i++) {
-    if (in.dis2lsu->alloc_req[i])
-      alloc_count++;
-  }
-
-  next_stq_tail = (this->stq_tail + alloc_count) % STQ_NUM;
+  out.lsu2rob->committed_store_pending = has_committed_store_pending();
 }
 
 // =========================================================
 // 2. Execute 阶段: 接收 AGU/SDU 请求 (多端口轮询)
 // =========================================================
 void SimpleLsu::comb_recv() {
+  if (mmu != nullptr) {
+    if (last_bound_ptw_mem_port != ptw_mem_port) {
+      mmu->set_ptw_mem_port(ptw_mem_port);
+      last_bound_ptw_mem_port = ptw_mem_port;
+    }
+    if (last_bound_ptw_walk_port != ptw_walk_port) {
+      mmu->set_ptw_walk_port(ptw_walk_port);
+      last_bound_ptw_walk_port = ptw_walk_port;
+    }
+  }
+
+  Assert(out.dcache_req != nullptr && "out.dcache_req is not connected");
+  Assert(out.dcache_wreq != nullptr && "out.dcache_wreq is not connected");
+  Assert(in.dcache_resp != nullptr && "in.dcache_resp is not connected");
+  Assert(in.dcache_wready != nullptr && "in.dcache_wready is not connected");
+  *out.dcache_req = {};
+  *out.dcache_wreq = {};
+
+  // Retry STA address translations that previously returned MMU::RETRY.
+  progress_pending_sta_addr();
+
   // 1. 优先级：Store Data (来自 SDU)
   // 确保在消费者检查之前数据就绪
   for (int i = 0; i < LSU_SDU_COUNT; i++) {
@@ -102,6 +161,30 @@ void SimpleLsu::comb_recv() {
       }
     }
   }
+
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    auto &entry = ldq[i];
+    if (!entry.valid || entry.killed || entry.sent || entry.waiting_resp) {
+      continue;
+    }
+    if (entry.uop.cplt_time == REQ_WAIT_SEND) {
+      MicroOp req_uop = entry.uop;
+      req_uop.rob_idx = i; // Local token: LDQ index
+      out.dcache_req->en = true;
+      out.dcache_req->wen = false;
+      out.dcache_req->addr = entry.uop.diag_val;
+      out.dcache_req->wdata = 0;
+      out.dcache_req->wstrb = 0;
+      out.dcache_req->uop = req_uop;
+      entry.sent = true;
+      entry.waiting_resp = true;
+      entry.uop.cplt_time = REQ_WAIT_RESP;
+      ldq_trace("send-req", i, entry.uop);
+      break;
+    }
+  }
+
+  drive_store_write_req();
 }
 
 // =========================================================
@@ -111,6 +194,27 @@ void SimpleLsu::comb_load_res() {
   // 1. 先清空所有写回端口
   for (int i = 0; i < LSU_LOAD_WB_WIDTH; i++) {
     out.lsu2exe->wb_req[i].valid = false;
+  }
+
+  if (in.dcache_resp->valid) {
+    int idx = in.dcache_resp->uop.rob_idx;
+    if (idx >= 0 && idx < MAX_INFLIGHT_LOADS) {
+      auto &entry = ldq[idx];
+      if (entry.valid && entry.sent && entry.waiting_resp) {
+        if (!entry.killed) {
+          ldq_trace("resp-live", idx, entry.uop);
+          entry.uop.result = extract_data(
+              in.dcache_resp->data, in.dcache_resp->addr, entry.uop.func3);
+          entry.uop.difftest_skip = in.dcache_resp->uop.difftest_skip;
+          entry.uop.cplt_time = sim_time;
+          entry.uop.is_cache_miss = in.dcache_resp->uop.is_cache_miss;
+          finished_loads.push_back(entry.uop);
+        } else {
+          ldq_trace("resp-killed-drain", idx, entry.uop);
+        }
+        free_ldq_entry(idx);
+      }
+    }
   }
 
   // 2. 从完成队列填充端口 (Load)
@@ -137,21 +241,26 @@ void SimpleLsu::comb_load_res() {
   }
 }
 
-// 内部辅助: 启动 Load 流程 (原 dispatch_load)
 void SimpleLsu::handle_load_req(const MicroOp &inst) {
-  // 注意：这里是组合逻辑，不能直接修改 inflight_loads (这是 seq 的状态)
-  // 但为了简化代码，我们假设这里是一个 "Next State Logic"，或者有一个 input
-  // latch 严格的硬件模拟应该把 task 放入一个 new_tasks 列表，在 seq 里 merge
-
-  // 这里采用简化做法：直接操作 inflight_loads，但在 seq 里处理时间推进
-  // 只要 inflight_loads 不被当作寄存器输出回环即可
+  int ldq_idx = inst.ldq_idx;
+  Assert(ldq_idx >= 0 && ldq_idx < MAX_INFLIGHT_LOADS);
+  if (!ldq[ldq_idx].valid || ldq[ldq_idx].killed) {
+    return;
+  }
 
   MicroOp task = inst;
   task.is_cache_miss = false; // Initialize to false
   uint32_t p_addr;
-  bool ret = mmu->translate(p_addr, task.result, 1, in.csr_status);
+  auto mmu_ret = mmu->translate(p_addr, task.result, 1, in.csr_status);
 
-  if (!ret) {
+  if (mmu_ret == AbstractMmu::Result::RETRY) {
+    task.cplt_time = REQ_WAIT_EXEC;
+    ldq[ldq_idx].tlb_retry = true;
+    ldq[ldq_idx].uop = task;
+    return;
+  }
+
+  if (mmu_ret == AbstractMmu::Result::FAULT) {
     task.page_fault_load = true;
     task.diag_val = task.result; // Store faulting virtual address
     task.cplt_time = sim_time + 1;
@@ -168,81 +277,23 @@ void SimpleLsu::handle_load_req(const MicroOp &inst) {
         is_mmio ? std::make_pair(0, 0u) : check_store_forward(p_addr, inst);
 
     if (fwd_res.first == 1) {
-      // 这里的 Store 给了我们数据！不用查缓存了！
-      // 这就是所谓的“Store-to-Load Forwarding Latency” (通常很短，0 或 1)
       task.result = fwd_res.second;
       task.cplt_time = sim_time + 0; // 这一拍直接完成！
     } else if (fwd_res.first == 0) {
-      // ❌ STQ 里没有，去读内存
-      // 模拟 Cache 访问
-      int latency = cache.cache_access(p_addr);
-      task.cplt_time = sim_time + latency;
-      if (latency >= cache.MISS_LATENCY) {
-          task.is_cache_miss = true;
-      }
-      uint32_t mem_val = p_memory[p_addr >> 2];
-
-      // Simple MMIO Read Interception
-      // Sync with Oracle's timer to prevent execution divergence
-      if (p_addr == 0x1fd0e000) {
-#ifdef CONFIG_BPU
-        mem_val = sim_time;
-#else
-        mem_val = get_oracle_timer();
-#endif
-        task.difftest_skip = true;
-      } else if (p_addr == 0x1fd0e004) {
-        mem_val = 0;
-        task.difftest_skip = true;
-      } else {
-        // Normal Memory Access (or Garbage). DO NOT SKIP.
-        // Let Difftest catch divergence.
-        task.difftest_skip = false;
-      }
-
-      task.result = extract_data(mem_val, p_addr, inst.func3);
+      task.cplt_time = REQ_WAIT_SEND;
     } else {
-      // 🔄 [Retry] Store 地址匹配但数据未就绪 (Stall)
-      // 设置特殊完成时间，让 seq 中的逻辑不断重试
-      task.cplt_time = 0x7FFFFFFFFFFFFFFF; // LLONG_MAX
+      task.cplt_time = REQ_WAIT_RETRY;
     }
   }
 
-  // 标记为新进入的 load，seq 中会统一处理
-  inflight_loads.push_back(task);
+  ldq[ldq_idx].tlb_retry = false;
+  ldq[ldq_idx].uop = task;
 }
 
 void SimpleLsu::handle_store_addr(const MicroOp &inst) {
-  int idx = inst.stq_idx;
-  stq[idx].addr = inst.result; // VA
-  // Translate VA -> PA
-  uint32_t pa = inst.result;
-  bool ret = mmu->translate(pa, inst.result, 2, in.csr_status); // 2=Store
-
-  if (!ret) {
-    // ⚠️ Store Page Fault Detected!
-    // Report to ROB via Writeback/Exception path
-    MicroOp fault_op = inst;
-    fault_op.page_fault_store = true;
-    fault_op.cplt_time = sim_time; // Immediate failure
-
-    // Store address calculation completed (with exception)
-    finished_sta_reqs.push_back(fault_op);
-  } else {
-    // Normal STA completion (Optional: we could also return it through Port 5
-    // to ensure ROB only considers it complete AFTER MMU translation.
-    // Given the user's advice, we will let ALL STA results go through Port 5
-    // via LSU.)
-    MicroOp success_op = inst;
-    success_op.cplt_time = sim_time;
-    bool is_mmio = ((pa & UART_ADDR_MASK) == UART_ADDR_BASE) ||
-                   ((pa & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
-    success_op.flush_pipe = is_mmio;
-    finished_sta_reqs.push_back(success_op);
+  if (!finish_store_addr_once(inst)) {
+    pending_sta_addr_reqs.push_back(inst);
   }
-
-  stq[idx].p_addr = pa;
-  stq[idx].addr_valid = true;
 }
 
 void SimpleLsu::handle_store_data(const MicroOp &inst) {
@@ -250,20 +301,361 @@ void SimpleLsu::handle_store_data(const MicroOp &inst) {
   stq[inst.stq_idx].data_valid = true;
 }
 
-// =========================================================
-// 4. Commit 阶段: 提交 Store
-// =========================================================
-void SimpleLsu::comb_commit() {
-  next_stq_commit = this->stq_commit;
+bool SimpleLsu::reserve_stq_entry(tag_t tag, uint32_t rob_idx,
+                                  uint32_t rob_flag, uint32_t func3) {
+  if (stq_count >= STQ_NUM) {
+    return false;
+  }
+  stq[stq_tail].valid = true;
+  stq[stq_tail].addr_valid = false;
+  stq[stq_tail].data_valid = false;
+  stq[stq_tail].committed = false;
+  stq[stq_tail].tag = tag;
+  stq[stq_tail].rob_idx = rob_idx;
+  stq[stq_tail].rob_flag = rob_flag;
+  stq[stq_tail].func3 = func3;
+  stq_tail = (stq_tail + 1) % STQ_NUM;
+  return true;
+}
 
-  for (int i = 0; i < COMMIT_WIDTH; i++) {
-    if (in.rob_commit->commit_entry[i].valid &&
-        is_store(in.rob_commit->commit_entry[i].uop)) {
-      int idx = in.rob_commit->commit_entry[i].uop.stq_idx;
-      stq[idx].committed = true;
-      Assert(this->next_stq_commit == idx);
-      next_stq_commit = (this->next_stq_commit + 1) % STQ_NUM;
+void SimpleLsu::consume_stq_alloc_reqs(int &push_count) {
+  for (int i = 0; i < MAX_STQ_DISPATCH_WIDTH; i++) {
+    if (!in.dis2lsu->alloc_req[i]) {
+      continue;
     }
+    bool ok = reserve_stq_entry(in.dis2lsu->tag[i], in.dis2lsu->rob_idx[i],
+                                in.dis2lsu->rob_flag[i], in.dis2lsu->func3[i]);
+    Assert(ok && "STQ allocate overflow");
+    push_count++;
+  }
+}
+
+bool SimpleLsu::reserve_ldq_entry(int idx, tag_t tag, uint32_t rob_idx,
+                                  uint32_t rob_flag) {
+  Assert(idx >= 0 && idx < MAX_INFLIGHT_LOADS);
+  if (ldq[idx].valid) {
+    return false;
+  }
+  ldq[idx].valid = true;
+  ldq[idx].killed = false;
+  ldq[idx].sent = false;
+  ldq[idx].waiting_resp = false;
+  ldq[idx].tlb_retry = false;
+  ldq[idx].uop = {};
+  ldq[idx].uop.tag = tag;
+  ldq[idx].uop.rob_idx = rob_idx;
+  ldq[idx].uop.rob_flag = rob_flag;
+  ldq[idx].uop.ldq_idx = idx;
+  ldq[idx].uop.cplt_time = REQ_WAIT_EXEC;
+  ldq_count++;
+  ldq_alloc_tail = (idx + 1) % MAX_INFLIGHT_LOADS;
+  return true;
+}
+
+void SimpleLsu::consume_ldq_alloc_reqs() {
+  for (int i = 0; i < MAX_LDQ_DISPATCH_WIDTH; i++) {
+    if (!in.dis2lsu->ldq_alloc_req[i]) {
+      continue;
+    }
+    bool ok = reserve_ldq_entry(in.dis2lsu->ldq_idx[i], in.dis2lsu->ldq_tag[i],
+                                in.dis2lsu->ldq_rob_idx[i],
+                                in.dis2lsu->ldq_rob_flag[i]);
+    Assert(ok && "LDQ allocate collision");
+  }
+}
+
+bool SimpleLsu::is_mmio_addr(uint32_t paddr) const {
+  return ((paddr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
+         ((paddr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+}
+
+void SimpleLsu::drive_store_write_req() {
+  if (stq_head == stq_commit) {
+    return;
+  }
+  StqEntry &head = stq[stq_head];
+  if (!(head.valid && head.addr_valid && head.data_valid)) {
+    return;
+  }
+
+  uint32_t alignment_mask = (head.func3 & 0x3) == 0   ? 0
+                            : (head.func3 & 0x3) == 1 ? 1
+                                                      : 3;
+  Assert((head.p_addr & alignment_mask) == 0 &&
+         "DUT: Store address misaligned at commit!");
+
+  uint32_t byte_off = head.p_addr & 0x3;
+  uint32_t wstrb = 0;
+  uint32_t wdata = 0;
+  switch (head.func3 & 0x3) {
+  case 0:
+    wstrb = (1u << byte_off);
+    wdata = (head.data & 0xFFu) << (byte_off * 8);
+    break;
+  case 1:
+    wstrb = (0x3u << byte_off);
+    wdata = (head.data & 0xFFFFu) << (byte_off * 8);
+    break;
+  default:
+    wstrb = 0xFu;
+    wdata = head.data;
+    break;
+  }
+
+  out.dcache_wreq->en = true;
+  out.dcache_wreq->wen = true;
+  out.dcache_wreq->addr = head.p_addr;
+  out.dcache_wreq->wdata = wdata;
+  out.dcache_wreq->wstrb = wstrb;
+}
+
+void SimpleLsu::handle_global_flush() {
+  int old_tail = stq_tail;
+  stq_tail = stq_commit;
+  stq_count = (stq_tail - stq_head + STQ_NUM) % STQ_NUM;
+
+  int ptr = stq_tail;
+  while (ptr != old_tail) {
+    stq[ptr].valid = false;
+    stq[ptr].addr_valid = false;
+    stq[ptr].data_valid = false;
+    ptr = (ptr + 1) % STQ_NUM;
+  }
+  pending_sta_addr_reqs.clear();
+}
+
+void SimpleLsu::handle_mispred(mask_t mask) {
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    if (!ldq[i].valid) {
+      continue;
+    }
+    if ((1ULL << ldq[i].uop.tag) & mask) {
+      if (ldq[i].sent) {
+        ldq_trace("mispred-mark-killed", i, ldq[i].uop);
+        ldq[i].killed = true;
+      } else {
+        ldq_trace("mispred-free-unsent", i, ldq[i].uop);
+        free_ldq_entry(i);
+      }
+    }
+  }
+
+  auto it_sta = finished_sta_reqs.begin();
+  while (it_sta != finished_sta_reqs.end()) {
+    if ((1ULL << it_sta->tag) & mask) {
+      it_sta = finished_sta_reqs.erase(it_sta);
+    } else {
+      ++it_sta;
+    }
+  }
+
+  auto it_finished = finished_loads.begin();
+  while (it_finished != finished_loads.end()) {
+    if ((1ULL << it_finished->tag) & mask) {
+      it_finished = finished_loads.erase(it_finished);
+    } else {
+      ++it_finished;
+    }
+  }
+
+  auto it_sta_retry = pending_sta_addr_reqs.begin();
+  while (it_sta_retry != pending_sta_addr_reqs.end()) {
+    if ((1ULL << it_sta_retry->tag) & mask) {
+      it_sta_retry = pending_sta_addr_reqs.erase(it_sta_retry);
+    } else {
+      ++it_sta_retry;
+    }
+  }
+
+  int recovery_tail = find_recovery_tail(mask);
+  if (recovery_tail == -1) {
+    return;
+  }
+
+  int old_tail = stq_tail;
+  stq_tail = recovery_tail;
+  stq_count = (stq_tail - stq_head + STQ_NUM) % STQ_NUM;
+  int ptr = stq_tail;
+
+  if (old_tail == stq_tail) {
+    do {
+      stq[ptr].valid = false;
+      stq[ptr].addr_valid = false;
+      stq[ptr].data_valid = false;
+      ptr = (ptr + 1) % STQ_NUM;
+    } while (ptr != old_tail);
+  } else {
+    while (ptr != old_tail) {
+      stq[ptr].valid = false;
+      stq[ptr].addr_valid = false;
+      stq[ptr].data_valid = false;
+      ptr = (ptr + 1) % STQ_NUM;
+    }
+  }
+}
+
+void SimpleLsu::retire_stq_head_if_ready(bool write_fire, int &pop_count) {
+  if (!write_fire) {
+    return;
+  }
+  if (stq_head == stq_commit) {
+    return;
+  }
+  StqEntry &head = stq[stq_head];
+  if (!(head.valid && head.addr_valid && head.data_valid)) {
+    return;
+  }
+
+  // Store write handshake succeeded in comb stage.
+  head.valid = false;
+  head.committed = false;
+  head.addr_valid = false;
+  head.data_valid = false;
+  head.addr = 0;
+  head.data = 0;
+
+  stq_head = (stq_head + 1) % STQ_NUM;
+  pop_count++;
+}
+
+void SimpleLsu::commit_stores_from_rob() {
+  for (int i = 0; i < COMMIT_WIDTH; i++) {
+    if (!(in.rob_commit->commit_entry[i].valid &&
+          is_store(in.rob_commit->commit_entry[i].uop))) {
+      continue;
+    }
+    int idx = in.rob_commit->commit_entry[i].uop.stq_idx;
+    if (idx == stq_commit) {
+      stq[idx].committed = true;
+      stq_commit = (stq_commit + 1) % STQ_NUM;
+    } else {
+      Assert(0 && "Store commit out of order?");
+    }
+  }
+}
+
+void SimpleLsu::progress_ldq_entries() {
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    auto &entry = ldq[i];
+    if (!entry.valid) {
+      continue;
+    }
+
+    if (entry.killed && !entry.sent) {
+      ldq_trace("seq-free-killed-unsent", i, entry.uop);
+      free_ldq_entry(i);
+      continue;
+    }
+
+    if (entry.waiting_resp || entry.uop.cplt_time == REQ_WAIT_EXEC) {
+      if (!entry.tlb_retry) {
+        continue;
+      }
+      uint32_t p_addr = 0;
+      auto mmu_ret = mmu->translate(p_addr, entry.uop.result, 1, in.csr_status);
+      if (mmu_ret == AbstractMmu::Result::RETRY) {
+        continue;
+      }
+      entry.tlb_retry = false;
+      if (mmu_ret == AbstractMmu::Result::FAULT) {
+        entry.uop.page_fault_load = true;
+        entry.uop.diag_val = entry.uop.result;
+        entry.uop.cplt_time = sim_time + 1;
+      } else {
+        entry.uop.diag_val = p_addr;
+        bool is_mmio = ((p_addr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
+                       ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+        entry.uop.flush_pipe = is_mmio;
+        auto fwd_res = is_mmio ? std::make_pair(0, 0u)
+                               : check_store_forward(p_addr, entry.uop);
+        if (fwd_res.first == 1) {
+          entry.uop.result = fwd_res.second;
+          entry.uop.cplt_time = sim_time;
+        } else if (fwd_res.first == 0) {
+          entry.uop.cplt_time = REQ_WAIT_SEND;
+        } else {
+          entry.uop.cplt_time = REQ_WAIT_RETRY;
+        }
+      }
+      continue;
+    }
+
+    if (entry.uop.cplt_time == REQ_WAIT_RETRY) {
+      auto fwd_res = check_store_forward(entry.uop.diag_val, entry.uop);
+      if (fwd_res.first == 1) {
+        entry.uop.result = fwd_res.second;
+        entry.uop.cplt_time = sim_time;
+      } else if (fwd_res.first == 0) {
+        entry.uop.cplt_time = REQ_WAIT_SEND;
+      }
+    }
+
+    if (entry.uop.cplt_time <= sim_time) {
+      if (!entry.killed) {
+        finished_loads.push_back(entry.uop);
+      }
+      free_ldq_entry(i);
+    }
+  }
+}
+
+bool SimpleLsu::finish_store_addr_once(const MicroOp &inst) {
+  int idx = inst.stq_idx;
+  stq[idx].addr = inst.result; // VA
+
+  uint32_t pa = inst.result;
+  auto mmu_ret = mmu->translate(pa, inst.result, 2, in.csr_status);
+  if (mmu_ret == AbstractMmu::Result::RETRY) {
+    return false;
+  }
+
+  if (mmu_ret == AbstractMmu::Result::FAULT) {
+    MicroOp fault_op = inst;
+    fault_op.page_fault_store = true;
+    fault_op.cplt_time = sim_time;
+    finished_sta_reqs.push_back(fault_op);
+    stq[idx].p_addr = pa;
+    stq[idx].addr_valid = false;
+    return true;
+  }
+
+  MicroOp success_op = inst;
+  success_op.cplt_time = sim_time;
+  bool is_mmio = ((pa & UART_ADDR_MASK) == UART_ADDR_BASE) ||
+                 ((pa & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+  success_op.flush_pipe = is_mmio;
+  finished_sta_reqs.push_back(success_op);
+  stq[idx].p_addr = pa;
+  stq[idx].addr_valid = true;
+  return true;
+}
+
+void SimpleLsu::progress_pending_sta_addr() {
+  if (pending_sta_addr_reqs.empty()) {
+    return;
+  }
+  size_t n = pending_sta_addr_reqs.size();
+  for (size_t i = 0; i < n; i++) {
+    MicroOp op = pending_sta_addr_reqs.front();
+    pending_sta_addr_reqs.pop_front();
+    if (!finish_store_addr_once(op)) {
+      pending_sta_addr_reqs.push_back(op);
+    }
+  }
+}
+
+void SimpleLsu::free_ldq_entry(int idx) {
+  Assert(idx >= 0 && idx < MAX_INFLIGHT_LOADS);
+  if (ldq[idx].valid) {
+    ldq_trace("free", idx, ldq[idx].uop);
+    ldq[idx].valid = false;
+    ldq[idx].killed = false;
+    ldq[idx].sent = false;
+    ldq[idx].waiting_resp = false;
+    ldq[idx].tlb_retry = false;
+    ldq[idx].uop = {};
+    ldq_count--;
+    Assert(ldq_count >= 0);
   }
 }
 
@@ -273,14 +665,22 @@ void SimpleLsu::comb_commit() {
 
 void SimpleLsu::comb_flush() {
   if (in.rob_bcast->flush) {
-    // 1. 清空飞行中的 Load
-    inflight_loads.clear();
+    // 1. LDQ: 已发请求项标记 killed，未发请求项直接释放
+    for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+      if (!ldq[i].valid) {
+        continue;
+      }
+      if (ldq[i].sent) {
+        ldq_trace("flush-mark-killed", i, ldq[i].uop);
+        ldq[i].killed = true;
+      } else {
+        ldq_trace("flush-free-unsent", i, ldq[i].uop);
+        free_ldq_entry(i);
+      }
+    }
     finished_loads.clear();
     finished_sta_reqs.clear();
-
-    // 2. STQ 回滚: Tail -> Commit
-    // 丢弃所有投机状态，只保留已提交状态
-    next_stq_tail = stq_commit;
+    pending_sta_addr_reqs.clear();
   }
 }
 
@@ -288,249 +688,41 @@ void SimpleLsu::comb_flush() {
 // 6. Sequential Logic: 状态更新与时序模拟
 // =========================================================
 void SimpleLsu::seq() {
-  // === Step 1: 准备变量 ===
   bool is_flush = in.rob_bcast->flush;
   bool is_mispred = in.dec_bcast->mispred;
-
-  // 临时变量，用于计算本周期的变化量
-  int push_count = 0; // 进队数量 (Dispatch)
-  int pop_count = 0;  // 出队数量 (Writeback/Retire)
-
-  // === Step 2: 处理 Flush / Mispred (优先级最高) ===
+  int push_count = 0;
+  int pop_count = 0;
 
   if (is_flush) {
-    // 全局冲刷：直接应用 flush 逻辑算好的值
-    int old_tail = stq_tail;
-    stq_tail = stq_commit; // 回滚到非投机点
-    // stq_head 保持不变 (已提交的不能扔)
-
-    // 重新计算 Count (信赖指针差值，因为 Flush 后不会满)
-    stq_count = (stq_tail - stq_head + STQ_NUM) % STQ_NUM;
-
-    // 修正：明确清除冲刷掉的条目以防止“僵尸”条目
-    int ptr = stq_tail;
-    while (ptr != old_tail) {
-      stq[ptr].valid = false;
-      stq[ptr].addr_valid = false;
-      stq[ptr].data_valid = false;
-      ptr = (ptr + 1) % STQ_NUM;
-    }
-
-    return; // ⛔ Flush 这一拍不处理正常的进出队，直接返回
-  }
-
-  if (is_mispred) {
-    uint64_t mask = in.dec_bcast->br_mask;
-    // 清除 inflight_loads 中被 Squash 的指令
-    auto it_inflight = inflight_loads.begin();
-    while (it_inflight != inflight_loads.end()) {
-      if ((1ULL << it_inflight->tag) & mask) {
-        it_inflight = inflight_loads.erase(it_inflight);
-      } else {
-        ++it_inflight;
-      }
-    }
-
-    // 清除 finished_sta_reqs 中被 Squash 的指令
-    auto it_sta = finished_sta_reqs.begin();
-    while (it_sta != finished_sta_reqs.end()) {
-      if ((1ULL << it_sta->tag) & mask) {
-        it_sta = finished_sta_reqs.erase(it_sta);
-      } else {
-        ++it_sta;
-      }
-    }
-
-    // [Fix] Also clear finished_loads that are waiting for WB
-    auto it_finished = finished_loads.begin();
-    while (it_finished != finished_loads.end()) {
-      if ((1ULL << it_finished->tag) & mask) {
-        it_finished = finished_loads.erase(it_finished);
-      } else {
-        ++it_finished;
-      }
-    }
-
-    // 分支误预测：Tail 回滚到某个中间点
-    int recovery_tail = find_recovery_tail(mask);
-
-    if (recovery_tail != -1) {
-      int old_tail = stq_tail;
-      stq_tail = recovery_tail;
-      // 重新计算 Count
-      stq_count = (stq_tail - stq_head + STQ_NUM) % STQ_NUM;
-
-      // 修正：明确清除冲刷掉的条目
-      int ptr = stq_tail;
-
-      if (old_tail == stq_tail) {
-        // 特殊情况：将满队列回滚到相同的指针
-        do {
-          stq[ptr].valid = false;
-          stq[ptr].addr_valid = false;
-          stq[ptr].data_valid = false;
-          ptr = (ptr + 1) % STQ_NUM;
-        } while (ptr != old_tail);
-      } else {
-        while (ptr != old_tail) {
-          stq[ptr].valid = false;
-          stq[ptr].addr_valid = false;
-          stq[ptr].data_valid = false;
-          ptr = (ptr + 1) % STQ_NUM;
-        }
-      }
-    }
-
-    // 关键修正：即使没有回滚 (recovery_tail == stq_tail)，
-    // 我们在此误预测周期内也绝对不能接受新的分配！
-    // 此时本周期分派的指令肯定是在错误路径上的。
+    mmu->flush();
+    handle_global_flush();
     return;
   }
 
-  // === Step 3: 正常的入队逻辑 (Alloc) ===
-  // 只有没满的时候才允许入队 (Dispatch 阶段保证了 lsu2dis->stq_free > 0)
-
-  for (int i = 0; i < MAX_STQ_DISPATCH_WIDTH; i++) {
-    if (in.dis2lsu->alloc_req[i]) {
-      // 1. 写入 Payload
-      stq[stq_tail].valid = true;
-      stq[stq_tail].addr_valid = false;
-      stq[stq_tail].data_valid = false;
-      stq[stq_tail].committed = false;
-
-      stq[stq_tail].tag = in.dis2lsu->tag[i];
-      stq[stq_tail].rob_idx = in.dis2lsu->rob_idx[i];
-      stq[stq_tail].rob_flag = in.dis2lsu->rob_flag[i];
-      stq[stq_tail].func3 = in.dis2lsu->func3[i];
-
-      // 2. 移动 Tail
-      stq_tail = (stq_tail + 1) % STQ_NUM;
-
-      // 3. 累加进队计数
-      push_count++;
-    }
+  if (is_mispred) {
+    mmu->flush();
+    handle_mispred(in.dec_bcast->br_mask);
+    return;
   }
 
-  // === Step 4: 正常的出队逻辑 (Retire/Writeback) ===
-  // 只要 Head != Commit，说明有东西已经 Commit 了，可以写内存
-  // [Note] 保持单端口提交以隔离 coherent_read 修复
-
-  if (stq_head != stq_commit) {
-    StqEntry &head = stq[stq_head];
-
-    // 只有当这一项完全 Ready 时才出队
-    if (head.valid && head.addr_valid && head.data_valid) {
-      // 在提交到内存之前，进行最终的对齐检查
-      uint32_t alignment_mask = (head.func3 & 0x3) == 0 ? 0 : (head.func3 & 0x3) == 1 ? 1 : 3;
-      Assert((head.p_addr & alignment_mask) == 0 && "DUT: Store address misaligned at commit!");
-
-      // 1. 写内存 (Memory Access)
-      cache.cache_access(head.p_addr);
-      uint32_t paddr = head.p_addr;
-      uint32_t old_val = p_memory[paddr >> 2];
-      uint32_t new_val = merge_data_to_word(old_val, head.data, paddr, head.func3);
-      p_memory[paddr >> 2] = new_val;
-
-      // Simple MMIO Write Side Effect
-      if (paddr == UART_ADDR_BASE) {
-        char temp = new_val & 0xFF;
-        std::cout << temp << std::flush;
-        p_memory[paddr >> 2] &= 0xFFFFFF00;
-      } else if (paddr == UART_ADDR_BASE + 1) {
-        uint8_t cmd = head.data & 0xff;
-        if (cmd == 7) {
-          p_memory[PLIC_CLAIM_ADDR / 4] = 0xa;
-          p_memory[UART_ADDR_BASE / 4] &= 0xfff0ffff;
-        } else if (cmd == 5) {
-          p_memory[UART_ADDR_BASE / 4] =
-              (p_memory[UART_ADDR_BASE / 4] & 0xfff0ffff) | 0x00030000;
-        }
-      } else if (paddr == PLIC_CLAIM_ADDR) {
-        if ((head.data & 0xff) == 0xa) {
-          p_memory[PLIC_CLAIM_ADDR / 4] = 0x0;
-        }
-      }
-
-      // 2. 清理条目
-      head.valid = false;
-      head.committed = false;
-      head.addr_valid = false;
-      head.data_valid = false;
-      head.addr = 0;
-      head.data = 0;
-
-      // 3. 移动 Head
-      stq_head = (stq_head + 1) % STQ_NUM;
-
-      // 4. 累加出队计数
-      pop_count++;
-    }
+  if (in.rob_bcast->fence) {
+    mmu->flush();
   }
 
-  // === Step 5: 更新 Commit 指针 (来自 ROB) ===
-  // Commit 指针只是在 Ring Buffer 里向后滑动，标记 "安全线"
-  // 它不改变 Count (Count 是 Head 到 Tail 的总长度)
-
-  // 复用你之前的逻辑，但是要小心不要越界
-  for (int i = 0; i < COMMIT_WIDTH; i++) {
-    if (in.rob_commit->commit_entry[i].valid &&
-        is_store(in.rob_commit->commit_entry[i].uop)) {
-
-      int idx = in.rob_commit->commit_entry[i].uop.stq_idx;
-
-      // 简单校验
-      if (idx == stq_commit) {
-        stq[idx].committed = true;
-        stq_commit = (stq_commit + 1) % STQ_NUM;
-      } else {
-        // 应该 Assert，ROB 必须按顺序 Commit Store
-        Assert(0 && "Store commit out of order?");
-      }
-    }
-  }
-
-  // === Step 6: 最终更新 Count (核心修复！) ✨ ===
-  // 不要用 Head/Tail 重新算！直接加减！
-  // 这样 16(满) + 0 - 0 = 16，不会变成 0。
+  consume_stq_alloc_reqs(push_count);
+  consume_ldq_alloc_reqs();
+  bool write_fire = out.dcache_wreq->en && in.dcache_wready->ready;
+  retire_stq_head_if_ready(write_fire, pop_count);
+  commit_stores_from_rob();
 
   stq_count = stq_count + push_count - pop_count;
-
-  // 🛡️ 安全检查 (防止逻辑错乱导致溢出)
   if (stq_count < 0) {
     Assert(0 && "STQ Count Underflow! logic bug!");
   }
   if (stq_count > STQ_NUM) {
     Assert(0 && "STQ Count Overflow! logic bug!");
   }
-
-  // 处理 Load 队列的 Tick (包含 Replay 逻辑)
-  auto it = inflight_loads.begin();
-  while (it != inflight_loads.end()) {
-    // 🔄 Replay Check: 如果任务处于等待状态 (cplt_time == LLONG_MAX)
-    if (it->cplt_time == 0x7FFFFFFFFFFFFFFF) {
-      auto fwd_res = check_store_forward(it->diag_val, *it);
-      if (fwd_res.first == 1) { // Hit -> Success
-        it->result = fwd_res.second;
-        it->cplt_time = sim_time;      // 完成
-      } else if (fwd_res.first == 0) { // Miss -> Memory
-        int lat = cache.cache_access(it->diag_val);
-        it->cplt_time = sim_time + lat;
-        if (lat >= cache.MISS_LATENCY) {
-            it->is_cache_miss = true;
-        }
-        uint32_t mem_val = p_memory[it->diag_val >> 2];
-        it->result = extract_data(mem_val, it->diag_val, it->func3);
-      }
-      // If 2 (Retry), keep waiting
-    }
-
-    if (it->cplt_time <= sim_time) {
-      finished_loads.push_back(*it);
-      it = inflight_loads.erase(it);
-    } else {
-      ++it;
-    }
-  }
+  progress_ldq_entries();
 }
 
 // =========================================================
@@ -587,16 +779,25 @@ SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
   bool hit_any = false;
 
   int ptr = this->stq_head;
-  int current_count = this->stq_count;
+  // The load remembers the tail at dispatch time.
+  // We check all stores from Head up to (but not including) that tail snapshot.
+  // Wait, if it's a circular buffer, and we stop at stq_idx, we need to be
+  // careful. Dispatch: stq_idx = (tail + alloc) % STQ_NUM. The load sees
+  // everything BEFORE this stq_idx. So we iterate until ptr ==
+  // load_uop.stq_idx.
 
-  for (int i = 0; i < current_count; i++) {
+  int stop_idx = load_uop.stq_idx;
+
+  while (ptr != stop_idx) {
     StqEntry &entry = stq[ptr];
-    bool is_older = entry.committed || is_store_older(entry.rob_idx, entry.rob_flag,
-                                                      load_uop.rob_idx, load_uop.rob_flag);
-    if (entry.valid && is_older) {
-      if (!entry.addr_valid) return {2, 0};
 
-      // 更加精确的重叠检查
+    // Important: We only care if the entry is valid.
+    // If it's valid, it's an older store that this load must respect.
+    if (entry.valid) {
+      if (!entry.addr_valid)
+        return {2, 0}; // Unknown address -> Stall (Retry)
+
+      // Address is valid, check overlap
       int store_width = get_mem_width(entry.func3);
       int load_width = get_mem_width(load_uop.func3);
       uint32_t s_start = entry.p_addr;
@@ -609,24 +810,27 @@ SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
 
       if (overlap_start < overlap_end) {
         hit_any = true;
-        if (!entry.data_valid) return {2, 0};
-        current_word = merge_data_to_word(current_word, entry.data, entry.p_addr, entry.func3);
+        if (!entry.data_valid)
+          return {2, 0}; // Data unknown -> Stall (Retry)
+        current_word = merge_data_to_word(current_word, entry.data,
+                                          entry.p_addr, entry.func3);
       }
     }
     ptr = (ptr + 1) % STQ_NUM;
   }
 
-  if (!hit_any) return {false, 0};
+  if (!hit_any)
+    return {false, 0};
 
   uint32_t final_data = extract_data(current_word, p_addr, load_uop.func3);
   return {true, final_data};
 }
 
-
 uint32_t SimpleLsu::get_load_addr(int rob_idx) {
-  for (const auto &it : inflight_loads) {
-    if (it.rob_idx == rob_idx)
-      return it.result; // For LOADS, result holds the VA
+  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+    if (ldq[i].valid && ldq[i].uop.rob_idx == rob_idx) {
+      return ldq[i].uop.result; // For LOADS, result holds the VA
+    }
   }
   for (const auto &it : finished_loads) {
     if (it.rob_idx == rob_idx)
@@ -647,7 +851,8 @@ uint32_t SimpleLsu::coherent_read(uint32_t p_addr) {
   for (int i = 0; i < count; i++) {
     const auto &entry = stq[ptr];
     if (entry.valid && entry.addr_valid) {
-      // 只要 Store 的 Word 地址匹配，就进行 merge (假设 aligned Store 不跨 Word)
+      // 只要 Store 的 Word 地址匹配，就进行 merge (假设 aligned Store 不跨
+      // Word)
       if ((entry.p_addr >> 2) == (p_addr >> 2)) {
         data = merge_data_to_word(data, entry.data, entry.p_addr, entry.func3);
       }

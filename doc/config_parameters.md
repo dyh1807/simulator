@@ -74,12 +74,15 @@
 
 | 参数/宏 | 默认值 | 说明 |
 |---------|--------|------|
-| `LOG_START` | 4,582,800 | 日志开始周期 |
+| `LOG_START` | 0 | 日志开始周期 |
 | `LOG_ENABLE` | 未定义 | 取消注释以启用日志 |
-| `DEBUG` | 0 | 通用调试日志 |
-| `MEM_LOG` | 0 | 内存子系统日志 |
-| `DCACHE_LOG` | 0 | DCache 日志 |
-| `MMU_LOG` | 0 | MMU 日志 |
+| `LOG_MEMORY_ENABLE` | 未定义 | 访存子系统日志域开关 |
+| `LOG_DCACHE_ENABLE` | 未定义 | DCache 日志域开关 |
+| `LOG_MMU_ENABLE` | 未定义 | MMU/TLB/PTW 日志域开关 |
+| `BACKEND_LOG_START` | `LOG_START` | 后端日志起始周期 |
+| `MEMORY_LOG_START` | `LOG_START` | 访存日志起始周期 |
+| `DCACHE_LOG_START` | `LOG_START` | DCache 日志起始周期 |
+| `MMU_LOG_START` | `LOG_START` | MMU 日志起始周期 |
 
 ### 2.2 功能开关
 
@@ -88,9 +91,13 @@
 | `CONFIG_DIFFTEST` | ✅ 启用 | 差分测试功能 |
 | `CONFIG_PERF_COUNTER` | ✅ 启用 | 性能计数器 |
 | `CONFIG_BPU` | ✅ 启用 | 分支预测单元 |
-| `CONFIG_MMU` | ❌ 禁用 | MMU 功能 |
-| `CONFIG_CACHE` | ❌ 禁用 | Cache 功能 |
-| `CONFIG_LOOSE_VA2PA` | ✅ 启用 | 宽松的地址翻译检查 |
+| `CONFIG_ITLB` | ✅ 启用 | 前端 ITLB 域功能标记 |
+| `CONFIG_DTLB` | ✅ 启用 | 后端 DTLB 域功能标记 |
+| `CONFIG_TLB_MMU` | ✅ 启用 | 统一 I/D 侧 MMU 模型开关（`TlbMmu` / `SimpleMmu`） |
+
+> ICache 模型选择约定：
+> - 默认使用真实 ICache 路径（未定义额外宏）
+> - 仅在评估性能上界时定义 `USE_IDEAL_ICACHE`
 
 ---
 
@@ -105,6 +112,8 @@
 | `LSU_LDU_COUNT` | 4 (自动计算) | 1~8 | Load 单元数量 |
 | `LSU_STA_COUNT` | 2 (自动计算) | 1~4 | Store Address 单元数量 |
 | `LSU_STD_COUNT` | 2 (自动计算) | 1~4 | Store Data 单元数量 |
+| `ITLB_ENTRIES` | 32 | 8~128(建议) | 前端 ITLB 表项数 |
+| `DTLB_ENTRIES` | 32 | 8~128(建议) | 后端 DTLB 表项数 |
 
 > [!NOTE]
 > 这些值由 `GLOBAL_ISSUE_PORT_CONFIG` 中的端口配置自动计算。

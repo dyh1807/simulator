@@ -83,23 +83,7 @@ void Isu::comb_enq() {
       if (in.dis2iss->req[i][w].valid) {
         MicroOp &uop = in.dis2iss->req[i][w].uop;
 
-        // === 加载指令 (Load) 依赖掩码生成 ===
-        if (i == IQ_LD) {
-          // 扫描 STA 队列
-          for (const auto &entry : iqs[IQ_STA].get_entries_1()) {
-            if (entry.valid)
-              uop.pre_sta_mask |= (1ULL << entry.uop.stq_idx);
-          }
-          // 修正：清除本周期正在发射的 STA 掩码（防止竞争状态）
-          for (int k = 0; k < LSU_STA_COUNT; k++) {
-            if (out.iss2prf->iss_entry[IQ_STA_PORT_BASE + k].valid) {
-              uop.pre_sta_mask &=
-                  ~(1ULL << out.iss2prf->iss_entry[IQ_STA_PORT_BASE + k]
-                             .uop.stq_idx);
-            }
-          }
 
-          }
 
         // 修正：检查本周期的寄存器唤醒 (快速/慢速唤醒)
         // out.iss_awake 包含在 comb_awake 中生成的所有唤醒信号
@@ -244,13 +228,7 @@ void Isu::comb_awake() {
     q.wakeup(pregs);
   }
 
-  // 2. Load 依赖唤醒 (Store Mask)
-  for (int i = 0; i < LSU_STA_COUNT; i++) {
-    if (out.iss2prf->iss_entry[IQ_STA_PORT_BASE + i].valid) {
-      iqs[IQ_LD].clear_store_mask(
-          out.iss2prf->iss_entry[IQ_STA_PORT_BASE + i].uop.stq_idx, true);
-    }
-  }
+
 
   // 3. 输出给外部 (iss_awake) - 用于通知 rename table 等
   for (size_t i = 0; i < MAX_WAKEUP_PORTS; i++) {

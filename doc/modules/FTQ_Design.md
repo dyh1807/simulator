@@ -1,56 +1,63 @@
 # FTQ (Fetch Target Queue) 模块设计文档
 
-> [!WARNING]
-> **当前状态**：功能级 (Functional Level) 实验性模块。
-> 接口描述目前为逻辑对应关系，尚未实现物理级的精确 IO 握手接口。
-
 ## 1. 概述
-FTQ (Fetch Target Queue) 是连接处理器前端（取指/预测）与后端（执行/验证）的关键微架构结构。它主要用于存储前端的分支预测元数据，并将其传递给后端执行单元进行结果验证，从而解耦前端预测与后端执行。
+FTQ (Fetch Target Queue) 用于保存前端每个 Fetch Block 的分支预测元数据，并在后端执行与提交阶段提供查询与回收能力。
 
-## 2. 接口定义 (逻辑接口)
-由于目前处于功能级实现，接口定义侧重于信息流向。
+当前实现中，FTQ **内聚在 IDU 内部**，作为 IDU 的私有子模块，不再由 BackTop/Exu 等模块直接持有指针。跨模块访问均通过显式 IO 完成。
 
-| 信号/字段 | 方向 | 来源/去向 | 描述 |
-|-----------|------|-----------|-----------|
-| `start_pc`| 输入 | 前端 (Idu) | 取指块 (Fetch Block) 的起始 PC。用于重建块内指令的精确 PC (`PC = start_pc + offset * 4`)。 |
-| `next_pc` | 输入 | 前端 (Idu) | 预测的下一取指块地址。用于后端分支验证中的 Target 校验。 |
-| `ftq_idx`  | 输出 | 后端 (Exu) | 标识指令所属的 FTQ 条目索引。 |
-| `ftq_offset`| 输出 | 后端 (Exu) | 指令在取指块内的偏移。 |
-| `mispred`  | 输出 | 后端 (Bru) | 分支验证结果（涉及 PC 与 Target 的比对）。 |
+## 2. 当前实现形态
 
-## 3. 微架构设计
+### 2.1 层次关系
+- `Idu` 内部持有 `FTQ ftq`。
+- `BackTop` 不再持有 `FTQ*`。
+- `Exu/BRU` 通过 `IduOut.ftq_lookup` 读取 FTQ 条目。
+- 前端训练路径（`rv_simu_mmu_v2.cpp`）也通过 `idu->out.ftq_lookup` 读取 FTQ 条目。
 
-### 3.1 PC 记录与计算功能
-FTQ 承担了部分 PC 管理职责，以平衡硬件开销与功能性：
-- **PC 压缩存储**：后端不再在 ROB 中为每条指令存储完整的 32 位 PC，而是通过 `ftq_idx` 索引到 FTQ 中的 `start_pc`，结合 `ftq_offset` 进行重建。
-- **分支目标验证 (Target Verification)**：BRU 执行时，会计算实际的 `pc_br`，并与 FTQ 中记录的 `next_pc` 进行比对。如果 `br_taken` 且 `pc_br != next_pc`，则判定为地址预测错误。
-- **精确异常处理**：当发生异常时，通过 FTQ 重建精确的 PC 并写入 CSR (如 `mepc`)。
+### 2.2 时序模型
+FTQ 采用与后端其他模块一致的两阶段模型：
+- 组合逻辑：`comb_begin/comb_alloc_req/comb_ctrl/comb_commit_reclaim`
+- 时序提交：`seq`
 
-### 逻辑结构
-FTQ 本质上是一个循环队列，每个条目管理一个**取指块 (Fetch Block)**。
+其中：
+- `comb_begin()`：建立 next-state（`entries_1/head_1/tail_1/count_1`）。
+- `comb_alloc_req()`：处理分配请求，返回 `alloc_resp`。
+- `comb_ctrl()`：处理 flush/recover 控制。
+- `comb_commit_reclaim()`：根据 commit 中 `ftq_is_last` 统计回收数量并统一 `comb_pop(pop_cnt)`。
+- `seq()`：提交 next-state。
 
-### 核心工作流
-1. **分配 (Allocation)**：在译码/分派阶段，为每个新进入后端的取指块在 FTQ 尾部申请条目。
-2. **携带 (Carrying)**：每条微指令 (`MicroOp`) 携带其所属的 `ftq_idx` 穿过流水线。
-3. **验证 (Verification)**：分支执行单元 (BRU) 根据 `ftq_idx` 读取 FTQ 中的预测信息，比对实际执行结果。
-4. **回收 (Reclamation)**：当包含在该取指块内的所有指令成功提交 (Commit) 后，FTQ 头部指针向前移动，释放资源。
+## 3. IO 定义
 
-### 交互示意图
-```mermaid
-graph LR
-    A[前端预测] -->|预测元数据| B(FTQ 队列)
-    B -->|预测方向| C[BRU]
-    D[指令提交] -->|释放信号| B
-```
+### 3.1 FTQ 输入 (`FTQIn`)
+- `rob_commit`：提交信息，用于回收判断。
+- `alloc_req`：分配请求（由 IDU 组合阶段产生）。
+- `flush_req`：流水线 flush 控制。
+- `recover_req`：分支误预测恢复控制。
+- `recover_tail`：恢复后的 tail 目标位置。
 
-## 4. 关键特性
-- **推测执行解耦**：允许前端在后端验证结果返回前继续预测。
-- **精确恢复**：误预测发生时，FTQ 提供回滚点，确保前端能从正确的地址重新取指。
+### 3.2 FTQ 输出 (`FTQOut`)
+- `alloc_resp`：分配结果（是否成功 + 分配索引）。
+- `status`：队列状态（`full/empty`）。
+- `lookup`：完整 FTQ 条目数组镜像，供 EXU/前端训练读取。
 
-## 5. 待办事项 (精确化路径)
-- [ ] 定义物理级的 Valid/Ready 握手信号。
-- [ ] 细分 FTQ 条目内部的 TAGE 状态存储。
-- [ ] 实现针对多分支并行验证的读端口扩展。
+## 4. 核心工作流
+1. IDU 在 `comb_fire` 中根据前端输入构造 `FTQEntry` 并通过 `alloc_req` 发起分配。
+2. FTQ 在 `comb_alloc_req` 返回 `alloc_resp.idx`，IDU 在 `seq` 中将该 `ftq_idx/offset/is_last` 写入 ibuf 指令。
+3. 指令携带 `ftq_idx/ftq_offset` 进入后端，BRU 通过 `ftq_lookup` 读取预测元数据进行校验。
+4. 提交阶段 FTQ 根据 `commit_entry[].uop.ftq_is_last` 统一回收多个条目。
+5. flush/误预测时，通过 `flush_req/recover_req/recover_tail` 控制 FTQ 状态恢复。
 
-## 6. 验证
-当前主要通过 `sha-test.bin` 和 `linux.bin` 等程序的正确运行来隐含验证 FTQ 的逻辑正确性。
+## 5. 关键约束
+- FTQ 条目回收时不清空 payload（仅移动指针/计数），避免在同拍或紧邻拍读取 `ftq_idx` 时丢失元数据。
+- 误预测恢复语义：`tail <- (mispred_ftq_idx + 1) % FTQ_SIZE`。
+- `count` 作为当前稳定的占用状态表示；判空判满由 `count` 派生。
+
+## 6. 与硬件对齐说明
+当前软件模型已经按“显式 IO + comb/seq”风格实现，便于后续映射到 RTL：
+- 控制路径统一通过 IO 信号传递（不跨模块直接改状态）。
+- 数据查询通过 `lookup` 端口完成（不使用跨模块函数调用）。
+
+## 7. 验证状态
+回归使用：
+- `./build/simulator ../image/linux/linux.bin`
+
+当前版本可稳定通过快速回归窗口（例如 `timeout 3s` 持续运行）。

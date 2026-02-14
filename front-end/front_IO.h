@@ -4,15 +4,13 @@
 #include "frontend.h"
 #include <cstdint>
 
+struct CsrStatusIO;
+
 struct front_top_in {
   bool reset;
   // from back-end
   bool back2front_valid[COMMIT_WIDTH];
   bool refetch;
-  bool fence_i;
-  // Flush type for debugging Oracle sync
-  bool is_mispred;    // 分支误预测
-  bool is_rob_flush;  // ROB发起的flush（exception/CSR/fence等）
   uint32_t refetch_address;
   uint32_t predict_base_pc[COMMIT_WIDTH];
   bool predict_dir[COMMIT_WIDTH];
@@ -23,7 +21,9 @@ struct front_top_in {
   uint8_t altpcpn[COMMIT_WIDTH];
   uint8_t pcpn[COMMIT_WIDTH];
   uint32_t tage_idx[COMMIT_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[COMMIT_WIDTH][4]; // TN_MAX = 4
   bool FIFO_read_enable;
+  CsrStatusIO *csr_status;
 };
 
 struct front_top_out {
@@ -39,6 +39,7 @@ struct front_top_out {
   bool page_fault_inst[FETCH_WIDTH];
   bool inst_valid[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
 };
 
 struct BPU_in {
@@ -57,6 +58,7 @@ struct BPU_in {
   uint8_t altpcpn[COMMIT_WIDTH];
   uint8_t pcpn[COMMIT_WIDTH];
   uint32_t tage_idx[COMMIT_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[COMMIT_WIDTH][4]; // TN_MAX = 4
   // from icache
   bool icache_read_ready;
 };
@@ -75,15 +77,22 @@ struct BPU_out {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
+  // 2-Ahead Predictor outputs
+  bool two_ahead_valid;
+  uint32_t two_ahead_target;
+  bool mini_flush_req;
+  bool mini_flush_correct;
+  uint32_t mini_flush_target;
 };
 
 struct icache_in {
   bool reset;
   bool refetch;
-  bool fence_i;
   // from BPU
   bool icache_read_valid;
   uint32_t fetch_address;
+  CsrStatusIO *csr_status;
   bool run_comb_only;
 };
 
@@ -104,6 +113,7 @@ struct instruction_FIFO_in {
   // from icache
   bool write_enable;
   uint32_t fetch_group[FETCH_WIDTH];
+  uint32_t pc[FETCH_WIDTH]; // THIS IS ONLY FOR DEBUG!!! 
   bool page_fault_inst[FETCH_WIDTH];
   bool inst_valid[FETCH_WIDTH];
   // from back-end
@@ -120,6 +130,7 @@ struct instruction_FIFO_out {
   // to back-end
   bool FIFO_valid;
   uint32_t instructions[FETCH_WIDTH];
+  uint32_t pc[FETCH_WIDTH]; // THIS IS ONLY FOR DEBUG!!! 
   bool page_fault_inst[FETCH_WIDTH];
   bool inst_valid[FETCH_WIDTH];
   uint8_t predecode_type[FETCH_WIDTH];
@@ -140,11 +151,17 @@ struct PTAB_in {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
   // from back-end
   bool read_enable;
+  // for 2-Ahead
+  bool need_mini_flush;
 };
 
 struct PTAB_out {
+  // 为了2-ahead处理添加的dummy entry
+  bool dummy_entry;
+  bool read_valid;
   bool full;
   bool empty;
   // to back-end
@@ -156,6 +173,7 @@ struct PTAB_out {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
 };
 
 struct front2back_FIFO_in {
@@ -175,6 +193,7 @@ struct front2back_FIFO_in {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
 };
 
 struct front2back_FIFO_out {
@@ -192,6 +211,22 @@ struct front2back_FIFO_out {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
+};
+
+struct fetch_address_FIFO_in {
+  bool reset;
+  bool refetch;
+  bool read_enable;
+  bool write_enable;
+  uint32_t fetch_address;
+};
+
+struct fetch_address_FIFO_out {
+  bool full;
+  bool empty;
+  bool read_valid;      // 这一拍是否真的弹出了一条地址
+  uint32_t fetch_address;
 };
 
 #endif

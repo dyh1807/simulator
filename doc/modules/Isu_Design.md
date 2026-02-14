@@ -67,7 +67,7 @@ Wakeup Matrix 维护一个全局位矩阵，记录“哪些指令正在等待某
 - **功能描述**：将 Dispatch 发来的指令写入对应的 IQ 空闲槽位。
 - **关键逻辑**：
   - 更新 Wakeup Matrix，标记源操作数依赖。
-  - 对于 Load 指令，需扫描 Store Queue 生成初始的 `store_mask`（用于内存依赖预测/消歧）。
+  - 对于 Load 指令，不再生成初始的 `store_mask`（依赖检查已移至 LSU 阶段）。
 
 ### 4.3 `comb_issue` (选择与发射)
 - **功能描述**：遍历所有 IQ，从就绪指令（操作数 Ready & Memory Ready）中选择最老的一条（Oldest-First）。
@@ -78,7 +78,7 @@ Wakeup Matrix 维护一个全局位矩阵，记录“哪些指令正在等待某
   1.  **慢速唤醒**：来自 `prf_awake` (Load/Cache Miss)。
   2.  **延迟唤醒**：来自 `latency_pipe` (多周期运算完成)。
   3.  **快速唤醒**：来自本周期刚刚发射的单周期指令 (ALU)。
-- **操作**：驱动唤醒矩阵，更新所有 IQ 中指令的 `src_busy` 状态。
+- **操作**：驱动唤醒矩阵，更新所有 IQ 中指令的 `src_busy` 状态。不再包含 `store_mask` 清除逻辑。
 
 ### 4.5 `comb_calc_latency_next` (下一周期延迟更新)
 - **功能描述**：更新延迟流水线状态，处理新发射的多周期指令。

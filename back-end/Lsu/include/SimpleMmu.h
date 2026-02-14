@@ -2,8 +2,6 @@
 
 #include "AbstractMmu.h"
 #include "config.h"
-#include "AbstractMmu.h"
-#include "config.h"
 
 class SimContext; // Forward declaration
 class AbstractLsu;
@@ -16,6 +14,6 @@ private:
 public:
     SimpleMmu(SimContext *ctx, AbstractLsu *lsu = nullptr);
 
-    bool translate(uint32_t &p_addr, uint32_t v_addr, uint32_t type,
-                         CsrStatusIO *status) override;
+    Result translate(uint32_t &p_addr, uint32_t v_addr, uint32_t type,
+                     CsrStatusIO *status) override;
 };

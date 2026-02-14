@@ -2,7 +2,8 @@
 #include "FPU.h"
 #include "config.h"
 
-Exu::Exu(SimContext *ctx, FTQ *ftq) : ctx(ctx), ftq(ftq) {
+Exu::Exu(SimContext *ctx, FTQLookupIO *ftq_lookup)
+    : ctx(ctx), ftq_lookup(ftq_lookup) {
   // 可以在这里或 init 创建 backend
 }
 
@@ -59,7 +60,7 @@ void Exu::init() {
 
     // 6. BRU
     if (mask & OP_MASK_BR) {
-      auto bru = new BruUnit("BRU", i, ftq);
+      auto bru = new BruUnit("BRU", i, ftq_lookup);
       units.push_back(bru);
       port_mappings[i].entries.push_back({bru, OP_MASK_BR});
     }

@@ -1,14 +1,16 @@
 #ifndef PREDECODE_H
 #define PREDECODE_H
 
+#include "front_IO.h"
 #include <cstdint>
-#include <util.h>
+#include "RISCV.h"
+#include "util.h"
 
 enum PredecodeType {
   PREDECODE_NON_BRANCH,
   PREDECODE_DIRECT_JUMP_NO_JAL, // PC_relative
-  PREDECODE_JALR,               // jalr
-  PREDECODE_JAL                 // jal
+  PREDECODE_JALR, //jalr
+  PREDECODE_JAL // jal
 };
 
 // enum Predecode_FIFO_TYPE{

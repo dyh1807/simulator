@@ -14,7 +14,7 @@ CXXFLAGS += -Wall -Wextra -Wno-unused-parameter
 CXXFLAGS += --std=c++2a
 
 # Libraries
-LIBS := ./softfloat.a
+LIBS := ./libs/softfloat.a
 LDFLAGS := -lz -lstdc++fs
 
 # Debug Flags (Use 'make DEBUG=1' to enable)
@@ -30,16 +30,18 @@ INCLUDES := -I./include/ \
             -I./back-end/Exu/include/ \
             -I./back-end/Lsu/include/ \
             -I./back-end/tools/include/ \
+            -I./MemSubSystem/include/ \
             -I./diff/include/ \
-            -I./front-end/ \
-            -I./mmu/include/
+            -I./front-end/
 
 # Source Files
 # (Using find to locate all cpp files)
 CXXSRC := $(shell find ./back-end -name "*.cpp") \
+          ./MemSubSystem/MemSubsystem.cpp \
+          ./MemSubSystem/SimpleCache.cpp \
+          ./MemSubSystem/PtwWalker.cpp \
           $(shell find ./front-end -name "*.cpp") \
           $(shell find ./diff -name "*.cpp") \
-          $(shell find ./mmu -name "*.cpp") \
           ./main.cpp \
           ./rv_simu_mmu_v2.cpp
 

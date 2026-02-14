@@ -1,85 +1,219 @@
-#include "BPU/target_predictor/btb.h"
-#include <BackTop.h>
-#include <RISCV.h>
-#include <SimCpu.h>
-#include <config.h>
+#include "AbstractLsu.h"
+#include "BackTop.h"
+#include "Csr.h"
+#include "RISCV.h"
+#include "SimCpu.h"
+#include "config.h"
+#include "diff.h"
+#include "front_IO.h"
+#include "front_module.h"
+#include "oracle.h"
+#include "util.h"
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
-#include <diff.h>
-#include <front_IO.h>
-#include <front_module.h>
-#include <oracle.h>
-#include <util.h>
 
 uint32_t *p_memory;
 
+namespace {
+constexpr int BR_DIRECT = 0;
+constexpr int BR_CALL = 1;
+constexpr int BR_RET = 2;
+constexpr int BR_IDIRECT = 3;
+constexpr int BR_NONCTL = 4;
+constexpr int BR_JAL = 5;
+
+void simcpu_commit_sync(SimCpu *cpu, InstInfo *inst) {
+  BackTop *back = &cpu->back;
+  if (inst->type == JALR) {
+    if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
+      cpu->ctx.perf.ret_br_num++;
+    } else {
+      cpu->ctx.perf.jalr_br_num++;
+    }
+  } else if (inst->type == BR) {
+    cpu->ctx.perf.cond_br_num++;
+  }
+
+  if (inst->mispred) {
+    if (inst->type == JALR) {
+      if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
+        cpu->ctx.perf.ret_mispred_num++;
+        bool pred_taken = false;
+        FTQEntry &entry = back->idu->out.ftq_lookup->entries[inst->ftq_idx];
+        if (entry.valid) {
+          pred_taken = entry.pred_taken_mask[inst->ftq_offset];
+        }
+        if (!pred_taken) {
+          cpu->ctx.perf.ret_dir_mispred++;
+        } else {
+          cpu->ctx.perf.ret_addr_mispred++;
+        }
+      } else {
+        cpu->ctx.perf.jalr_mispred_num++;
+        bool pred_taken = false;
+        FTQEntry &entry = back->idu->out.ftq_lookup->entries[inst->ftq_idx];
+        if (entry.valid) {
+          pred_taken = entry.pred_taken_mask[inst->ftq_offset];
+        }
+        if (!pred_taken) {
+          cpu->ctx.perf.jalr_dir_mispred++;
+        } else {
+          cpu->ctx.perf.jalr_addr_mispred++;
+        }
+      }
+    } else if (inst->type == BR) {
+      bool pred_taken = false;
+      FTQEntry &entry = back->idu->out.ftq_lookup->entries[inst->ftq_idx];
+      if (entry.valid) {
+        pred_taken = entry.pred_taken_mask[inst->ftq_offset];
+      }
+      if (pred_taken != inst->br_taken) {
+        cpu->ctx.perf.cond_dir_mispred++;
+      } else {
+        cpu->ctx.perf.cond_addr_mispred++;
+      }
+      cpu->ctx.perf.cond_mispred_num++;
+    }
+  }
+
+  if (is_store(*inst) && !inst->page_fault_store) {
+    StqEntry e = back->lsu->get_stq_entry(inst->stq_idx);
+    cpu->mem_subsystem.on_commit_store(e.p_addr, e.data);
+  }
+}
+
+bool simcpu_difftest_prepare(SimCpu *cpu, InstEntry *inst_entry, bool *skip) {
+  if (cpu == nullptr || inst_entry == nullptr || skip == nullptr) {
+    return false;
+  }
+  BackTop *back = &cpu->back;
+  InstInfo *inst = &inst_entry->uop;
+
+#ifdef CONFIG_DIFFTEST
+  for (int i = 0; i < ARF_NUM; i++) {
+    dut_cpu.gpr[i] = back->prf->reg_file[back->rename->arch_RAT_1[i]];
+  }
+
+  if (is_store(*inst) && !inst->page_fault_store) {
+    StqEntry e = back->lsu->get_stq_entry(inst->stq_idx);
+    Assert(e.addr_valid && e.data_valid);
+    dut_cpu.store = true;
+    dut_cpu.store_addr = e.p_addr;
+    if (e.func3 == 0b00)
+      dut_cpu.store_data = e.data & 0xFF;
+    else if (e.func3 == 0b01)
+      dut_cpu.store_data = e.data & 0xFFFF;
+    else
+      dut_cpu.store_data = e.data;
+
+    dut_cpu.store_data = dut_cpu.store_data << (dut_cpu.store_addr & 0b11) * 8;
+  } else {
+    dut_cpu.store = false;
+  }
+
+  for (int i = 0; i < CSR_NUM; i++) {
+    dut_cpu.csr[i] = back->csr->CSR_RegFile_1[i];
+  }
+  dut_cpu.pc = (is_branch(inst->type) || inst->type == JAL ||
+                back->rob->out.rob_bcast->flush)
+                   ? inst_entry->uop.diag_val
+                   : inst->pc + 4;
+  dut_cpu.instruction = inst->instruction;
+  dut_cpu.page_fault_inst = inst->page_fault_inst;
+  dut_cpu.page_fault_load = inst->page_fault_load;
+  dut_cpu.page_fault_store = inst->page_fault_store;
+  dut_cpu.inst_idx = inst->inst_idx;
+  *skip = inst->difftest_skip;
+#else
+  *skip = false;
+#endif
+  return true;
+}
+} // namespace
+
+void SimContext::run_commit_inst(InstEntry *inst_entry) {
+  if (cpu == nullptr || inst_entry == nullptr || !inst_entry->valid) {
+    return;
+  }
+  simcpu_commit_sync(cpu, &inst_entry->uop);
+}
+
+void SimContext::run_difftest_inst(InstEntry *inst_entry) {
+  if (cpu == nullptr || inst_entry == nullptr || !inst_entry->valid) {
+    return;
+  }
+  bool skip = false;
+  if (!simcpu_difftest_prepare(cpu, inst_entry, &skip)) {
+    return;
+  }
+  if (skip) {
+    difftest_skip();
+  } else {
+    difftest_step(true);
+  }
+}
+
 // 复位逻辑
 void SimCpu::init() {
+  // 第一阶段：绑定顶层上下文
+  ctx.cpu = this;
 
+  // 第二阶段：构建模块对象（生成内部子模块实例）
   back.init();
-  mmu.reset();
 
-#ifdef CONFIG_BPU
-  front_in.reset = true;
-  front_in.FIFO_read_enable = true;
-  front_top(&front_in, &front_out);
-  front_in.reset = false;
-#endif
+  // 第三阶段：集中完成跨模块连线
+  mem_subsystem.csr = back.csr;
+  mem_subsystem.memory = p_memory;
+
+  front.in.csr_status = back.csr->out.csr_status;
+  front.ctx = &ctx;
+
+  back.lsu->ptw_walk_port = mem_subsystem.dtlb_walk_port;
+  back.lsu->ptw_mem_port = mem_subsystem.dtlb_ptw_port;
+
+  mem_subsystem.lsu_req_io = back.lsu_dcache_req_io;
+  mem_subsystem.lsu_wreq_io = back.lsu_dcache_wreq_io;
+  mem_subsystem.lsu_resp_io = back.lsu_dcache_resp_io;
+  mem_subsystem.lsu_wready_io = back.lsu_dcache_wready_io;
+
+  front.icache_ptw_walk_port = mem_subsystem.itlb_walk_port;
+  front.icache_ptw_mem_port = mem_subsystem.itlb_ptw_port;
+
+  // 第四阶段：统一执行各模块复位逻辑
+  front.init();
+  mem_subsystem.init();
 }
 
 // 强制重置前端 PC (用于 FAST 模式切换)
 void SimCpu::restore_pc(uint32_t pc) {
-  front_in.reset = false;
-  front_in.FIFO_read_enable = false;
-  front_in.refetch = true;
-  front_in.fence_i = true; // 强制刷新 ICache
-  front_in.refetch_address = pc;
+  front.in.reset = false;
+  front.in.FIFO_read_enable = false;
+  // 显式给前端一个重取指请求，并同步后端重定向输出，
+  // 保证即使调用方未额外设置 flush/mispred，也会从目标 PC 重新开始。
+  front.in.refetch = true;
+  front.in.refetch_address = pc;
+  back.out.flush = true;
+  back.out.mispred = true;
+  back.out.redirect_pc = pc;
 
   // 刷新 CSR 状态输出 (SATP, Privilege) 以确保 MMU 模式正确
   back.comb_csr_status();
-
-  // 运行一次前端逻辑以应用 PC
-#ifdef CONFIG_BPU
-  front_top(&front_in, &front_out);
-#else
-  get_oracle(front_in, front_out);
-#endif
-
-  front_in.refetch = false;
-  front_in.fence_i = false;
 }
 
 void SimCpu::cycle() {
   ctx.perf.cycle++;
-  back.comb_csr_status(); // 获取mstatus sstatus satp
+  // 统一在此处刷新 CSR 状态，供本拍 front/back 组合逻辑共同使用。
+  back.comb_csr_status();
 
-#ifdef CONFIG_MMU
-  // 后端 (CSR) -> MMU
-  back2mmu_comb();
-  // 步骤 1：取指并填充后端输入
-#endif
   front_cycle();
-
-#ifdef CONFIG_MMU
-  mmu.comb_frontend(); // 根据新的取指请求有效位更新 MMU 取指响应
-#endif
   back.comb();
-
-#ifdef CONFIG_MMU
-  mmu.comb_backend(); // 根据新的访存请求有效位更新 MMU 访存响应
-  // 后端的请求会在 back.Back_comb() 中设置
-  // 前端的请求会在 front_cycle() 中设置
-  mmu.comb_ptw();
-#endif
+  mem_subsystem.comb();
 
   // 步骤 2：反馈给前端
   back2front_comb();
   back.seq();
-
-#ifdef CONFIG_MMU
-  mmu.seq();
-#endif
+  mem_subsystem.seq();
 
   if (ctx.exit_reason != ExitReason::NONE) {
     printf("Simulation Exited with Reason: %d\n", (int)ctx.exit_reason);
@@ -100,89 +234,97 @@ void SimCpu::front_cycle() {
 
   if (!back.out.stall || back.out.mispred || back.out.flush) {
 
-    front_in.FIFO_read_enable = true;
-    front_in.refetch = (back.out.mispred || back.out.flush);
-    front_in.fence_i = back.out.fence_i;
-    front_in.is_mispred = back.out.mispred && !back.out.flush; // 纯分支误预测
-    front_in.is_rob_flush = back.out.flush; // ROB flush (exception/CSR/fence)
-    if (front_in.refetch) {
-      front_in.refetch_address =
+    front.in.FIFO_read_enable = true;
+    front.in.refetch = (back.out.mispred || back.out.flush);
+    if (front.in.refetch) {
+      front.in.refetch_address =
           back.out.redirect_pc; // 再次确保赋值，防止时序错位
     }
 
 #ifdef CONFIG_BPU
-    front_top(&front_in, &front_out);
+    front.step_bpu();
 #else
-    get_oracle(front_in, front_out);
+    front.step_oracle();
 #endif
 
     bool no_taken = true;
     for (int j = 0; j < FETCH_WIDTH; j++) {
       back.in.valid[j] =
-          no_taken && front_out.FIFO_valid && front_out.inst_valid[j];
-      back.in.pc[j] = front_out.pc[j];
+          no_taken && front.out.FIFO_valid && front.out.inst_valid[j];
+      back.in.pc[j] = front.out.pc[j];
       back.in.predict_next_fetch_address[j] =
-          front_out.predict_next_fetch_address;
-      back.in.page_fault_inst[j] = front_out.page_fault_inst[j];
-      back.in.inst[j] = front_out.instructions[j];
+          front.out.predict_next_fetch_address;
+      back.in.page_fault_inst[j] = front.out.page_fault_inst[j];
+      back.in.inst[j] = front.out.instructions[j];
 
       if (LOG && back.in.valid[j]) {
         cout << "指令index:" << dec << sim_time << " 当前PC的取值为:" << hex
-             << front_out.pc[j] << " Inst: " << back.in.inst[j] << endl;
+             << front.out.pc[j] << " Inst: " << back.in.inst[j] << endl;
       }
 
-      back.in.predict_dir[j] = front_out.predict_dir[j];
-      back.in.alt_pred[j] = front_out.alt_pred[j];
-      back.in.altpcpn[j] = front_out.altpcpn[j];
-      back.in.pcpn[j] = front_out.pcpn[j];
+      back.in.predict_dir[j] = front.out.predict_dir[j];
+      back.in.alt_pred[j] = front.out.alt_pred[j];
+      back.in.altpcpn[j] = front.out.altpcpn[j];
+      back.in.pcpn[j] = front.out.pcpn[j];
       for (int k = 0; k < 4; k++) { // TN_MAX = 4 (分支预测相关索引)
-        back.in.tage_idx[j][k] = front_out.tage_idx[j][k];
+        back.in.tage_idx[j][k] = front.out.tage_idx[j][k];
+        back.in.tage_tag[j][k] = front.out.tage_tag[j][k];
       }
-      if (back.in.valid[j] && front_out.predict_dir[j])
+      if (back.in.valid[j] && front.out.predict_dir[j])
         no_taken = false;
     }
   } else {
 
 #ifdef CONFIG_BPU
-    front_in.FIFO_read_enable = false;
-    front_in.refetch = false;
-    front_top(&front_in, &front_out);
+    front.in.FIFO_read_enable = false;
+    front.in.refetch = false;
+    front.step_bpu();
+#else
+    // Oracle 路径在后端阻塞时不能推进：
+    // 当前 oracle 模型没有额外缓冲，推进会导致该拍取到的指令无人接收而丢失。
+    front.in.FIFO_read_enable = false;
+    front.in.refetch = false;
 #endif
   }
 }
 
 void SimCpu::back2front_comb() {
-  front_in.FIFO_read_enable = false;
+  front.in.FIFO_read_enable = false;
+  front.in.csr_status = back.csr->out.csr_status;
   for (int i = 0; i < COMMIT_WIDTH; i++) {
     InstInfo *inst = &back.out.commit_entry[i].uop;
-    front_in.back2front_valid[i] = back.out.commit_entry[i].valid;
+    front.in.back2front_valid[i] = back.out.commit_entry[i].valid;
+    for (int j = 0; j < 4; j++) {
+      front.in.tage_tag[i][j] = 0;
+    }
 
-    if (front_in.back2front_valid[i]) {
+    if (front.in.back2front_valid[i]) {
 
       bool pred_taken = false;
       bool alt_pred = false;
       uint8_t altpcpn = 0;
       uint8_t pcpn = 0;
       uint32_t tage_idx[4] = {0};
+      uint32_t tage_tag[4] = {0};
 
-      if (back.ftq) {
-        FTQEntry &entry = back.ftq->get(inst->ftq_idx);
-        if (entry.valid) {
-          pred_taken = entry.pred_taken_mask[inst->ftq_offset];
-          alt_pred = entry.alt_pred[inst->ftq_offset];
-          altpcpn = entry.altpcpn[inst->ftq_offset];
-          pcpn = entry.pcpn[inst->ftq_offset];
-          for (int k = 0; k < 4; k++)
-            tage_idx[k] = entry.tage_idx[inst->ftq_offset][k];
+      FTQEntry &entry = back.idu->out.ftq_lookup->entries[inst->ftq_idx];
+      if (entry.valid) {
+        pred_taken = entry.pred_taken_mask[inst->ftq_offset];
+        alt_pred = entry.alt_pred[inst->ftq_offset];
+        altpcpn = entry.altpcpn[inst->ftq_offset];
+        pcpn = entry.pcpn[inst->ftq_offset];
+        for (int k = 0; k < 4; k++) {
+          tage_idx[k] = entry.tage_idx[inst->ftq_offset][k];
+          tage_tag[k] = entry.tage_tag[inst->ftq_offset][k];
         }
       }
 
-      front_in.predict_dir[i] = pred_taken;
-      front_in.predict_base_pc[i] = inst->pc;
-      front_in.actual_dir[i] =
+      front.in.predict_dir[i] = pred_taken;
+      front.in.predict_base_pc[i] = inst->pc;
+      front.in.actual_dir[i] =
           (inst->type == JAL || inst->type == JALR) ? true : inst->br_taken;
-      front_in.actual_target[i] =
-          (is_branch(inst->type) || inst->type == JAL)
+      front.in.actual_target[i] =
+          (is_branch(inst->type) || inst->type == JAL || inst->type == JALR)
               ? back.out.commit_entry[i].uop.diag_val
               : inst->pc + 4;
       int br_type = BR_NONCTL;
@@ -201,28 +343,18 @@ void SimCpu::back2front_comb() {
           br_type = BR_IDIRECT;
       }
 
-      front_in.actual_br_type[i] = br_type;
-      front_in.alt_pred[i] = alt_pred;
-      front_in.altpcpn[i] = altpcpn;
-      front_in.pcpn[i] = pcpn;
+      front.in.actual_br_type[i] = br_type;
+      front.in.alt_pred[i] = alt_pred;
+      front.in.altpcpn[i] = altpcpn;
+      front.in.pcpn[i] = pcpn;
       for (int j = 0; j < 4; j++) { // TN_MAX = 4 (分支预测相关索引)
-        front_in.tage_idx[i][j] = tage_idx[j];
+        front.in.tage_idx[i][j] = tage_idx[j];
+        front.in.tage_tag[i][j] = tage_tag[j];
       }
     }
   }
 
   if (back.out.mispred || back.out.flush) {
-    front_in.refetch_address = back.out.redirect_pc;
+    front.in.refetch_address = back.out.redirect_pc;
   }
-}
-
-void SimCpu::back2mmu_comb() {
-  // mmu.io.in.state.satp = reinterpret_cast<satp_t &>(back.out.satp);
-  std::memcpy(&mmu.io.in.state.satp, &back.out.satp, sizeof(satp_t));
-  mmu.io.in.state.mstatus = back.out.mstatus;
-  mmu.io.in.state.sstatus = back.out.sstatus;
-  mmu.io.in.state.privilege = mmu_n::Privilege(back.out.privilege);
-  // 用于刷新 TLB：
-  // - 如果请求刷新，稍后在后端设置 flush_valid = true
-  mmu.io.in.tlb_flush.flush_valid = false;
 }

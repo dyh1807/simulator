@@ -1,15 +1,15 @@
 #pragma once
 
+#include "ModuleIOs.h"
 #include "config.h"
+#include "util.h"
 #include <cstdint>
 #include <sys/types.h>
-#include <util.h>
-#include "ModuleIOs.h"
 
 struct DecRenIO {
 
-  InstInfo uop[FETCH_WIDTH];
-  wire<1> valid[FETCH_WIDTH];
+  InstInfo uop[DECODE_WIDTH];
+  wire<1> valid[DECODE_WIDTH];
   DecRenIO() {
     for (auto &v : uop)
       v = {};
@@ -49,6 +49,7 @@ struct FrontDecIO {
   wire<8> pcpn[FETCH_WIDTH];
   wire<32> predict_next_fetch_address[FETCH_WIDTH];
   wire<32> tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  wire<32> tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
   wire<1> page_fault_inst[FETCH_WIDTH];
 
   FrontDecIO() {
@@ -71,6 +72,9 @@ struct FrontDecIO {
     for (auto &tage_idx_0 : tage_idx)
       for (auto &idx : tage_idx_0)
         idx = {};
+    for (auto &tage_tag_0 : tage_tag)
+      for (auto &tag : tage_tag_0)
+        tag = {};
 
     for (auto &v : page_fault_inst)
       v = {};
@@ -126,9 +130,9 @@ struct RobDisIO {
 
 struct DisRobIO {
 
-  InstInfo uop[FETCH_WIDTH];
-  wire<1> valid[FETCH_WIDTH];
-  wire<1> dis_fire[FETCH_WIDTH];
+  InstInfo uop[DECODE_WIDTH];
+  wire<1> valid[DECODE_WIDTH];
+  wire<1> dis_fire[DECODE_WIDTH];
 
   DisRobIO() {
     for (auto &v : uop)
@@ -142,8 +146,8 @@ struct DisRobIO {
 
 struct RenDisIO {
 
-  InstInfo uop[FETCH_WIDTH];
-  wire<1> valid[FETCH_WIDTH];
+  InstInfo uop[DECODE_WIDTH];
+  wire<1> valid[DECODE_WIDTH];
 
   RenDisIO() {
     for (auto &v : uop)
@@ -283,7 +287,6 @@ struct ExeIssIO {
   }
 };
 
-
 struct ExuRobIO {
   UopEntry entry[ISSUE_WIDTH];
 
@@ -293,14 +296,13 @@ struct ExuRobIO {
   }
 };
 
-
 struct ExuIdIO {
 
   wire<1> mispred;
   wire<32> redirect_pc;
   wire<ROB_IDX_WIDTH> redirect_rob_idx;
   wire<BR_TAG_WIDTH> br_tag;
-  int ftq_idx;  // FTQ index of mispredicting branch, for tail recovery
+  int ftq_idx; // FTQ index of mispredicting branch, for tail recovery
 
   ExuIdIO() {
     mispred = {};
@@ -376,6 +378,70 @@ struct RobCsrIO {
   RobCsrIO() {
     interrupt_resp = {};
     commit = {};
+  }
+};
+
+struct PtwWalkReq {
+  wire<32> vaddr;
+  wire<32> satp;
+  wire<32> access_type; // 0=Fetch, 1=Load, 2=Store
+
+  PtwWalkReq() {
+    vaddr = {};
+    satp = {};
+    access_type = {};
+  }
+};
+
+struct PtwWalkResp {
+  wire<1> fault;
+  wire<32> leaf_pte;
+  wire<8> leaf_level; // 1: L1 leaf, 0: L0 leaf
+
+  PtwWalkResp() {
+    fault = {};
+    leaf_pte = {};
+    leaf_level = {};
+  }
+};
+
+struct PtwMemReqIO {
+  wire<1> en;
+  wire<32> paddr;
+
+  PtwMemReqIO() {
+    en = {};
+    paddr = {};
+  }
+};
+
+struct PtwMemRespIO {
+  wire<1> valid;
+  wire<32> data;
+
+  PtwMemRespIO() {
+    valid = {};
+    data = {};
+  }
+};
+
+struct PtwWalkReqIO {
+  wire<1> en;
+  PtwWalkReq req;
+
+  PtwWalkReqIO() {
+    en = {};
+    req = {};
+  }
+};
+
+struct PtwWalkRespIO {
+  wire<1> valid;
+  PtwWalkResp resp;
+
+  PtwWalkRespIO() {
+    valid = {};
+    resp = {};
   }
 };
 
@@ -599,22 +665,27 @@ struct PrfDcacheIO {
 
 struct LsuDisIO {
 
-  int stq_tail; // 当前分配指针
-  int stq_free; // 剩余空闲条目数
-  int ldq_free; // 剩余 Load 队列空闲数
+  int stq_tail;                              // 当前分配指针
+  int stq_free;                              // 剩余空闲条目数
+  int ldq_free;                              // 剩余 Load 队列空闲数
+  int ldq_alloc_idx[MAX_LDQ_DISPATCH_WIDTH]; // 本拍可分配的 LDQ 索引序列
 
   LsuDisIO() {
     stq_tail = 0;
     stq_free = 0;
     ldq_free = 0;
+    for (auto &v : ldq_alloc_idx)
+      v = -1;
   }
 };
 
 struct LsuRobIO {
   wire<ROB_NUM> miss_mask;
+  wire<1> committed_store_pending;
 
   LsuRobIO() {
     miss_mask = 0;
+    committed_store_pending = 0;
   }
 };
 
@@ -639,10 +710,32 @@ struct DisLsuIO {
   uint32_t rob_idx[MAX_STQ_DISPATCH_WIDTH];
   uint32_t rob_flag[MAX_STQ_DISPATCH_WIDTH];
 
+  bool ldq_alloc_req[MAX_LDQ_DISPATCH_WIDTH];
+  uint32_t ldq_idx[MAX_LDQ_DISPATCH_WIDTH];
+  uint32_t ldq_tag[MAX_LDQ_DISPATCH_WIDTH];
+  uint32_t ldq_rob_idx[MAX_LDQ_DISPATCH_WIDTH];
+  uint32_t ldq_rob_flag[MAX_LDQ_DISPATCH_WIDTH];
+
   DisLsuIO() {
     for (auto &v : alloc_req)
       v = false;
     for (auto &v : tag)
+      v = 0;
+    for (auto &v : func3)
+      v = 0;
+    for (auto &v : rob_idx)
+      v = 0;
+    for (auto &v : rob_flag)
+      v = 0;
+    for (auto &v : ldq_alloc_req)
+      v = false;
+    for (auto &v : ldq_idx)
+      v = 0;
+    for (auto &v : ldq_tag)
+      v = 0;
+    for (auto &v : ldq_rob_idx)
+      v = 0;
+    for (auto &v : ldq_rob_flag)
       v = 0;
   }
 };

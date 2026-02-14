@@ -1,6 +1,6 @@
 #pragma once
 #include "IO.h"
-#include <config.h>
+#include "config.h"
 
 #define M_MODE_ECALL 0xb
 #define CSR_W 0b01

@@ -1,6 +1,7 @@
 #include "config.h"
 #include "diff.h"
 #include "front_IO.h"
+#include "frontend.h"
 #include "ref.h"
 #include "util.h"
 #include <cstdint>
@@ -29,12 +30,33 @@ void init_oracle(int img_size) {
   oracle.memory[uint32_t(0x00001020 / 4)] = 0x8fe00000;
 }
 
+void init_oracle_ckpt(CPU_state ckpt_state, uint32_t *ckpt_memory) {
+  oracle.init(0);
+  oracle.state = ckpt_state;
+  oracle.privilege = RISCV_MODE_U;
+
+  std::memcpy(oracle.memory, ckpt_memory,
+              (uint64_t)PHYSICAL_MEMORY_LENGTH * sizeof(uint32_t));
+
+  uint32_t p_addr;
+  bool success = oracle.va2pa(p_addr, oracle.state.pc, 0);
+  Assert(success);
+}
+
 void get_oracle(struct front_top_in &in, struct front_top_out &out) {
   int i;
   static bool stall = false;
 
   if (in.refetch) {
-    Assert(!in.is_mispred && "Mispred width oracle");
+    oracle.sim_end = false;
+    stall = false;
+  }
+
+  if (oracle.sim_end) {
+    stall = true;
+  }
+
+  if (in.refetch) {
     Assert(in.refetch_address == oracle.state.pc && "Error refetch PC");
 
     bool state_mismatch = false;
@@ -83,6 +105,7 @@ void get_oracle(struct front_top_in &in, struct front_top_out &out) {
     oracle.exec();
     out.instructions[i] = oracle.Instruction;
 
+
     if (oracle.is_exception || oracle.is_csr || oracle.is_mmio_load) {
       if (LOG) {
         printf("[ORACLE] Stalling at PC 0x%08x, Inst 0x%08x (Ex:%d, CSR:%d, "
@@ -112,6 +135,11 @@ void get_oracle(struct front_top_in &in, struct front_top_out &out) {
         break;
     } else {
       out.predict_dir[i] = false;
+    }
+
+    // Cache line boundary check: truncate if next instruction is in a different line
+    if ((oracle.state.pc ^ out.pc[i]) & ~(ICACHE_LINE_SIZE - 1)) {
+      break;
     }
   }
 

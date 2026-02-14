@@ -1,11 +1,20 @@
 #include "config.h"
-#include <IO.h>
-#include <Prf.h>
+#include "IO.h"
+#include "Prf.h"
 #include <cstring>
 #include <iostream>
-#include <util.h>
+#include "util.h"
 
-void Prf::init() {}
+void Prf::init() {
+  for (int i = 0; i < PRF_NUM; i++) {
+    reg_file[i] = 0;
+    reg_file_1[i] = 0;
+  }
+  for (int i = 0; i < ISSUE_WIDTH; i++) {
+    inst_r[i] = {};
+    inst_r_1[i] = {};
+  }
+}
 
 // ==========================================
 // 1. 分支检查 (Writeback 阶段)

@@ -1,9 +1,9 @@
 #pragma once
 #pragma once
 #include "IO.h"
-#include <Fu.h> // 包含具体的 FU 定义
-#include <config.h>
-#include <FTQ.h>
+#include "Fu.h" // 包含具体的 FU 定义
+#include "config.h"
+#include "FTQ.h"
 #include <vector>
 
 struct FuEntry {
@@ -37,11 +37,11 @@ public:
 
 class Exu {
 public:
-  Exu(SimContext *ctx, FTQ *ftq);
+  Exu(SimContext *ctx, FTQLookupIO *ftq_lookup);
   ~Exu(); // 析构函数释放 FU 内存
 
   SimContext *ctx;
-  FTQ *ftq;
+  FTQLookupIO *ftq_lookup;
   std::vector<PortMapping> port_mappings;
 
   void init();

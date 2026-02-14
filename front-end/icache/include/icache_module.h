@@ -85,7 +85,7 @@ public:
   ICache();
 
   void reset();
-  void set_refetch(bool fence_i);
+  void set_refetch();
   void comb();
   void comb_pipe1();
   void comb_pipe2();

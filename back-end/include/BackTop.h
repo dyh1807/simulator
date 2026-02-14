@@ -1,15 +1,15 @@
 #pragma once
+#include "Csr.h"
+#include "Dispatch.h"
+#include "Exu.h"
+#include "FTQ.h"
 #include "IO.h"
-#include <Csr.h>
-#include <Dispatch.h>
-#include <Exu.h>
-#include <FTQ.h>
-#include <Idu.h>
-#include <Isu.h>
-#include <Prf.h>
-#include <Ren.h>
-#include <Rob.h>
-#include <config.h>
+#include "Idu.h"
+#include "Isu.h"
+#include "Prf.h"
+#include "Ren.h"
+#include "Rob.h"
+#include "config.h"
 #include <cstdint>
 
 class SimContext;
@@ -23,6 +23,7 @@ typedef struct {
   uint8_t altpcpn[FETCH_WIDTH];
   uint8_t pcpn[FETCH_WIDTH];
   uint32_t tage_idx[FETCH_WIDTH][4]; // TN_MAX = 4
+  uint32_t tage_tag[FETCH_WIDTH][4]; // TN_MAX = 4
   uint32_t predict_next_fetch_address[FETCH_WIDTH];
   bool page_fault_inst[FETCH_WIDTH];
 } Back_in;
@@ -53,6 +54,7 @@ class Rob;
 class Csr;
 class AbstractLsu;
 class AbstractMMU;
+class MemSubsystem;
 
 class BackTop {
 private:
@@ -86,6 +88,10 @@ private:
   LsuExeIO lsu2exe;
   LsuDisIO lsu2dis;
   LsuRobIO lsu2rob;
+  MemReqIO lsu2dcache_req;
+  MemReqIO lsu2dcache_wreq;
+  MemRespIO dcache2lsu_resp;
+  MemReadyIO dcache2lsu_wready;
 
   RobDisIO rob2dis;
   RobCsrIO rob2csr;
@@ -110,16 +116,25 @@ public:
   Csr *csr;
   Rob *rob;
   AbstractLsu *lsu;
-  FTQ *ftq;
 
   Back_in in;
   Back_out out;
+  MemReqIO *lsu_dcache_req_io;
+  MemReqIO *lsu_dcache_wreq_io;
+  MemRespIO *lsu_dcache_resp_io;
+  MemReadyIO *lsu_dcache_wready_io;
   void init();
   void comb_csr_status();
   void comb();
   void seq();
 
-  BackTop(SimContext *ctx) { this->ctx = ctx; };
+  BackTop(SimContext *ctx) {
+    this->ctx = ctx;
+    lsu_dcache_req_io = &lsu2dcache_req;
+    lsu_dcache_wreq_io = &lsu2dcache_wreq;
+    lsu_dcache_resp_io = &dcache2lsu_resp;
+    lsu_dcache_wready_io = &dcache2lsu_wready;
+  };
   ~BackTop() {
     delete rename;
     delete dis;
@@ -129,26 +144,14 @@ public:
     delete prf;
     delete rob;
     delete csr;
-    delete ftq;
   }
 
   uint32_t number_PC = 0;
-
-#ifdef CONFIG_MMU
-  bool load_data(uint32_t &data, uint32_t v_addr, int rob_idx,
-                 bool &mmu_page_fault, uint32_t &mmu_ppn, bool &stall_load);
-#else
-  bool load_data(uint32_t &data, uint32_t v_addr, int rob_idx);
-#endif
 
   void load_image(const std::string &filename);
   void restore_checkpoint(const std::string &filename);
   void restore_from_ref();
 
-  // debug
-  void difftest_inst(InstEntry *inst_entry);
-  void difftest_cycle();
-  void difftest_sync(InstInfo *inst);
   uint32_t get_reg(uint8_t arch_idx) {
     return prf->reg_file[rename->arch_RAT_1[arch_idx]];
   }

@@ -30,8 +30,14 @@ constexpr uint64_t PHYSICAL_MEMORY_LENGTH =
     1ULL * 1024 * 1024 * 1024;                      // 1G elements = 4GB
 constexpr uint64_t MAX_SIM_TIME = 1000000000000ULL; // 1T cycles (very large)
 
-constexpr int FETCH_WIDTH = 8;
-constexpr int COMMIT_WIDTH = FETCH_WIDTH;
+constexpr int FETCH_WIDTH = 16;
+constexpr int DECODE_WIDTH = 8;
+static_assert(DECODE_WIDTH > 0, "DECODE_WIDTH must be positive");
+static_assert(DECODE_WIDTH <= FETCH_WIDTH,
+              "DECODE_WIDTH must be <= FETCH_WIDTH");
+constexpr int COMMIT_WIDTH = DECODE_WIDTH;
+constexpr int IDU_INST_BUFFER_SIZE = 64;
+constexpr int ICACHE_LINE_SIZE = 64; // bytes
 
 constexpr int ARF_NUM = 32;
 constexpr int PRF_NUM = 160; // Optimized for 8-wide
@@ -53,20 +59,48 @@ constexpr int SIMPOINT_INTERVAL = 100000000;
 // ==========================================
 
 constexpr uint64_t LOG_START = 0;
-// #define LOG_ENABLE // Enable logging support (controlled by macros below)
+constexpr uint64_t BACKEND_LOG_START = LOG_START;
+constexpr uint64_t MEMORY_LOG_START = LOG_START;
+constexpr uint64_t DCACHE_LOG_START = LOG_START;
+constexpr uint64_t MMU_LOG_START = LOG_START;
+
+// Master log enable
+// #define LOG_ENABLE
+// Domain enables (effective only when LOG_ENABLE is enabled)
+// #define LOG_MEMORY_ENABLE
+// #define LOG_DCACHE_ENABLE
+// #define LOG_MMU_ENABLE
 
 extern long long sim_time; // Global simulation time
 
 #ifdef LOG_ENABLE
-                           // Adjust these conditions to enable specific logs
-#define LOG (sim_time >= (long long)LOG_START)
-#define DEBUG (LOG)
-#define MEM_LOG (LOG)
-#define DCACHE_LOG (LOG)
-#define MMU_LOG (LOG)
+#define BACKEND_LOG (sim_time >= BACKEND_LOG_START)
+
+#ifdef LOG_MEMORY_ENABLE
+#define MEM_LOG (sim_time >= MEMORY_LOG_START)
 #else
-#define DEBUG (0)
+#define MEM_LOG (0)
+#endif
+
+#ifdef LOG_DCACHE_ENABLE
+#define DCACHE_LOG (sim_time >= DCACHE_LOG_START)
+#else
+#define DCACHE_LOG (0)
+#endif
+
+#ifdef LOG_MMU_ENABLE
+#define MMU_LOG (sim_time >= MMU_LOG_START)
+#else
+#define MMU_LOG (0)
+#endif
+
+// Backward-compatible aliases for existing backend logs
+#define LOG (BACKEND_LOG)
+#define DEBUG (BACKEND_LOG)
+#else
+#define BACKEND_LOG (0)
 #define LOG (0)
+#define DEBUG (0)
 #define MEM_LOG (0)
 #define DCACHE_LOG (0)
 #define MMU_LOG (0)
@@ -78,15 +112,13 @@ constexpr uint32_t DEBUG_ADDR = 0x807a1848; // 0x807a4000
 #define CONFIG_DIFFTEST
 #define CONFIG_PERF_COUNTER
 #define CONFIG_BPU
-// #define CONFIG_MMU
-// #define CONFIG_CACHE
-
-/*
- * 宽松的va2pa检查：
- * 允许 DUT 判定为 page fault，但是 REF 判定不为
- * page fault 时，通过 DIFFTEST 并以 DUT 为准
- */
-#define CONFIG_LOOSE_VA2PA
+// MMU domain feature tags (kept enabled for front/back path visibility)
+#define CONFIG_DTLB
+#define CONFIG_ITLB
+// Unified MMU model switch:
+// - defined   : I/D side both use TlbMmu (with PTW path)
+// - undefined : I/D side both use SimpleMmu (ideal va2pa)
+#define CONFIG_TLB_MMU
 
 constexpr uint32_t UART_BASE = 0x10000000;
 
@@ -113,16 +145,16 @@ constexpr uint64_t OP_MASK_FP = (1ULL << UOP_FP);
 // OP_MASK_CSR
 constexpr IssuePortConfigInfo GLOBAL_ISSUE_PORT_CONFIG[] = {
     {0, OP_MASK_ALU | OP_MASK_MUL | OP_MASK_CSR |
-            OP_MASK_DIV},           // Port 0: Full ALU + System
+            OP_MASK_DIV},                        // Port 0: Full ALU + System
     {1, OP_MASK_ALU | OP_MASK_MUL | OP_MASK_FP}, // Port 1: ALU + Mul + FP
-    {2, OP_MASK_ALU},               // Port 2: Simple ALU
-    {3, OP_MASK_ALU},               // Port 3: Simple ALU
-    {4, OP_MASK_LD},                // Port 4: Load 0
-    {5, OP_MASK_LD},                // Port 5: Load 1
-    {6, OP_MASK_STA},               // Port 6: Store Addr
-    {7, OP_MASK_STD},               // Port 7: Store Data
-    {8, OP_MASK_BR},                // Port 8: Branch 0
-    {9, OP_MASK_BR}                 // Port 9: Branch 1
+    {2, OP_MASK_ALU},                            // Port 2: Simple ALU
+    {3, OP_MASK_ALU},                            // Port 3: Simple ALU
+    {4, OP_MASK_LD},                             // Port 4: Load 0
+    {5, OP_MASK_LD},                             // Port 5: Load 1
+    {6, OP_MASK_STA},                            // Port 6: Store Addr
+    {7, OP_MASK_STD},                            // Port 7: Store Data
+    {8, OP_MASK_BR},                             // Port 8: Branch 0
+    {9, OP_MASK_BR}                              // Port 9: Branch 1
 };
 
 constexpr int ISSUE_WIDTH =
@@ -156,8 +188,9 @@ constexpr int find_first_port_with_mask(uint64_t mask) {
   return -1;
 }
 
-constexpr int MAX_IQ_DISPATCH_WIDTH = FETCH_WIDTH;
+constexpr int MAX_IQ_DISPATCH_WIDTH = DECODE_WIDTH;
 constexpr int MAX_STQ_DISPATCH_WIDTH = 4;
+constexpr int MAX_LDQ_DISPATCH_WIDTH = DECODE_WIDTH;
 constexpr int MAX_UOPS_PER_INST = 3;
 
 constexpr int ALU_NUM = count_ports_with_mask(OP_MASK_ALU);
@@ -173,6 +206,8 @@ constexpr int LSU_LDU_COUNT = count_ports_with_mask(OP_MASK_LD);
 constexpr int LSU_AGU_COUNT = LSU_STA_COUNT + LSU_LDU_COUNT;
 constexpr int LSU_SDU_COUNT = count_ports_with_mask(OP_MASK_STD);
 constexpr int LSU_LOAD_WB_WIDTH = LSU_LDU_COUNT;
+constexpr int ITLB_ENTRIES = 32;
+constexpr int DTLB_ENTRIES = 32;
 
 constexpr int MAX_WAKEUP_PORTS =
     LSU_LOAD_WB_WIDTH + count_ports_with_mask(OP_MASK_ALU) +
@@ -218,9 +253,9 @@ constexpr int IQ_BR_PORT_BASE = find_first_port_with_mask(OP_MASK_BR);
 // 计算总功能单元数量 (用于 Bypass 广播)
 constexpr int calculate_total_fu_count() {
   int total = 0;
-  uint64_t major_masks[] = {OP_MASK_ALU, OP_MASK_CSR, OP_MASK_MUL, OP_MASK_DIV,
-                            OP_MASK_BR,  OP_MASK_LD,  OP_MASK_STA, OP_MASK_STD,
-                            OP_MASK_FP};
+  uint64_t major_masks[] = {OP_MASK_ALU, OP_MASK_CSR, OP_MASK_MUL,
+                            OP_MASK_DIV, OP_MASK_BR,  OP_MASK_LD,
+                            OP_MASK_STA, OP_MASK_STD, OP_MASK_FP};
   for (const auto &cfg : GLOBAL_ISSUE_PORT_CONFIG) {
     for (uint64_t m : major_masks) {
       if (cfg.support_mask & m)
@@ -237,16 +272,16 @@ constexpr int TOTAL_FU_COUNT = calculate_total_fu_count();
 
 // Instruction Queue Configuration
 constexpr IQStaticConfig GLOBAL_IQ_CONFIG[] = {
-    {IQ_INT, 64, FETCH_WIDTH,
+    {IQ_INT, 64, DECODE_WIDTH,
      OP_MASK_ALU | OP_MASK_MUL | OP_MASK_DIV | OP_MASK_CSR, IQ_ALU_PORT_BASE,
      count_ports_with_mask(OP_MASK_ALU)},
-    {IQ_LD, 32, FETCH_WIDTH, OP_MASK_LD, IQ_LD_PORT_BASE,
+    {IQ_LD, 32, DECODE_WIDTH, OP_MASK_LD, IQ_LD_PORT_BASE,
      count_ports_with_mask(OP_MASK_LD)},
-    {IQ_STA, 32, FETCH_WIDTH, OP_MASK_STA, IQ_STA_PORT_BASE,
+    {IQ_STA, 32, DECODE_WIDTH, OP_MASK_STA, IQ_STA_PORT_BASE,
      count_ports_with_mask(OP_MASK_STA)},
-    {IQ_STD, 32, FETCH_WIDTH, OP_MASK_STD, IQ_STD_PORT_BASE,
+    {IQ_STD, 32, DECODE_WIDTH, OP_MASK_STD, IQ_STD_PORT_BASE,
      count_ports_with_mask(OP_MASK_STD)},
-    {IQ_BR, 32, FETCH_WIDTH, OP_MASK_BR, IQ_BR_PORT_BASE,
+    {IQ_BR, 32, DECODE_WIDTH, OP_MASK_BR, IQ_BR_PORT_BASE,
      count_ports_with_mask(OP_MASK_BR)}};
 
 #include "types.h"

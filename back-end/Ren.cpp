@@ -1,13 +1,12 @@
-#include <Ren.h>
-#include <SimCpu.h>
-#include <config.h>
+#include "Ren.h"
+#include "config.h"
 #include <cstdlib>
 #include <cstring>
 
-#include <util.h>
+#include "util.h"
 
 // 多个comb复用的中间信号
-static wire<1> fire[FETCH_WIDTH];
+static wire<1> fire[DECODE_WIDTH];
 static wire<1> spec_alloc_flush[PRF_NUM];
 static wire<1> spec_alloc_mispred[PRF_NUM];
 static wire<1> spec_alloc_normal[PRF_NUM];
@@ -18,8 +17,6 @@ static wire<PRF_IDX_WIDTH> spec_RAT_flush[ARF_NUM + 1];
 static wire<PRF_IDX_WIDTH> spec_RAT_mispred[ARF_NUM + 1];
 static wire<PRF_IDX_WIDTH> spec_RAT_normal[ARF_NUM + 1];
 static wire<1> busy_table_awake[PRF_NUM];
-
-int ren_commit_idx;
 
 void Ren::init() {
   for (int i = 0; i < PRF_NUM; i++) {
@@ -34,14 +31,15 @@ void Ren::init() {
     }
   }
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     inst_r[i].valid = false;
   }
 
   memcpy(arch_RAT_1, arch_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   memcpy(spec_RAT_1, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   memcpy(spec_RAT_normal, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
-  memcpy(spec_RAT_mispred, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
+  memcpy(spec_RAT_mispred, spec_RAT,
+         (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   memcpy(spec_RAT_flush, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
 
   memcpy(spec_alloc_mispred, spec_alloc, PRF_NUM);
@@ -56,12 +54,12 @@ void Ren::init() {
 }
 
 void Ren::comb_alloc() {
-  // 可用寄存器个数 每周期最多使用FETCH_WIDTH个
-  wire<PRF_IDX_WIDTH> alloc_reg[FETCH_WIDTH];
-  wire<1> alloc_valid[FETCH_WIDTH] = {false};
+  // 可用寄存器个数 每周期最多使用DECODE_WIDTH个
+  wire<PRF_IDX_WIDTH> alloc_reg[DECODE_WIDTH];
+  wire<1> alloc_valid[DECODE_WIDTH] = {false};
   int alloc_num = 0;
 
-  for (int i = 0; i < PRF_NUM && alloc_num < FETCH_WIDTH; i++) {
+  for (int i = 0; i < PRF_NUM && alloc_num < DECODE_WIDTH; i++) {
     if (free_vec[i]) {
       alloc_reg[alloc_num] = i;
       alloc_valid[alloc_num] = true;
@@ -72,7 +70,7 @@ void Ren::comb_alloc() {
   // stall相当于需要查看前一条指令是否stall
   // 一条指令stall，后面的也stall
   wire<1> stall = false;
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     out.ren2dis->uop[i] = inst_r[i].uop;
     out.ren2dis->uop[i].dest_preg = alloc_reg[i];
     // 分配寄存器
@@ -110,22 +108,22 @@ void Ren::comb_wake() {
 
 void Ren::comb_rename() {
 
-  wire<PRF_IDX_WIDTH> src1_preg_normal[FETCH_WIDTH];
-  wire<1> src1_busy_normal[FETCH_WIDTH];
-  wire<PRF_IDX_WIDTH> src1_preg_bypass[FETCH_WIDTH];
-  wire<1> src1_bypass_hit[FETCH_WIDTH];
+  wire<PRF_IDX_WIDTH> src1_preg_normal[DECODE_WIDTH];
+  wire<1> src1_busy_normal[DECODE_WIDTH];
+  wire<PRF_IDX_WIDTH> src1_preg_bypass[DECODE_WIDTH];
+  wire<1> src1_bypass_hit[DECODE_WIDTH];
 
-  wire<PRF_IDX_WIDTH> src2_preg_normal[FETCH_WIDTH];
-  wire<1> src2_busy_normal[FETCH_WIDTH];
-  wire<PRF_IDX_WIDTH> src2_preg_bypass[FETCH_WIDTH];
-  wire<1> src2_bypass_hit[FETCH_WIDTH];
+  wire<PRF_IDX_WIDTH> src2_preg_normal[DECODE_WIDTH];
+  wire<1> src2_busy_normal[DECODE_WIDTH];
+  wire<PRF_IDX_WIDTH> src2_preg_bypass[DECODE_WIDTH];
+  wire<1> src2_bypass_hit[DECODE_WIDTH];
 
-  wire<PRF_IDX_WIDTH> old_dest_preg_normal[FETCH_WIDTH];
-  wire<PRF_IDX_WIDTH> old_dest_preg_bypass[FETCH_WIDTH];
-  wire<1> old_dest_bypass_hit[FETCH_WIDTH];
+  wire<PRF_IDX_WIDTH> old_dest_preg_normal[DECODE_WIDTH];
+  wire<PRF_IDX_WIDTH> old_dest_preg_bypass[DECODE_WIDTH];
+  wire<1> old_dest_bypass_hit[DECODE_WIDTH];
 
   // 无waw raw的输出 读spec_RAT和busy_table
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     old_dest_preg_normal[i] = spec_RAT[inst_r[i].uop.dest_areg];
     src1_preg_normal[i] = spec_RAT[inst_r[i].uop.src1_areg];
     src2_preg_normal[i] = spec_RAT[inst_r[i].uop.src2_areg];
@@ -138,7 +136,7 @@ void Ren::comb_rename() {
   src1_bypass_hit[0] = false;
   src2_bypass_hit[0] = false;
   old_dest_bypass_hit[0] = false;
-  for (int i = 1; i < FETCH_WIDTH; i++) {
+  for (int i = 1; i < DECODE_WIDTH; i++) {
     src1_bypass_hit[i] = false;
     src2_bypass_hit[i] = false;
     old_dest_bypass_hit[i] = false;
@@ -170,7 +168,7 @@ void Ren::comb_rename() {
   }
 
   // 重命名 (Rename)
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (src1_bypass_hit[i]) {
       out.ren2dis->uop[i].src1_preg = src1_preg_bypass[i];
       out.ren2dis->uop[i].src1_busy = true;
@@ -197,11 +195,11 @@ void Ren::comb_rename() {
 
 void Ren::comb_fire() {
   memcpy(busy_table_1, busy_table_awake, sizeof(wire<1>) * PRF_NUM);
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     fire[i] = out.ren2dis->valid[i] && in.dis2ren->ready;
   }
 
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (fire[i] && out.ren2dis->uop[i].dest_en) {
       int dest_preg = out.ren2dis->uop[i].dest_preg;
       spec_alloc_normal[dest_preg] = true;
@@ -228,7 +226,7 @@ void Ren::comb_fire() {
   }
 
   out.ren2dec->ready = true;
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     out.ren2dec->ready &= fire[i] || !inst_r[i].valid;
   }
 }
@@ -299,25 +297,40 @@ void Ren ::comb_commit() {
         }
       }
 
-      if (LOG) {
-        printf("ROB commit PC 0x%08x Inst:0x%08x rob_idx:%d idx %ld\n",
-               inst->pc, inst->instruction, inst->rob_idx, inst->inst_idx);
-      }
-      ren_commit_idx = i;
+      BE_LOG("ROB commit PC=0x%08x Inst=0x%08x rob_idx=%d idx=%ld", inst->pc,
+             inst->instruction, inst->rob_idx, inst->inst_idx);
       if (inst->dest_en && !is_exception(*inst) && !in.rob_bcast->interrupt) {
         arch_RAT_1[inst->dest_areg] = inst->dest_preg;
       }
-      cpu.back.difftest_inst(&in.rob_commit->commit_entry[i]);
+      ctx->run_commit_inst(&in.rob_commit->commit_entry[i]);
+      ctx->run_difftest_inst(&in.rob_commit->commit_entry[i]);
     }
   }
-
-#ifdef CONFIG_DIFFTEST
-  // cpu.back.difftest_cycle();
-#endif
 }
 
 void Ren ::comb_pipeline() {
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  if (in.rob_bcast->flush || in.dec_bcast->mispred) {
+#ifdef CONFIG_PERF_COUNTER
+    uint64_t killed = 0;
+    for (int i = 0; i < DECODE_WIDTH; i++) {
+      if (inst_r[i].valid) {
+        killed++;
+      }
+    }
+    if (killed > 0) {
+      if (in.rob_bcast->flush) {
+        ctx->perf.squash_flush_ren += killed;
+        ctx->perf.squash_flush_total += killed;
+      } else {
+        ctx->perf.squash_mispred_ren += killed;
+        ctx->perf.squash_mispred_total += killed;
+      }
+      ctx->perf.pending_squash_slots += killed;
+    }
+#endif
+  }
+
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     if (in.rob_bcast->flush || in.dec_bcast->mispred) {
       inst_r_1[i].valid = false;
     } else if (out.ren2dec->ready) {
@@ -331,21 +344,24 @@ void Ren ::comb_pipeline() {
   if (in.rob_bcast->flush) {
     memcpy(spec_alloc_1, spec_alloc_flush, PRF_NUM);
     memcpy(free_vec_1, free_vec_flush, PRF_NUM);
-    memcpy(spec_RAT_1, spec_RAT_flush, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
+    memcpy(spec_RAT_1, spec_RAT_flush,
+           (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   } else if (in.dec_bcast->mispred) {
     memcpy(spec_alloc_1, spec_alloc_mispred, PRF_NUM);
     memcpy(free_vec_1, free_vec_mispred, PRF_NUM);
-    memcpy(spec_RAT_1, spec_RAT_mispred, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
+    memcpy(spec_RAT_1, spec_RAT_mispred,
+           (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   } else {
     memcpy(spec_alloc_1, spec_alloc_normal, PRF_NUM);
     memcpy(free_vec_1, free_vec_normal, PRF_NUM);
-    memcpy(spec_RAT_1, spec_RAT_normal, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
+    memcpy(spec_RAT_1, spec_RAT_normal,
+           (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   }
 }
 
 void Ren ::seq() {
 
-  memcpy(inst_r, inst_r_1, FETCH_WIDTH * sizeof(InstEntry));
+  memcpy(inst_r, inst_r_1, DECODE_WIDTH * sizeof(InstEntry));
   memcpy(spec_RAT, spec_RAT_1, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
   memcpy(arch_RAT, arch_RAT_1, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
 
@@ -367,8 +383,9 @@ void Ren ::seq() {
   // memcpy(free_vec_flush, free_vec, PRF_NUM);
 
   memcpy(spec_RAT_normal, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
-  // memcpy(spec_RAT_flush, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
-  // memcpy(spec_RAT_mispred, spec_RAT, (ARF_NUM + 1) * sizeof(reg<PRF_IDX_WIDTH>));
+  // memcpy(spec_RAT_flush, spec_RAT, (ARF_NUM + 1) *
+  // sizeof(reg<PRF_IDX_WIDTH>)); memcpy(spec_RAT_mispred, spec_RAT, (ARF_NUM +
+  // 1) * sizeof(reg<PRF_IDX_WIDTH>));
   memcpy(busy_table_awake, busy_table, PRF_NUM * sizeof(wire<1>));
 }
 
@@ -376,7 +393,7 @@ RenIO Ren::get_hardware_io() {
   RenIO hardware;
 
   // --- Inputs ---
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     hardware.from_dec.valid[i] = in.dec2ren->valid[i];
     // Reconstruct DecRenUop from full InstUop
     hardware.from_dec.uop[i] = DecRenUop::filter(in.dec2ren->uop[i]);
@@ -401,7 +418,7 @@ RenIO Ren::get_hardware_io() {
 
   // --- Outputs ---
   hardware.to_dec.ready = out.ren2dec->ready;
-  for (int i = 0; i < FETCH_WIDTH; i++) {
+  for (int i = 0; i < DECODE_WIDTH; i++) {
     hardware.to_dis.valid[i] = out.ren2dis->valid[i];
     hardware.to_dis.uop[i] = RenDisUop::filter(out.ren2dis->uop[i]);
   }
