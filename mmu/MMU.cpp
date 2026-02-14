@@ -13,6 +13,7 @@ using namespace mmu_n;
 namespace {
 
 constexpr bool kDelayedLookup = (MMU_TLB_LOOKUP_LATENCY > 0);
+constexpr bool kLookupFromInput = (MMU_TLB_LOOKUP_FROM_INPUT != 0);
 constexpr reg16_t kLookupDelayInit =
     kDelayedLookup ? static_cast<reg16_t>(MMU_TLB_LOOKUP_LATENCY - 1) : 0;
 
@@ -61,6 +62,45 @@ LookupResult<N> lookup_table(const std::array<TLBEntry, N> &table, wire20_t vtag
 inline void fill_lookup_entry_fields(const TLBEntry &entry,
                                      tlb_module_n::TLB_lookup_in_t &lookup_in,
                                      bool ifu, uint32_t port = 0) {
+  if (ifu) {
+    lookup_in.ifu_lookup_vpn1 = static_cast<wire10_t>(entry.vpn1);
+    lookup_in.ifu_lookup_vpn0 = static_cast<wire10_t>(entry.vpn0);
+    lookup_in.ifu_lookup_ppn1 = static_cast<wire12_t>(entry.ppn1);
+    lookup_in.ifu_lookup_ppn0 = static_cast<wire10_t>(entry.ppn0);
+    lookup_in.ifu_lookup_asid = static_cast<wire9_t>(entry.asid);
+    lookup_in.ifu_lookup_megapage = entry.megapage;
+    lookup_in.ifu_lookup_dirty = entry.dirty;
+    lookup_in.ifu_lookup_accessed = entry.accessed;
+    lookup_in.ifu_lookup_global = entry.global;
+    lookup_in.ifu_lookup_user = entry.user;
+    lookup_in.ifu_lookup_execute = entry.execute;
+    lookup_in.ifu_lookup_write = entry.write;
+    lookup_in.ifu_lookup_read = entry.read;
+    lookup_in.ifu_lookup_valid = entry.valid;
+    lookup_in.ifu_lookup_pte_valid = entry.pte_valid;
+    return;
+  }
+
+  lookup_in.lsu_lookup_vpn1[port] = static_cast<wire10_t>(entry.vpn1);
+  lookup_in.lsu_lookup_vpn0[port] = static_cast<wire10_t>(entry.vpn0);
+  lookup_in.lsu_lookup_ppn1[port] = static_cast<wire12_t>(entry.ppn1);
+  lookup_in.lsu_lookup_ppn0[port] = static_cast<wire10_t>(entry.ppn0);
+  lookup_in.lsu_lookup_asid[port] = static_cast<wire9_t>(entry.asid);
+  lookup_in.lsu_lookup_megapage[port] = entry.megapage;
+  lookup_in.lsu_lookup_dirty[port] = entry.dirty;
+  lookup_in.lsu_lookup_accessed[port] = entry.accessed;
+  lookup_in.lsu_lookup_global[port] = entry.global;
+  lookup_in.lsu_lookup_user[port] = entry.user;
+  lookup_in.lsu_lookup_execute[port] = entry.execute;
+  lookup_in.lsu_lookup_write[port] = entry.write;
+  lookup_in.lsu_lookup_read[port] = entry.read;
+  lookup_in.lsu_lookup_valid[port] = entry.valid;
+  lookup_in.lsu_lookup_pte_valid[port] = entry.pte_valid;
+}
+
+inline void fill_lookup_entry_fields_from_external(
+    const mmu_tlb_lookup_entry_t &entry, tlb_module_n::TLB_lookup_in_t &lookup_in,
+    bool ifu, uint32_t port = 0) {
   if (ifu) {
     lookup_in.ifu_lookup_vpn1 = static_cast<wire10_t>(entry.vpn1);
     lookup_in.ifu_lookup_vpn0 = static_cast<wire10_t>(entry.vpn0);
@@ -303,10 +343,23 @@ void MMU::comb_frontend() {
 
   auto &lookup_in = itlb_mod.io.lookup_in;
   lookup_in = {};
-  if (!kDelayedLookup) {
+  lookup_in.refill_victim_valid = io.in.itlb_lookup_in.refill_victim_valid;
+  lookup_in.refill_victim_index =
+      static_cast<wire6_t>(io.in.itlb_lookup_in.refill_victim_index);
+  if (kLookupFromInput) {
     if (in.ifu_req_valid) {
-      auto result =
-          lookup_table(itlb_table, in.ifu_req_vtag, in.satp_asid);
+      lookup_in.ifu_lookup_resp_valid = io.in.itlb_lookup_in.lookup_resp_valid;
+      lookup_in.ifu_lookup_hit = io.in.itlb_lookup_in.lookup_hit;
+      lookup_in.ifu_lookup_hit_index =
+          static_cast<wire6_t>(io.in.itlb_lookup_in.lookup_hit_index);
+      if (io.in.itlb_lookup_in.lookup_hit) {
+        fill_lookup_entry_fields_from_external(io.in.itlb_lookup_in.lookup_entry,
+                                               lookup_in, true);
+      }
+    }
+  } else if (!kDelayedLookup) {
+    if (in.ifu_req_valid) {
+      auto result = lookup_table(itlb_table, in.ifu_req_vtag, in.satp_asid);
       lookup_in.ifu_lookup_resp_valid = true;
       lookup_in.ifu_lookup_hit = result.hit;
       lookup_in.ifu_lookup_hit_index = result.hit_index;
@@ -417,7 +470,25 @@ void MMU::comb_backend() {
 
   auto &lookup_in = dtlb_mod.io.lookup_in;
   lookup_in = {};
+  lookup_in.refill_victim_valid = io.in.dtlb_lookup_in.refill_victim_valid;
+  lookup_in.refill_victim_index =
+      static_cast<wire6_t>(io.in.dtlb_lookup_in.refill_victim_index);
   for (int i = 0; i < MAX_LSU_REQ_NUM; ++i) {
+    if (kLookupFromInput) {
+      if (!in.lsu_req_valid[i]) {
+        continue;
+      }
+      lookup_in.lsu_lookup_resp_valid[i] = io.in.dtlb_lookup_in.lookup_resp_valid[i];
+      lookup_in.lsu_lookup_hit[i] = io.in.dtlb_lookup_in.lookup_hit[i];
+      lookup_in.lsu_lookup_hit_index[i] =
+          static_cast<wire6_t>(io.in.dtlb_lookup_in.lookup_hit_index[i]);
+      if (io.in.dtlb_lookup_in.lookup_hit[i]) {
+        fill_lookup_entry_fields_from_external(io.in.dtlb_lookup_in.lookup_entry[i],
+                                               lookup_in, false, i);
+      }
+      continue;
+    }
+
     if (!kDelayedLookup) {
       if (!in.lsu_req_valid[i]) {
         continue;

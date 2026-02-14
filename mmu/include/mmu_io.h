@@ -92,6 +92,45 @@ struct tlb_flush_t {
   uint32_t flush_asid; // 用于 sfence.vma 的 ASID
 };
 
+// External TLB lookup payload (entry fields from regfile/SRAM backend).
+struct mmu_tlb_lookup_entry_t {
+  uint32_t vpn1;
+  uint32_t vpn0;
+  uint32_t ppn1;
+  uint32_t ppn0;
+  uint32_t asid;
+  bool megapage;
+  bool dirty;
+  bool accessed;
+  bool global;
+  bool user;
+  bool execute;
+  bool write;
+  bool read;
+  bool valid;
+  bool pte_valid;
+};
+
+struct mmu_itlb_lookup_in_t {
+  bool refill_victim_valid;
+  uint32_t refill_victim_index;
+
+  bool lookup_resp_valid;
+  bool lookup_hit;
+  uint32_t lookup_hit_index;
+  mmu_tlb_lookup_entry_t lookup_entry;
+};
+
+struct mmu_dtlb_lookup_in_t {
+  bool refill_victim_valid;
+  uint32_t refill_victim_index;
+
+  bool lookup_resp_valid[MAX_LSU_REQ_NUM];
+  bool lookup_hit[MAX_LSU_REQ_NUM];
+  uint32_t lookup_hit_index[MAX_LSU_REQ_NUM];
+  mmu_tlb_lookup_entry_t lookup_entry[MAX_LSU_REQ_NUM];
+};
+
 // mmu_request & mmu_response interface (master + slave)
 struct mmu_req_master_t {
   bool valid;                 // 请求是否有效
@@ -221,6 +260,13 @@ struct MMU_in_t {
    */
   mmu_state_t state;
   tlb_flush_t tlb_flush;
+
+  /*
+   * Optional external lookup input for TLB modules.
+   * Effective when MMU_TLB_LOOKUP_FROM_INPUT is enabled.
+   */
+  mmu_itlb_lookup_in_t itlb_lookup_in;
+  mmu_dtlb_lookup_in_t dtlb_lookup_in;
 };
 
 struct MMU_out_t {
