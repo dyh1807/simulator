@@ -73,11 +73,12 @@ int main() {
 
   auto &port = intlv.read_ports[axi_interconnect::MASTER_ICACHE];
   bool accepted = false;
+  bool ar_issued = false;
   bool responded = false;
 
   for (int cycle = 0; cycle < 4000 && !responded; cycle++) {
     clear_master_inputs(intlv);
-    if (!accepted) {
+    if (!ar_issued) {
       port.req.valid = true;
       port.req.addr = 0x1000;
       port.req.total_size = 31;
@@ -93,15 +94,16 @@ int main() {
     ddr.comb_inputs();
 
     accepted = accepted || (port.req.valid && port.req.ready);
+    ar_issued = ar_issued || (intlv.axi_io.ar.arvalid && intlv.axi_io.ar.arready);
     responded = port.resp.valid;
 
     ddr.seq();
     intlv.seq();
   }
 
-  if (!accepted || !responded) {
-    std::printf("AXI4 smoke demo failed: accepted=%d responded=%d\n",
-                accepted ? 1 : 0, responded ? 1 : 0);
+  if (!accepted || !ar_issued || !responded) {
+    std::printf("AXI4 smoke demo failed: accepted=%d ar_issued=%d responded=%d\n",
+                accepted ? 1 : 0, ar_issued ? 1 : 0, responded ? 1 : 0);
     return 1;
   }
 

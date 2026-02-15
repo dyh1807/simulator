@@ -16,6 +16,9 @@
 #include "SimDDR_AXI3.h"
 #else
 #include "AXI_Interconnect.h"
+#include "AXI_Router_AXI4.h"
+#include "MMIO_Bus_AXI4.h"
+#include "UART16550_Device.h"
 #include "SimDDR.h"
 #endif
 #include <config.h>
@@ -32,11 +35,9 @@ public:
   // Initialize subsystem
   void init() {
     interconnect.init();
-#ifndef USE_SIM_DDR_AXI4
     router.init();
     mmio.init();
     mmio.add_device(UART_BASE, 0x1000, &uart0);
-#endif
     ddr.init();
     clear_inputs();
   }
@@ -53,27 +54,10 @@ public:
 
     // First get DDR/MMIO outputs for interconnect
     ddr.comb_outputs();
-#ifndef USE_SIM_DDR_AXI4
     mmio.comb_outputs();
-#endif
 
-#ifndef USE_SIM_DDR_AXI4
     // Route DDR/MMIO responses to interconnect inputs via router
     router.comb_outputs(interconnect.axi_io, ddr.io, mmio.io);
-#else
-    // Wire DDR responses to interconnect inputs
-    interconnect.axi_io.ar.arready = ddr.io.ar.arready;
-    interconnect.axi_io.r.rvalid = ddr.io.r.rvalid;
-    interconnect.axi_io.r.rid = ddr.io.r.rid;
-    interconnect.axi_io.r.rdata = ddr.io.r.rdata;
-    interconnect.axi_io.r.rlast = ddr.io.r.rlast;
-    interconnect.axi_io.r.rresp = ddr.io.r.rresp;
-    interconnect.axi_io.aw.awready = ddr.io.aw.awready;
-    interconnect.axi_io.w.wready = ddr.io.w.wready;
-    interconnect.axi_io.b.bvalid = ddr.io.b.bvalid;
-    interconnect.axi_io.b.bid = ddr.io.b.bid;
-    interconnect.axi_io.b.bresp = ddr.io.b.bresp;
-#endif
 
     // Now run interconnect output phase
     interconnect.comb_outputs();
@@ -85,42 +69,12 @@ public:
     // Run interconnect input phase (arbiter, write request)
     interconnect.comb_inputs();
 
-#ifndef USE_SIM_DDR_AXI4
     // Route interconnect -> DDR/MMIO inputs via router
     router.comb_inputs(interconnect.axi_io, ddr.io, mmio.io);
-#else
-    // Wire interconnect to DDR inputs
-    ddr.io.ar.arvalid = interconnect.axi_io.ar.arvalid;
-    ddr.io.ar.araddr = interconnect.axi_io.ar.araddr;
-    ddr.io.ar.arid = interconnect.axi_io.ar.arid;
-    ddr.io.ar.arlen = interconnect.axi_io.ar.arlen;
-    ddr.io.ar.arsize = interconnect.axi_io.ar.arsize;
-    ddr.io.ar.arburst = interconnect.axi_io.ar.arburst;
-
-    ddr.io.aw.awvalid = interconnect.axi_io.aw.awvalid;
-    ddr.io.aw.awaddr = interconnect.axi_io.aw.awaddr;
-    ddr.io.aw.awid = interconnect.axi_io.aw.awid;
-    ddr.io.aw.awlen = interconnect.axi_io.aw.awlen;
-    ddr.io.aw.awsize = interconnect.axi_io.aw.awsize;
-    ddr.io.aw.awburst = interconnect.axi_io.aw.awburst;
-
-    ddr.io.w.wvalid = interconnect.axi_io.w.wvalid;
-    ddr.io.w.wdata = interconnect.axi_io.w.wdata;
-    ddr.io.w.wstrb = interconnect.axi_io.w.wstrb;
-    ddr.io.w.wlast = interconnect.axi_io.w.wlast;
-#ifndef USE_SIM_DDR_AXI4
-    ddr.io.w.wid = interconnect.axi_io.w.wid;
-#endif
-
-    ddr.io.r.rready = interconnect.axi_io.r.rready;
-    ddr.io.b.bready = interconnect.axi_io.b.bready;
-#endif
 
     // Run DDR input phase
     ddr.comb_inputs();
-#ifndef USE_SIM_DDR_AXI4
     mmio.comb_inputs();
-#endif
   }
 
   // Convenience wrapper (for tests that don't need two-phase)
@@ -132,10 +86,8 @@ public:
   // Sequential logic (call in main loop after comb)
   void seq() {
     ddr.seq();
-#ifndef USE_SIM_DDR_AXI4
     mmio.seq();
     router.seq(interconnect.axi_io, ddr.io, mmio.io);
-#endif
     interconnect.seq();
   }
 
@@ -195,6 +147,9 @@ private:
 #ifdef USE_SIM_DDR_AXI4
   axi_interconnect::AXI_Interconnect interconnect;
   sim_ddr::SimDDR ddr;
+  axi_interconnect::AXI_Router_AXI4 router;
+  mmio::MMIO_Bus_AXI4 mmio;
+  mmio::UART16550_Device uart0{UART_BASE};
 #else
   axi_interconnect::AXI_Interconnect_AXI3 interconnect;
   sim_ddr_axi3::SimDDR_AXI3 ddr;

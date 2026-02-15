@@ -16,10 +16,19 @@ set(AXI_KIT_INCLUDE_DIRS
 
 add_library(axi_kit_axi4 STATIC
     axi_interconnect/AXI_Interconnect.cpp
+    axi_interconnect/AXI_Router_AXI4.cpp
     sim_ddr/SimDDR.cpp
+    mmio/MMIO_Bus_AXI4.cpp
+    mmio/UART16550_Device.cpp
 )
 target_include_directories(axi_kit_axi4 PUBLIC ${AXI_KIT_INCLUDE_DIRS})
 target_compile_features(axi_kit_axi4 PUBLIC cxx_std_20)
+if(AXI_KIT_BUILD_TESTS)
+  target_compile_definitions(axi_kit_axi4 PRIVATE
+      MMIO_TEST_BASE=0x200000
+      MMIO_TEST_SIZE=0x1000
+  )
+endif()
 
 add_library(axi_kit_axi3 STATIC
     axi_interconnect/AXI_Interconnect_AXI3.cpp
@@ -50,6 +59,15 @@ if(AXI_KIT_BUILD_TESTS)
   )
   target_link_libraries(axi_interconnect_test PRIVATE axi_kit_axi4)
 
+  add_executable(mmio_router_axi4_test
+      mmio/mmio_router_axi4_test.cpp
+  )
+  target_compile_definitions(mmio_router_axi4_test PRIVATE
+      MMIO_TEST_BASE=0x200000
+      MMIO_TEST_SIZE=0x1000
+  )
+  target_link_libraries(mmio_router_axi4_test PRIVATE axi_kit_axi4)
+
   add_executable(sim_ddr_axi3_test
       sim_ddr/sim_ddr_axi3_test.cpp
   )
@@ -75,6 +93,7 @@ if(AXI_KIT_BUILD_TESTS)
 
   add_test(NAME sim_ddr_test COMMAND sim_ddr_test)
   add_test(NAME axi_interconnect_test COMMAND axi_interconnect_test)
+  add_test(NAME mmio_router_axi4_test COMMAND mmio_router_axi4_test)
   add_test(NAME sim_ddr_axi3_test COMMAND sim_ddr_axi3_test)
   add_test(NAME axi_interconnect_axi3_test COMMAND axi_interconnect_axi3_test)
   add_test(NAME mmio_router_axi3_test COMMAND mmio_router_axi3_test)
