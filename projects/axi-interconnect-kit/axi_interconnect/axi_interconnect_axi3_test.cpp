@@ -13,7 +13,7 @@
 
 #include "AXI_Interconnect_AXI3.h"
 #include "SimDDR_AXI3.h"
-#include <mmio_map.h>
+#include "axi_mmio_map.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -309,10 +309,11 @@ static bool test_read_multi_master_offsets(TestEnv &env,
       {.master = axi_interconnect::MASTER_MMU, .addr = 0x1004, .total_size = 3, .id = 0xA},
       {.master = axi_interconnect::MASTER_DCACHE_R, .addr = 0x201C, .total_size = 7, .id = 0x7},
       {.master = axi_interconnect::MASTER_ICACHE, .addr = 0x3008, .total_size = 31, .id = 0x3},
+      {.master = axi_interconnect::MASTER_EXTRA_R, .addr = 0x380C, .total_size = 15, .id = 0x4},
   };
 
-  bool accepted[axi_interconnect::NUM_READ_MASTERS] = {false, false, false};
-  bool done[axi_interconnect::NUM_READ_MASTERS] = {false, false, false};
+  bool accepted[axi_interconnect::NUM_READ_MASTERS] = {};
+  bool done[axi_interconnect::NUM_READ_MASTERS] = {};
   int timeout = sim_ddr_axi3::SIM_DDR_AXI3_LATENCY * 400;
   while (timeout-- > 0) {
     bool all_done = true;

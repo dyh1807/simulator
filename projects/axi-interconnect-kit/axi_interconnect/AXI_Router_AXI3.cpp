@@ -4,7 +4,7 @@
  */
 
 #include "AXI_Router_AXI3.h"
-#include <mmio_map.h>
+#include "axi_mmio_map.h"
 
 namespace axi_interconnect {
 

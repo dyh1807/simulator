@@ -11,7 +11,7 @@
  * - No narrow bursts (AWSIZE/ARSIZE must be 32B)
  */
 
-#include <config.h>
+#include "axi_interconnect_compat.h"
 #include <cstdint>
 
 namespace sim_ddr_axi3 {

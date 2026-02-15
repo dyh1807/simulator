@@ -13,7 +13,7 @@
 
 #include "AXI_Interconnect_IO.h"
 #include "SimDDR_IO.h"
-#include <config.h>
+#include "axi_interconnect_compat.h"
 #include <queue>
 #include <vector>
 
@@ -75,6 +75,8 @@ struct WritePendingTxn {
 
 class AXI_Interconnect {
 public:
+  AXI_Interconnect() : write_port(write_ports[MASTER_DCACHE_W]) {}
+
   void init();
 
   // Two-phase combinational logic for proper signal timing
@@ -91,7 +93,9 @@ public:
 
   // Upstream IO (Masters)
   ReadMasterPort_t read_ports[NUM_READ_MASTERS];
-  WriteMasterPort_t write_port;
+  WriteMasterPort_t write_ports[NUM_WRITE_MASTERS];
+  // Backward-compatible alias to the primary write master.
+  WriteMasterPort_t &write_port;
 
   // Downstream IO (to SimDDR)
   sim_ddr::SimDDR_IO_t axi_io;
@@ -106,7 +110,9 @@ private:
   uint32_t r_pending_age[NUM_READ_MASTERS];
   bool r_pending_warned[NUM_READ_MASTERS];
   bool req_drop_warned[NUM_READ_MASTERS];
-  bool w_req_ready_r;
+  uint8_t w_arb_rr_idx;
+  int w_current_master;
+  bool w_req_ready_r[NUM_WRITE_MASTERS];
 
   // AR latch for AXI compliance
   ARLatch_t ar_latched;
@@ -117,9 +123,9 @@ private:
   // Write state
   bool w_active;
   WritePendingTxn w_current;
-  bool w_resp_valid;
-  uint8_t w_resp_id;
-  uint8_t w_resp_resp;
+  bool w_resp_valid[NUM_WRITE_MASTERS];
+  uint8_t w_resp_id[NUM_WRITE_MASTERS];
+  uint8_t w_resp_resp[NUM_WRITE_MASTERS];
 
   // AW latch for AXI compliance
   AWLatch_t aw_latched;

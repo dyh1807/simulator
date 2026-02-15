@@ -153,7 +153,11 @@ public:
   }
 
   axi_interconnect::WriteMasterPort_t &dcache_write_port() {
-    return interconnect.write_port;
+    return interconnect.write_ports[axi_interconnect::MASTER_DCACHE_W];
+  }
+
+  axi_interconnect::WriteMasterPort_t &extra_write_port() {
+    return interconnect.write_ports[axi_interconnect::MASTER_EXTRA_W];
   }
 
   // Debug print for stall diagnosis
@@ -167,6 +171,15 @@ public:
              interconnect.read_ports[i].req.addr,
              interconnect.read_ports[i].resp.valid,
              interconnect.read_ports[i].resp.ready);
+    }
+    for (int i = 0; i < axi_interconnect::NUM_WRITE_MASTERS; i++) {
+      printf("  write_port[%d]: req_v=%d req_rdy=%d addr=0x%08x resp_v=%d "
+             "resp_rdy=%d\n",
+             i, interconnect.write_ports[i].req.valid,
+             interconnect.write_ports[i].req.ready,
+             interconnect.write_ports[i].req.addr,
+             interconnect.write_ports[i].resp.valid,
+             interconnect.write_ports[i].resp.ready);
     }
     printf("  axi_io: arvalid=%d arready=%d rvalid=%d rready=%d\n",
            interconnect.axi_io.ar.arvalid, interconnect.axi_io.ar.arready,
@@ -199,13 +212,15 @@ private:
       interconnect.read_ports[i].req.id = 0;
       interconnect.read_ports[i].resp.ready = false;
     }
-    interconnect.write_port.req.valid = false;
-    interconnect.write_port.req.addr = 0;
-    interconnect.write_port.req.wdata.clear();
-    interconnect.write_port.req.wstrb = 0;
-    interconnect.write_port.req.total_size = 0;
-    interconnect.write_port.req.id = 0;
-    interconnect.write_port.resp.ready = false;
+    for (int i = 0; i < axi_interconnect::NUM_WRITE_MASTERS; i++) {
+      interconnect.write_ports[i].req.valid = false;
+      interconnect.write_ports[i].req.addr = 0;
+      interconnect.write_ports[i].req.wdata.clear();
+      interconnect.write_ports[i].req.wstrb = 0;
+      interconnect.write_ports[i].req.total_size = 0;
+      interconnect.write_ports[i].req.id = 0;
+      interconnect.write_ports[i].resp.ready = false;
+    }
   }
 };
 

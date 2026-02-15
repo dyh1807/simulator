@@ -33,10 +33,8 @@ void AXI_Interconnect::init() {
 
   w_active = false;
   w_current = {};
-  w_req_ready_r = false;
-  w_resp_valid = false;
-  w_resp_id = 0;
-  w_resp_resp = 0;
+  w_arb_rr_idx = 0;
+  w_current_master = -1;
 
   // Clear AW latch
   aw_latched.valid = false;
@@ -60,10 +58,16 @@ void AXI_Interconnect::init() {
     read_ports[i].resp.data.clear();
     read_ports[i].resp.id = 0;
   }
-  write_port.req.ready = false;
-  write_port.resp.valid = false;
-  write_port.resp.id = 0;
-  write_port.resp.resp = 0;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    write_ports[i].req.ready = false;
+    write_ports[i].resp.valid = false;
+    write_ports[i].resp.id = 0;
+    write_ports[i].resp.resp = 0;
+    w_req_ready_r[i] = false;
+    w_resp_valid[i] = false;
+    w_resp_id[i] = 0;
+    w_resp_resp[i] = 0;
+  }
 
   axi_io.ar.arvalid = false;
   axi_io.ar.arid = 0;
@@ -109,7 +113,13 @@ void AXI_Interconnect::comb_outputs() {
   }
 
   // Registered write req.ready (two-phase timing)
-  write_port.req.ready = w_req_ready_r;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    write_ports[i].req.ready = w_req_ready_r[i];
+  }
+  if (aw_latched.valid && w_current_master >= 0 &&
+      w_current_master < NUM_WRITE_MASTERS) {
+    write_ports[w_current_master].req.ready = true;
+  }
 }
 
 // Phase 2: Input signals from masters (run AFTER cpu.cycle())
@@ -255,11 +265,15 @@ void AXI_Interconnect::comb_read_response() {
 // Write Request with Latched AW (AXI Compliant)
 // ============================================================================
 void AXI_Interconnect::comb_write_request() {
-  bool w_req_ready_curr = w_req_ready_r;
-  w_req_ready_r = false;
-
-  if (w_req_ready_curr && !write_port.req.valid && DEBUG) {
-    printf("[axi] write ready without valid (drop)\n");
+  bool w_req_ready_curr[NUM_WRITE_MASTERS];
+  bool any_w_resp_valid = false;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    w_req_ready_curr[i] = w_req_ready_r[i];
+    w_req_ready_r[i] = false;
+    any_w_resp_valid = any_w_resp_valid || w_resp_valid[i];
+    if (w_req_ready_curr[i] && !write_ports[i].req.valid && DEBUG) {
+      printf("[axi] write ready without valid (drop) master=%d\n", i);
+    }
   }
 
   axi_io.w.wvalid = false;
@@ -275,11 +289,39 @@ void AXI_Interconnect::comb_write_request() {
   } else {
     axi_io.aw.awvalid = false;
 
+    // If a write master saw ready in previous cycle and keeps valid,
+    // prioritize issuing its AW now.
+    if (!w_active && !any_w_resp_valid) {
+      for (int k = 0; k < NUM_WRITE_MASTERS; k++) {
+        int idx = (w_arb_rr_idx + k) % NUM_WRITE_MASTERS;
+        if (!w_req_ready_curr[idx] || !write_ports[idx].req.valid) {
+          continue;
+        }
+        w_current_master = idx;
+        axi_io.aw.awvalid = true;
+        axi_io.aw.awaddr = write_ports[idx].req.addr;
+        axi_io.aw.awlen = calc_burst_len(write_ports[idx].req.total_size);
+        axi_io.aw.awsize = 2;
+        axi_io.aw.awburst = sim_ddr::AXI_BURST_INCR;
+        axi_io.aw.awid = ((idx & 0x1) << 3) | (write_ports[idx].req.id & 0x7);
+        write_ports[idx].req.ready = true;
+        return;
+      }
+    }
+
     // Ready-first handshake: raise req.ready one cycle before accepting.
-    // write_port.req.ready is driven from w_req_ready_r in comb_outputs().
-    if (!w_active && !w_resp_valid && write_port.req.valid &&
-        !w_req_ready_curr) {
-      w_req_ready_r = true;
+    if (!w_active && !any_w_resp_valid) {
+      for (int k = 0; k < NUM_WRITE_MASTERS; k++) {
+        int idx = (w_arb_rr_idx + k) % NUM_WRITE_MASTERS;
+        if (!write_ports[idx].req.valid) {
+          continue;
+        }
+        if (!w_req_ready_curr[idx]) {
+          w_req_ready_r[idx] = true;
+          write_ports[idx].req.ready = true;
+          break;
+        }
+      }
     }
   }
 
@@ -293,12 +335,16 @@ void AXI_Interconnect::comb_write_request() {
 }
 
 void AXI_Interconnect::comb_write_response() {
-  write_port.resp.valid = w_resp_valid;
-  write_port.resp.id = w_resp_id;
-  write_port.resp.resp = w_resp_resp;
+  bool any_w_resp_valid = false;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    write_ports[i].resp.valid = w_resp_valid[i];
+    write_ports[i].resp.id = w_resp_id[i];
+    write_ports[i].resp.resp = w_resp_resp[i];
+    any_w_resp_valid = any_w_resp_valid || w_resp_valid[i];
+  }
 
   // Backpressure DDR if upstream hasn't consumed the response yet.
-  axi_io.b.bready = !w_resp_valid;
+  axi_io.b.bready = !any_w_resp_valid;
 }
 
 // ============================================================================
@@ -398,25 +444,35 @@ void AXI_Interconnect::seq() {
   // ========== Write Channel ==========
 
   // Accept new write request
-  if (!w_active && write_port.req.valid && write_port.req.ready) {
-    w_active = true;
-    w_current.master_id = MASTER_DCACHE_W;
-    w_current.orig_id = write_port.req.id;
-    w_current.addr = write_port.req.addr;
-    w_current.wdata = write_port.req.wdata;
-    w_current.wstrb = write_port.req.wstrb;
-    w_current.total_beats = calc_burst_len(write_port.req.total_size) + 1;
-    w_current.beats_sent = 0;
-    w_current.aw_done = false;
-    w_current.w_done = false;
+  if (!w_active) {
+    for (int k = 0; k < NUM_WRITE_MASTERS; k++) {
+      int idx = (w_arb_rr_idx + k) % NUM_WRITE_MASTERS;
+      if (!write_ports[idx].req.valid || !write_ports[idx].req.ready) {
+        continue;
+      }
+      w_active = true;
+      w_current.master_id = idx;
+      w_current.orig_id = write_ports[idx].req.id;
+      w_current.addr = write_ports[idx].req.addr;
+      w_current.wdata = write_ports[idx].req.wdata;
+      w_current.wstrb = write_ports[idx].req.wstrb;
+      w_current.total_beats =
+          calc_burst_len(write_ports[idx].req.total_size) + 1;
+      w_current.beats_sent = 0;
+      w_current.aw_done = false;
+      w_current.w_done = false;
+      w_current_master = idx;
 
-    // Immediately latch AW (will stay valid until awready)
-    aw_latched.valid = true;
-    aw_latched.addr = w_current.addr;
-    aw_latched.len = w_current.total_beats - 1;
-    aw_latched.size = 2;
-    aw_latched.burst = sim_ddr::AXI_BURST_INCR;
-    aw_latched.id = (MASTER_DCACHE_W << 2) | (w_current.orig_id & 0x3);
+      // Immediately latch AW (will stay valid until awready)
+      aw_latched.valid = true;
+      aw_latched.addr = w_current.addr;
+      aw_latched.len = w_current.total_beats - 1;
+      aw_latched.size = 2;
+      aw_latched.burst = sim_ddr::AXI_BURST_INCR;
+      aw_latched.id = ((idx & 0x1) << 3) | (w_current.orig_id & 0x7);
+      w_arb_rr_idx = (idx + 1) % NUM_WRITE_MASTERS;
+      break;
+    }
   }
 
   // AW handshake
@@ -435,16 +491,24 @@ void AXI_Interconnect::seq() {
 
   // B handshake
   if (axi_io.b.bvalid && axi_io.b.bready) {
-    w_resp_valid = true;
-    w_resp_id = axi_io.b.bid & 0x3;
-    w_resp_resp = axi_io.b.bresp;
+    uint8_t master = (axi_io.b.bid >> 3) & 0x1;
+    if (master < NUM_WRITE_MASTERS) {
+      w_resp_valid[master] = true;
+      w_resp_id[master] = axi_io.b.bid & 0x7;
+      w_resp_resp[master] = axi_io.b.bresp;
+    }
   }
 
   // Upstream response handshake (only one write outstanding is supported)
-  if (write_port.resp.valid && write_port.resp.ready) {
-    w_resp_valid = false;
+  if (w_current.master_id < NUM_WRITE_MASTERS &&
+      write_ports[w_current.master_id].resp.valid &&
+      write_ports[w_current.master_id].resp.ready) {
+    w_resp_valid[w_current.master_id] = false;
+    w_resp_id[w_current.master_id] = 0;
+    w_resp_resp[w_current.master_id] = 0;
     w_active = false;
     w_current = {};
+    w_current_master = -1;
   }
 }
 

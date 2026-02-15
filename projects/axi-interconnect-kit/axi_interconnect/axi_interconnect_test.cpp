@@ -225,7 +225,7 @@ bool test_read_multi_master_var_sizes(TestEnv &env) {
   env.intlv.init();
   env.ddr.init();
 
-  // master 0: 4B (1 beat), master 1: 8B (2 beats), master 2: 32B (8 beats)
+  // master 0: 4B, master 1: 8B, master 2: 32B, master 3: 16B
   struct Req {
     uint8_t master;
     uint32_t addr;
@@ -236,6 +236,7 @@ bool test_read_multi_master_var_sizes(TestEnv &env) {
       {.master = 0, .addr = 0x1000, .total_size = 3, .id = 0},
       {.master = 1, .addr = 0x2000, .total_size = 7, .id = 1},
       {.master = 2, .addr = 0x3000, .total_size = 31, .id = 2},
+      {.master = 3, .addr = 0x3400, .total_size = 15, .id = 3},
   };
 
   for (const auto &r : reqs) {
@@ -245,7 +246,7 @@ bool test_read_multi_master_var_sizes(TestEnv &env) {
     }
   }
 
-  bool issued[axi_interconnect::NUM_READ_MASTERS] = {false, false, false};
+  bool issued[axi_interconnect::NUM_READ_MASTERS] = {};
   int issue_timeout = 200;
   while (issue_timeout-- > 0) {
     bool all = true;
@@ -318,7 +319,7 @@ bool test_read_multi_master_var_sizes(TestEnv &env) {
   }
 
   // Wait for all responses (may arrive out-of-order)
-  bool done[axi_interconnect::NUM_READ_MASTERS] = {false, false, false};
+  bool done[axi_interconnect::NUM_READ_MASTERS] = {};
   int resp_timeout = sim_ddr::SIM_DDR_LATENCY * 40;
   while (resp_timeout-- > 0) {
     bool all = true;

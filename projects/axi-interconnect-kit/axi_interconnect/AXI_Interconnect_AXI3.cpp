@@ -4,7 +4,7 @@
  */
 
 #include "AXI_Interconnect_AXI3.h"
-#include <mmio_map.h>
+#include "axi_mmio_map.h"
 #include <cstdio>
 
 namespace axi_interconnect {
@@ -53,6 +53,8 @@ void AXI_Interconnect_AXI3::store_le32(uint8_t *p, uint32_t v) {
 
 void AXI_Interconnect_AXI3::init() {
   r_arb_rr_idx = 0;
+  w_arb_rr_idx = 0;
+  w_current_master = -1;
 
   for (int i = 0; i < NUM_READ_MASTERS; i++) {
     req_ready_r[i] = false;
@@ -62,11 +64,16 @@ void AXI_Interconnect_AXI3::init() {
     read_ports[i].resp.id = 0;
   }
 
-  w_req_ready_r = false;
-  write_port.req.ready = false;
-  write_port.resp.valid = false;
-  write_port.resp.id = 0;
-  write_port.resp.resp = 0;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    w_req_ready_r[i] = false;
+    write_ports[i].req.ready = false;
+    write_ports[i].resp.valid = false;
+    write_ports[i].resp.id = 0;
+    write_ports[i].resp.resp = 0;
+    w_resp_valid[i] = false;
+    w_resp_id[i] = 0;
+    w_resp_resp[i] = 0;
+  }
 
   // Downstream defaults
   axi_io.ar.arvalid = false;
@@ -108,10 +115,6 @@ void AXI_Interconnect_AXI3::init() {
   r_beats[0].clear();
   r_beats[1].clear();
 
-  w_resp_valid = false;
-  w_resp_id = 0;
-  w_resp_resp = 0;
-
   w_active = false;
   w_axi_id = 0;
   w_total_beats = 0;
@@ -140,7 +143,9 @@ void AXI_Interconnect_AXI3::comb_outputs() {
     }
   }
 
-  write_port.req.ready = w_req_ready_r;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    write_ports[i].req.ready = w_req_ready_r[i];
+  }
 }
 
 void AXI_Interconnect_AXI3::comb_inputs() {
@@ -289,11 +294,15 @@ void AXI_Interconnect_AXI3::comb_read_response() {
 }
 
 void AXI_Interconnect_AXI3::comb_write_request() {
-  bool w_req_ready_curr = w_req_ready_r;
-  w_req_ready_r = false;
-
-  if (w_req_ready_curr && !write_port.req.valid && DEBUG) {
-    printf("[axi3] write ready without valid (drop)\n");
+  bool w_req_ready_curr[NUM_WRITE_MASTERS];
+  bool any_w_resp_valid = false;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    w_req_ready_curr[i] = w_req_ready_r[i];
+    w_req_ready_r[i] = false;
+    any_w_resp_valid = any_w_resp_valid || w_resp_valid[i];
+    if (w_req_ready_curr[i] && !write_ports[i].req.valid && DEBUG) {
+      printf("[axi3] write ready without valid (drop) master=%d\n", i);
+    }
   }
 
   // Drive AW from latch until handshake.
@@ -308,8 +317,17 @@ void AXI_Interconnect_AXI3::comb_write_request() {
     axi_io.aw.awvalid = false;
 
     // Ready-first for upstream write request; block when busy or resp pending.
-    if (!w_active && !w_resp_valid && write_port.req.valid && !w_req_ready_curr) {
-      w_req_ready_r = true;
+    if (!w_active && !any_w_resp_valid) {
+      for (int k = 0; k < NUM_WRITE_MASTERS; k++) {
+        int idx = (w_arb_rr_idx + k) % NUM_WRITE_MASTERS;
+        if (!write_ports[idx].req.valid) {
+          continue;
+        }
+        if (!w_req_ready_curr[idx]) {
+          w_req_ready_r[idx] = true;
+          break;
+        }
+      }
     }
   }
 
@@ -327,18 +345,25 @@ void AXI_Interconnect_AXI3::comb_write_request() {
 }
 
 void AXI_Interconnect_AXI3::comb_write_response() {
-  write_port.resp.valid = w_resp_valid;
-  write_port.resp.id = w_resp_id;
-  write_port.resp.resp = w_resp_resp;
+  bool any_w_resp_valid = false;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    write_ports[i].resp.valid = w_resp_valid[i];
+    write_ports[i].resp.id = w_resp_id[i];
+    write_ports[i].resp.resp = w_resp_resp[i];
+    any_w_resp_valid = any_w_resp_valid || w_resp_valid[i];
+  }
 
-  axi_io.b.bready = !w_resp_valid;
+  axi_io.b.bready = !any_w_resp_valid;
 }
 
 void AXI_Interconnect_AXI3::seq() {
   // Capture previous-cycle visibility for robust upstream handshakes.
   // (Prevents clearing a response in the same cycle it is produced.)
   bool r_resp_valid_curr = r_resp_valid;
-  bool w_resp_valid_curr = w_resp_valid;
+  bool w_resp_valid_curr[NUM_WRITE_MASTERS];
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    w_resp_valid_curr[i] = w_resp_valid[i];
+  }
 
   // Upstream read response handshake
   if (r_resp_valid_curr && r_resp_master < NUM_READ_MASTERS &&
@@ -348,13 +373,22 @@ void AXI_Interconnect_AXI3::seq() {
   }
 
   // Upstream write response handshake
-  if (w_resp_valid_curr && write_port.resp.valid && write_port.resp.ready) {
-    w_resp_valid = false;
-    w_active = false;
-    w_aw_done = false;
-    w_w_done = false;
-    w_total_beats = 0;
-    w_beats_sent = 0;
+  for (int i = 0; i < NUM_WRITE_MASTERS; i++) {
+    if (!w_resp_valid_curr[i] || !write_ports[i].resp.valid ||
+        !write_ports[i].resp.ready) {
+      continue;
+    }
+    w_resp_valid[i] = false;
+    w_resp_id[i] = 0;
+    w_resp_resp[i] = 0;
+    if (w_current_master == i) {
+      w_active = false;
+      w_aw_done = false;
+      w_w_done = false;
+      w_total_beats = 0;
+      w_beats_sent = 0;
+      w_current_master = -1;
+    }
   }
 
   // ========== AR latch ==========
@@ -432,45 +466,52 @@ void AXI_Interconnect_AXI3::seq() {
   }
 
   // ========== Accept new write request ==========
-  if (!w_active && write_port.req.valid && write_port.req.ready) {
-    uint32_t req_addr = write_port.req.addr;
-    uint8_t total_size = write_port.req.total_size;
-    uint8_t offset = req_addr & 0x1F;
-    bool is_mmio = is_mmio_addr(req_addr);
-    uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
-    uint8_t beats = 0;
-    if (is_mmio) {
-      if ((offset + bytes) > sim_ddr_axi3::AXI_DATA_BYTES) {
-        if (DEBUG) {
-          printf("[axi3] mmio write spans beats addr=0x%08x size=%u\n", req_addr,
-                 total_size);
+  if (!w_active) {
+    for (int k = 0; k < NUM_WRITE_MASTERS; k++) {
+      int idx = (w_arb_rr_idx + k) % NUM_WRITE_MASTERS;
+      const auto &req = write_ports[idx].req;
+      if (!req.valid || !req.ready) {
+        continue;
+      }
+
+      uint32_t req_addr = req.addr;
+      uint8_t total_size = req.total_size;
+      uint8_t offset = req_addr & 0x1F;
+      bool is_mmio = is_mmio_addr(req_addr);
+      uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
+      uint8_t beats = 0;
+      if (is_mmio) {
+        if ((offset + bytes) > sim_ddr_axi3::AXI_DATA_BYTES) {
+          if (DEBUG) {
+            printf("[axi3] mmio write spans beats addr=0x%08x size=%u\n", req_addr,
+                   total_size);
+          }
+          continue;
         }
-      } else {
         beats = 1;
+      } else {
+        beats = calc_total_beats(offset, total_size);
       }
-    } else {
-      beats = calc_total_beats(offset, total_size);
-    }
-    if (beats == 0 || beats > 2) {
-      if (DEBUG) {
-        printf("[axi3] invalid write beats=%u addr=0x%08x size=%u\n", beats,
-               req_addr, total_size);
+      if (beats == 0 || beats > 2) {
+        if (DEBUG) {
+          printf("[axi3] invalid write beats=%u addr=0x%08x size=%u\n", beats,
+                 req_addr, total_size);
+        }
+        continue;
       }
-    } else {
+
       uint32_t aligned_addr = req_addr & ~0x1Fu;
-      uint32_t axi_id =
-          make_axi_id(MASTER_DCACHE_W, write_port.req.id, offset, total_size);
+      uint32_t axi_id = make_axi_id(idx, req.id, offset, total_size);
 
       uint8_t in_bytes[32] = {0};
       for (int w = 0; w < CACHELINE_WORDS; w++) {
-        store_le32(in_bytes + (w * 4), write_port.req.wdata[w]);
+        store_le32(in_bytes + (w * 4), req.wdata[w]);
       }
 
       uint8_t beat_bytes[2][32] = {{0}};
       uint32_t beat_strb[2] = {0, 0};
-      uint32_t bytes = static_cast<uint32_t>(total_size) + 1;
       for (uint32_t i = 0; i < bytes && i < 32; i++) {
-        if (((write_port.req.wstrb >> i) & 1u) == 0) {
+        if (((req.wstrb >> i) & 1u) == 0) {
           continue;
         }
         uint32_t dst = static_cast<uint32_t>(offset) + i;
@@ -497,6 +538,8 @@ void AXI_Interconnect_AXI3::seq() {
       w_beats_sent = 0;
       w_aw_done = false;
       w_w_done = false;
+      w_current_master = idx;
+      w_arb_rr_idx = (idx + 1) % NUM_WRITE_MASTERS;
 
       aw_latched.valid = true;
       aw_latched.addr = aligned_addr;
@@ -505,6 +548,7 @@ void AXI_Interconnect_AXI3::seq() {
       aw_latched.burst =
           is_mmio ? sim_ddr_axi3::AXI_BURST_FIXED : sim_ddr_axi3::AXI_BURST_INCR;
       aw_latched.id = axi_id;
+      break;
     }
   }
 
@@ -526,9 +570,11 @@ void AXI_Interconnect_AXI3::seq() {
   if (axi_io.b.bvalid && axi_io.b.bready) {
     uint8_t master = 0, orig = 0, off = 0, ts = 0;
     decode_axi_id(axi_io.b.bid, master, orig, off, ts);
-    w_resp_valid = true;
-    w_resp_id = orig;
-    w_resp_resp = axi_io.b.bresp;
+    if (master < NUM_WRITE_MASTERS) {
+      w_resp_valid[master] = true;
+      w_resp_id[master] = orig;
+      w_resp_resp[master] = axi_io.b.bresp;
+    }
   }
 
 }
@@ -536,7 +582,7 @@ void AXI_Interconnect_AXI3::seq() {
 void AXI_Interconnect_AXI3::debug_print() {
   printf("  interconnect_axi3: r_active=%d r_resp=%d ar_latched=%d "
          "w_active=%d w_resp=%d aw_latched=%d\n",
-         r_active, r_resp_valid, ar_latched.valid, w_active, w_resp_valid,
+         r_active, r_resp_valid, ar_latched.valid, w_active, w_resp_valid[0],
          aw_latched.valid);
 }
 

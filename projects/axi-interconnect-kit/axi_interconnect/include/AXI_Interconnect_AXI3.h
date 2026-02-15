@@ -4,8 +4,8 @@
  * @brief AXI-Interconnect (CPU-side ports) -> constrained AXI3 (256-bit) bridge
  *
  * Keeps the same upstream (CPU-side) simplified ports as AXI_Interconnect:
- * - 3 read masters (icache/dcache/mmu)
- * - 1 write master (dcache)
+ * - 4 read masters
+ * - 2 write masters
  *
  * Downstream targets a constrained AXI3 controller:
  * - 256-bit data beats only (SIZE=5)
@@ -16,13 +16,15 @@
 
 #include "AXI_Interconnect_IO.h"
 #include "SimDDR_AXI3_IO.h"
-#include <config.h>
+#include "axi_interconnect_compat.h"
 #include <cstdint>
 
 namespace axi_interconnect {
 
 class AXI_Interconnect_AXI3 {
 public:
+  AXI_Interconnect_AXI3() : write_port(write_ports[MASTER_DCACHE_W]) {}
+
   void init();
 
   // Two-phase combinational logic
@@ -38,7 +40,9 @@ public:
 
   // Upstream ports (same as existing interconnect)
   ReadMasterPort_t read_ports[NUM_READ_MASTERS];
-  WriteMasterPort_t write_port;
+  WriteMasterPort_t write_ports[NUM_WRITE_MASTERS];
+  // Backward-compatible alias to the primary write master.
+  WriteMasterPort_t &write_port;
 
   // Downstream AXI3 IO
   sim_ddr_axi3::SimDDR_AXI3_IO_t axi_io;
@@ -46,7 +50,9 @@ public:
 private:
   // Registered req.ready pulses
   bool req_ready_r[NUM_READ_MASTERS];
-  bool w_req_ready_r;
+  bool w_req_ready_r[NUM_WRITE_MASTERS];
+  uint8_t w_arb_rr_idx;
+  int w_current_master;
 
   // Round-robin for reads
   uint8_t r_arb_rr_idx;
@@ -74,10 +80,10 @@ private:
     uint32_t id;
   } ar_latched;
 
-  // Write response register
-  bool w_resp_valid;
-  uint8_t w_resp_id;
-  uint8_t w_resp_resp;
+  // Write response registers
+  bool w_resp_valid[NUM_WRITE_MASTERS];
+  uint8_t w_resp_id[NUM_WRITE_MASTERS];
+  uint8_t w_resp_resp[NUM_WRITE_MASTERS];
 
   // Active write transaction tracking (no interleaving)
   bool w_active;
@@ -117,4 +123,3 @@ private:
 };
 
 } // namespace axi_interconnect
-

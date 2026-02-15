@@ -9,7 +9,7 @@
  * - ID for out-of-order response routing
  */
 
-#include <config.h>
+#include "axi_interconnect_compat.h"
 #include <cstdint>
 
 namespace axi_interconnect {
@@ -17,8 +17,8 @@ namespace axi_interconnect {
 // ============================================================================
 // Configuration
 // ============================================================================
-constexpr uint8_t NUM_READ_MASTERS = 3;  // icache, dcache, mmu
-constexpr uint8_t NUM_WRITE_MASTERS = 1; // dcache only
+constexpr uint8_t NUM_READ_MASTERS = 4;  // icache, dcache, mmu, extra
+constexpr uint8_t NUM_WRITE_MASTERS = 2; // dcache + extra
 constexpr uint8_t MAX_OUTSTANDING = 8;
 constexpr uint8_t CACHELINE_WORDS = 8; // 256-bit = 8 x 32-bit
 
@@ -26,7 +26,10 @@ constexpr uint8_t CACHELINE_WORDS = 8; // 256-bit = 8 x 32-bit
 constexpr uint8_t MASTER_ICACHE = 0;
 constexpr uint8_t MASTER_DCACHE_R = 1;
 constexpr uint8_t MASTER_MMU = 2;
-constexpr uint8_t MASTER_DCACHE_W = 3;
+constexpr uint8_t MASTER_EXTRA_R = 3;
+
+constexpr uint8_t MASTER_DCACHE_W = 0;
+constexpr uint8_t MASTER_EXTRA_W = 1;
 
 // ============================================================================
 // Wide Data Type (256-bit = 8 x 32-bit words)
@@ -71,7 +74,7 @@ struct ReadMasterPort_t {
 };
 
 // ============================================================================
-// Write Master Interface (for dcache only)
+// Write Master Interface
 // ============================================================================
 
 // Write Request: Master → Interleaver (AW+W combined)
@@ -107,8 +110,8 @@ struct AXI_Interconnect_IO_t {
   // Upstream: Read Masters (3 ports)
   ReadMasterPort_t read_masters[NUM_READ_MASTERS];
 
-  // Upstream: Write Master (1 port - dcache)
-  WriteMasterPort_t write_master;
+  // Upstream: Write Masters (2 ports)
+  WriteMasterPort_t write_masters[NUM_WRITE_MASTERS];
 
   // Downstream: AXI4 to SimDDR
   // (Use SimDDR_IO_t from sim_ddr module)

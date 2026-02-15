@@ -7,7 +7,7 @@
 #include "MMIO_Bus_AXI3.h"
 #include "SimDDR_AXI3.h"
 #include "UART16550_Device.h"
-#include <mmio_map.h>
+#include "axi_mmio_map.h"
 #include <cstdio>
 #include <cstring>
 #include <iostream>

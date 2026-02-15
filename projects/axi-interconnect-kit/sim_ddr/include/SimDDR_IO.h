@@ -11,7 +11,7 @@
  * - Read Data (R): Slave -> Master
  */
 
-#include <config.h>
+#include "axi_interconnect_compat.h"
 
 namespace sim_ddr {
 
