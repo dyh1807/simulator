@@ -7,67 +7,64 @@
 #pragma once
 #include <config.h>
 #include <cstdint>
-#include <TLBEntry.h>
 
-#define MAX_LSU_REQ_NUM 4  // 支持 LSU 同时发起的最大地址翻译请求数
+#define MAX_LSU_REQ_NUM 4 // 支持 LSU 同时发起的最大地址翻译请求数
 
 namespace mmu_n {
-  /*
-   * AXI Channel States
-   */
-  enum channel_state {
-    AXI_IDLE, // 空闲状态
-    AXI_BUSY, // 忙碌状态
-  };
+/*
+ * AXI Channel States
+ */
+enum channel_state {
+  AXI_IDLE, // 空闲状态
+  AXI_BUSY, // 忙碌状态
+};
 
-  /*
-   * Machine Privilege Levels
-   */
-  enum Privilege {
-    M_MODE = 3, // Machine Mode
-    S_MODE = 1, // Supervisor Mode
-    U_MODE = 0  // User Mode
-  };
+/*
+ * Machine Privilege Levels
+ */
+enum Privilege {
+  M_MODE = 3, // Machine Mode
+  S_MODE = 1, // Supervisor Mode
+  U_MODE = 0  // User Mode
+};
 
-  /*
-   * Operation Types
-   */
-  enum MMU_OP_TYPE {
-    OP_FETCH = 0, // 执行 (fetch)
-    OP_LOAD = 1,  // 读 (load)
-    OP_STORE = 2  // 写 (store)
-  };
+/*
+ * Operation Types
+ */
+enum MMU_OP_TYPE {
+  OP_FETCH = 0, // 执行 (fetch)
+  OP_LOAD = 1,  // 读 (load)
+  OP_STORE = 2  // 写 (store)
+};
 
-  /*
-   * SATP Modes
-   */
-  enum SATP_MODE {
-    MODE_BARE = 0, // Bare mode
-    MODE_SV32 = 1  // Sv32 mode
-  };
+/*
+ * SATP Modes
+ */
+enum SATP_MODE {
+  MODE_BARE = 0, // Bare mode
+  MODE_SV32 = 1  // Sv32 mode
+};
 
-}
+enum TLB_DEST {
+  DEST_ITLB = 0,
+  DEST_DTLB = 1
+};
+
+#define ITLB_SIZE 32
+#define DTLB_SIZE 32
+
+} // namespace mmu_n
 
 /*
  * MMU Inner Module connections
  *  - PTW: Page Table Walker
  *  - TLB: Translation Lookaside Buffer
  */
-struct PTW_to_TLB {
-  bool write_valid;   // PTW 命中，需要写入 MMU // 设计时，保证下一拍写入
-  TLBEntry entry; // 准备填入的 TLB 条目
-};
-
 struct TLB_to_PTW {
-  bool tlb_miss; // TLB 未命中，需要访问页表（PTW）
-  uint32_t vpn1; // 虚拟页号一级索引
-  uint32_t vpn0; // 虚拟页号二级索引
+  bool tlb_miss;              // TLB 未命中，需要访问页表（PTW）
+  uint32_t vpn1;              // 虚拟页号一级索引
+  uint32_t vpn0;              // 虚拟页号二级索引
   mmu_n::MMU_OP_TYPE op_type; // TLB 失效对应的操作类型（读/写/INST）
-};
-
-struct TLB_IO_PTW {
-  TLB_to_PTW *tlb2ptw; // TLB 到 PTW 的接口
-  PTW_to_TLB *ptw2tlb; // PTW 到 TLB 的接口
 };
 
 /*
@@ -76,29 +73,68 @@ struct TLB_IO_PTW {
  *  - MMU <-> Backend (LSU/DCache/CSR)
  */
 struct satp_t {
-  uint32_t ppn : 22;   // Page Table Base Address
-  uint32_t asid : 9;   // ASID (Address Space Identifier)
-  uint32_t mode : 1;   // 0: Bare, 1: Sv32
+  uint32_t ppn : 22; // Page Table Base Address
+  uint32_t asid : 9; // ASID (Address Space Identifier)
+  uint32_t mode : 1; // 0: Bare, 1: Sv32
 };
 
 struct mmu_state_t {
-  satp_t satp;      // Current satp register value
-  uint32_t mstatus; // Current mstatus register value
-  uint32_t sstatus; // Current sstatus register value
+  satp_t satp;                // Current satp register value
+  uint32_t mstatus;           // Current mstatus register value
+  uint32_t sstatus;           // Current sstatus register value
   mmu_n::Privilege privilege; // Current privilege level
 };
 
 // Flush 接口
 struct tlb_flush_t {
-  bool flush_valid;     // 是否有效
-  uint32_t flush_vpn;   // 用于 sfence.vma 的虚拟页号
-  uint32_t flush_asid;  // 用于 sfence.vma 的 ASID
+  bool flush_valid;    // 是否有效
+  uint32_t flush_vpn;  // 用于 sfence.vma 的虚拟页号
+  uint32_t flush_asid; // 用于 sfence.vma 的 ASID
+};
+
+// External TLB lookup payload (entry fields from regfile/SRAM backend).
+struct mmu_tlb_lookup_entry_t {
+  uint32_t vpn1;
+  uint32_t vpn0;
+  uint32_t ppn1;
+  uint32_t ppn0;
+  uint32_t asid;
+  bool megapage;
+  bool dirty;
+  bool accessed;
+  bool global;
+  bool user;
+  bool execute;
+  bool write;
+  bool read;
+  bool valid;
+  bool pte_valid;
+};
+
+struct mmu_itlb_lookup_in_t {
+  bool refill_victim_valid;
+  uint32_t refill_victim_index;
+
+  bool lookup_resp_valid;
+  bool lookup_hit;
+  uint32_t lookup_hit_index;
+  mmu_tlb_lookup_entry_t lookup_entry;
+};
+
+struct mmu_dtlb_lookup_in_t {
+  bool refill_victim_valid;
+  uint32_t refill_victim_index;
+
+  bool lookup_resp_valid[MAX_LSU_REQ_NUM];
+  bool lookup_hit[MAX_LSU_REQ_NUM];
+  uint32_t lookup_hit_index[MAX_LSU_REQ_NUM];
+  mmu_tlb_lookup_entry_t lookup_entry[MAX_LSU_REQ_NUM];
 };
 
 // mmu_request & mmu_response interface (master + slave)
 struct mmu_req_master_t {
-  bool valid;    // 请求是否有效
-  uint32_t vtag; // 请求的虚拟页号
+  bool valid;                 // 请求是否有效
+  uint32_t vtag;              // 请求的虚拟页号
   mmu_n::MMU_OP_TYPE op_type; // 请求的操作类型
 };
 
@@ -107,23 +143,23 @@ struct mmu_req_slave_t {
 };
 
 struct mmu_resp_master_t {
-  bool valid;     // miss/hit 响应是否有效
-  bool excp;      // 响应是否产生异常
-  bool miss;      // TLB 未命中
-  uint32_t ptag;  // 命中时返回的物理页号
-                  // (20/22 bits for 32/34-bit address)
+  bool valid;    // miss/hit 响应是否有效
+  bool excp;     // 响应是否产生异常
+  bool miss;     // TLB 未命中
+  uint32_t ptag; // 命中时返回的物理页号
+                 // (20/22 bits for 32/34-bit address)
 };
 
 struct mmu_resp_slave_t {
   // 是否准备好接收响应
   // (always true for current blocking and non-blocking design)
-  bool ready; 
+  bool ready;
 };
 
 // dcache_request & dcache_response interface
 struct dcache_req_master_t {
-  bool valid;       // 请求是否有效
-  uint32_t paddr;  // 请求的物理地址
+  bool valid;     // 请求是否有效
+  uint32_t paddr; // 请求的物理地址
 };
 
 struct dcache_req_slave_t {
@@ -131,13 +167,32 @@ struct dcache_req_slave_t {
 };
 
 struct dcache_resp_master_t {
-  bool valid;      // 响应是否有效
-  bool miss;       // 未命中 DCache
-  uint32_t data;   // 命中时返回的数据(32-bit PTE)
+  bool valid;    // 响应是否有效
+  bool miss;     // 未命中 DCache
+  uint32_t data; // 命中时返回的数据(32-bit PTE)
 };
 
 struct dcache_resp_slave_t {
   bool ready; // 是否准备好接收响应
+};
+
+// main memory request & response interface (for PTW)
+struct ptw_mem_req_master_t {
+  bool valid;
+  uint32_t paddr;
+};
+
+struct ptw_mem_req_slave_t {
+  bool ready;
+};
+
+struct ptw_mem_resp_master_t {
+  bool valid;
+  uint32_t data;
+};
+
+struct ptw_mem_resp_slave_t {
+  bool ready;
 };
 
 struct MMU_in_t {
@@ -158,7 +213,7 @@ struct MMU_in_t {
    *  2. 各个请求/响应通道采用独立的多组 ready/valid 信号握手
    *  3. 支持同一个周期内，LSU 同时发起多个地址翻译请求
    *  4. 某个周期发起的请求，恰好在下一个周期得到响应(valid 拉高)；LSU 在
-   *     完成 REQ 通道的 valid＆ready 握手后，需要将 RESP 通道的 ready 
+   *     完成 REQ 通道的 valid＆ready 握手后，需要将 RESP 通道的 ready
    *     信号拉高（表示准备好接收响应）
    *  5. RESP 通道的 valid 信号拉高时， 出现 miss 或 hit 都表示有效的响
    *     应；hit 可以分为正常命中和异常命中(excp=0/1)，LSU 应当能够接受
@@ -180,10 +235,10 @@ struct MMU_in_t {
    * 约定：
    *  1. MMU 向 DCache 发送的请求地址是物理地址，不需要再做虚实地址转换
    *  2. REQ 通道和 RESP 通道分别有独立的 ready/valid 信号
-   *  3. DCache 可以不命中 MMU 的请求，且未命中时只需要把 RESP 通道的 
+   *  3. DCache 可以不命中 MMU 的请求，且未命中时只需要把 RESP 通道的
    *     valid 信号和 miss 信号均置为有效，不需要再从内存加载到 Dcache
    *  4. 请求读取的数据规模为 32-bit (PTE 大小)
-   *  5. 出现异常/中断/分支预测错误等情况需要清空对应的流水线时，MMU 取消对 
+   *  5. 出现异常/中断/分支预测错误等情况需要清空对应的流水线时，MMU 取消对
    *     DCache 的未完成请求，DCache 根据清空流水线信号取消对应请求的处理
    *      (具体而言：如果以状态机维护 REQ/RESP 通道的状态，则将状态机复位到
    *       初始状态)
@@ -193,13 +248,25 @@ struct MMU_in_t {
    */
   dcache_req_slave_t mmu_dcache_req;
   dcache_resp_master_t mmu_dcache_resp;
-  
+
+  /*
+   * Main Memory -> MMU (for PTW)
+   */
+  ptw_mem_req_slave_t mmu_mem_req;
+  ptw_mem_resp_master_t mmu_mem_resp;
+
   /*
    * Backend -> MMU
    */
   mmu_state_t state;
   tlb_flush_t tlb_flush;
 
+  /*
+   * Optional external lookup input for TLB modules.
+   * Effective when MMU_TLB_LOOKUP_FROM_INPUT is enabled.
+   */
+  mmu_itlb_lookup_in_t itlb_lookup_in;
+  mmu_dtlb_lookup_in_t dtlb_lookup_in;
 };
 
 struct MMU_out_t {
@@ -221,6 +288,11 @@ struct MMU_out_t {
   dcache_req_master_t mmu_dcache_req;
   dcache_resp_slave_t mmu_dcache_resp;
 
+  /*
+   * MMU -> Main Memory (for PTW)
+   */
+  ptw_mem_req_master_t mmu_mem_req;
+  ptw_mem_resp_slave_t mmu_mem_resp;
 };
 
 struct MMU_IO_t {

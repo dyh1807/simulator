@@ -4,6 +4,77 @@
 #include <cstdlib> // For exit()
 #include <cstring> // Added for memset
 
+#ifndef WIRE_REG_TYPES_DEFINED
+#define WIRE_REG_TYPES_DEFINED
+using wire1_t = bool;
+using wire2_t = uint8_t;
+using wire3_t = uint8_t;
+using wire4_t = uint8_t;
+using wire5_t = uint8_t;
+using wire6_t = uint8_t;
+using wire7_t = uint8_t;
+using wire8_t = uint8_t;
+using wire9_t = uint16_t;
+using wire10_t = uint16_t;
+using wire11_t = uint16_t;
+using wire12_t = uint16_t;
+using wire13_t = uint16_t;
+using wire14_t = uint16_t;
+using wire15_t = uint16_t;
+using wire16_t = uint16_t;
+using wire17_t = uint32_t;
+using wire18_t = uint32_t;
+using wire19_t = uint32_t;
+using wire20_t = uint32_t;
+using wire21_t = uint32_t;
+using wire22_t = uint32_t;
+using wire23_t = uint32_t;
+using wire24_t = uint32_t;
+using wire25_t = uint32_t;
+using wire26_t = uint32_t;
+using wire27_t = uint32_t;
+using wire28_t = uint32_t;
+using wire29_t = uint32_t;
+using wire30_t = uint32_t;
+using wire31_t = uint32_t;
+using wire32_t = uint32_t;
+using wire64_t = uint64_t;
+
+using reg1_t = bool;
+using reg2_t = uint8_t;
+using reg3_t = uint8_t;
+using reg4_t = uint8_t;
+using reg5_t = uint8_t;
+using reg6_t = uint8_t;
+using reg7_t = uint8_t;
+using reg8_t = uint8_t;
+using reg9_t = uint16_t;
+using reg10_t = uint16_t;
+using reg11_t = uint16_t;
+using reg12_t = uint16_t;
+using reg13_t = uint16_t;
+using reg14_t = uint16_t;
+using reg15_t = uint16_t;
+using reg16_t = uint16_t;
+using reg17_t = uint32_t;
+using reg18_t = uint32_t;
+using reg19_t = uint32_t;
+using reg20_t = uint32_t;
+using reg21_t = uint32_t;
+using reg22_t = uint32_t;
+using reg23_t = uint32_t;
+using reg24_t = uint32_t;
+using reg25_t = uint32_t;
+using reg26_t = uint32_t;
+using reg27_t = uint32_t;
+using reg28_t = uint32_t;
+using reg29_t = uint32_t;
+using reg30_t = uint32_t;
+using reg31_t = uint32_t;
+using reg32_t = uint32_t;
+using reg64_t = uint64_t;
+#endif
+
 // Helper to compute log2 at compile time
 constexpr int clog2(uint64_t n) {
   int res = 0;
@@ -18,6 +89,10 @@ constexpr int clog2(uint64_t n) {
 
 #ifndef ICACHE_MISS_LATENCY
 #define ICACHE_MISS_LATENCY 50
+#endif
+
+#ifndef PTW_MEM_LATENCY
+#define PTW_MEM_LATENCY 100
 #endif
 
 #ifndef MAX_COMMIT_INST

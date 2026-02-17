@@ -39,7 +39,7 @@ INCLUDES := -I./include/ \
 CXXSRC := $(shell find ./back-end -name "*.cpp") \
           $(shell find ./front-end -name "*.cpp") \
           $(shell find ./diff -name "*.cpp") \
-          $(shell find ./mmu -name "*.cpp") \
+          $(shell find ./mmu -name "*.cpp" ! -name "PTW.cpp" ! -name "TLB.cpp") \
           ./main.cpp \
           ./rv_simu_mmu_v2.cpp
 
