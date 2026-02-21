@@ -3,7 +3,6 @@ a.out
 /build/
 *.o
 *.d
-*.a
 *.so
 *.out
 

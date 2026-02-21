@@ -303,7 +303,9 @@ void Ren ::comb_commit() {
         arch_RAT_1[inst->dest_areg] = inst->dest_preg;
       }
       ctx->run_commit_inst(&in.rob_commit->commit_entry[i]);
+#ifdef CONFIG_DIFFTEST
       ctx->run_difftest_inst(&in.rob_commit->commit_entry[i]);
+#endif
     }
   }
 }

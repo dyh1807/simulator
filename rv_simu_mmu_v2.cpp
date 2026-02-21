@@ -1,7 +1,6 @@
 #include "AbstractLsu.h"
 #include "BackTop.h"
 #include "Csr.h"
-#include "RISCV.h"
 #include "SimCpu.h"
 #include "config.h"
 #include "diff.h"
@@ -15,7 +14,6 @@
 
 uint32_t *p_memory;
 
-namespace {
 constexpr int BR_DIRECT = 0;
 constexpr int BR_CALL = 1;
 constexpr int BR_RET = 2;
@@ -23,43 +21,43 @@ constexpr int BR_IDIRECT = 3;
 constexpr int BR_NONCTL = 4;
 constexpr int BR_JAL = 5;
 
-void simcpu_commit_sync(SimCpu *cpu, InstInfo *inst) {
-  BackTop *back = &cpu->back;
+void SimCpu::commit_sync(InstInfo *inst) {
+  BackTop *back = &this->back;
   if (inst->type == JALR) {
     if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
-      cpu->ctx.perf.ret_br_num++;
+      this->ctx.perf.ret_br_num++;
     } else {
-      cpu->ctx.perf.jalr_br_num++;
+      this->ctx.perf.jalr_br_num++;
     }
   } else if (inst->type == BR) {
-    cpu->ctx.perf.cond_br_num++;
+    this->ctx.perf.cond_br_num++;
   }
 
   if (inst->mispred) {
     if (inst->type == JALR) {
       if (inst->src1_areg == 1 && inst->dest_areg == 0 && inst->imm == 0) {
-        cpu->ctx.perf.ret_mispred_num++;
+        this->ctx.perf.ret_mispred_num++;
         bool pred_taken = false;
         FTQEntry &entry = back->idu->out.ftq_lookup->entries[inst->ftq_idx];
         if (entry.valid) {
           pred_taken = entry.pred_taken_mask[inst->ftq_offset];
         }
         if (!pred_taken) {
-          cpu->ctx.perf.ret_dir_mispred++;
+          this->ctx.perf.ret_dir_mispred++;
         } else {
-          cpu->ctx.perf.ret_addr_mispred++;
+          this->ctx.perf.ret_addr_mispred++;
         }
       } else {
-        cpu->ctx.perf.jalr_mispred_num++;
+        this->ctx.perf.jalr_mispred_num++;
         bool pred_taken = false;
         FTQEntry &entry = back->idu->out.ftq_lookup->entries[inst->ftq_idx];
         if (entry.valid) {
           pred_taken = entry.pred_taken_mask[inst->ftq_offset];
         }
         if (!pred_taken) {
-          cpu->ctx.perf.jalr_dir_mispred++;
+          this->ctx.perf.jalr_dir_mispred++;
         } else {
-          cpu->ctx.perf.jalr_addr_mispred++;
+          this->ctx.perf.jalr_addr_mispred++;
         }
       }
     } else if (inst->type == BR) {
@@ -69,28 +67,26 @@ void simcpu_commit_sync(SimCpu *cpu, InstInfo *inst) {
         pred_taken = entry.pred_taken_mask[inst->ftq_offset];
       }
       if (pred_taken != inst->br_taken) {
-        cpu->ctx.perf.cond_dir_mispred++;
+        this->ctx.perf.cond_dir_mispred++;
       } else {
-        cpu->ctx.perf.cond_addr_mispred++;
+        this->ctx.perf.cond_addr_mispred++;
       }
-      cpu->ctx.perf.cond_mispred_num++;
+      this->ctx.perf.cond_mispred_num++;
     }
   }
 
   if (is_store(*inst) && !inst->page_fault_store) {
     StqEntry e = back->lsu->get_stq_entry(inst->stq_idx);
-    cpu->mem_subsystem.on_commit_store(e.p_addr, e.data);
+    this->mem_subsystem.on_commit_store(e.p_addr, e.data);
   }
 }
 
-bool simcpu_difftest_prepare(SimCpu *cpu, InstEntry *inst_entry, bool *skip) {
-  if (cpu == nullptr || inst_entry == nullptr || skip == nullptr) {
-    return false;
-  }
-  BackTop *back = &cpu->back;
+void SimCpu::difftest_prepare(InstEntry *inst_entry, bool *skip) {
+  Assert(inst_entry != nullptr && "SimCpu::difftest_prepare: inst_entry is null");
+  Assert(skip != nullptr && "SimCpu::difftest_prepare: skip is null");
+  BackTop *back = &this->back;
   InstInfo *inst = &inst_entry->uop;
 
-#ifdef CONFIG_DIFFTEST
   for (int i = 0; i < ARF_NUM; i++) {
     dut_cpu.gpr[i] = back->prf->reg_file[back->rename->arch_RAT_1[i]];
   }
@@ -125,28 +121,25 @@ bool simcpu_difftest_prepare(SimCpu *cpu, InstEntry *inst_entry, bool *skip) {
   dut_cpu.page_fault_store = inst->page_fault_store;
   dut_cpu.inst_idx = inst->inst_idx;
   *skip = inst->difftest_skip;
-#else
-  *skip = false;
-#endif
-  return true;
 }
-} // namespace
 
 void SimContext::run_commit_inst(InstEntry *inst_entry) {
-  if (cpu == nullptr || inst_entry == nullptr || !inst_entry->valid) {
-    return;
-  }
-  simcpu_commit_sync(cpu, &inst_entry->uop);
+  Assert(cpu != nullptr && "SimContext::run_commit_inst: cpu is null");
+  Assert(inst_entry != nullptr &&
+         "SimContext::run_commit_inst: inst_entry is null");
+  Assert(inst_entry->valid &&
+         "SimContext::run_commit_inst: inst_entry is not valid");
+  cpu->commit_sync(&inst_entry->uop);
 }
 
 void SimContext::run_difftest_inst(InstEntry *inst_entry) {
-  if (cpu == nullptr || inst_entry == nullptr || !inst_entry->valid) {
-    return;
-  }
+  Assert(cpu != nullptr && "SimContext::run_difftest_inst: cpu is null");
+  Assert(inst_entry != nullptr &&
+         "SimContext::run_difftest_inst: inst_entry is null");
+  Assert(inst_entry->valid &&
+         "SimContext::run_difftest_inst: inst_entry is not valid");
   bool skip = false;
-  if (!simcpu_difftest_prepare(cpu, inst_entry, &skip)) {
-    return;
-  }
+  cpu->difftest_prepare(inst_entry, &skip);
   if (skip) {
     difftest_skip();
   } else {
@@ -279,11 +272,6 @@ void SimCpu::front_cycle() {
     front.in.FIFO_read_enable = false;
     front.in.refetch = false;
     front.step_bpu();
-#else
-    // Oracle 路径在后端阻塞时不能推进：
-    // 当前 oracle 模型没有额外缓冲，推进会导致该拍取到的指令无人接收而丢失。
-    front.in.FIFO_read_enable = false;
-    front.in.refetch = false;
 #endif
   }
 }

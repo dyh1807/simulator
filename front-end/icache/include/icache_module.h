@@ -30,7 +30,7 @@ namespace icache_module_n {
 enum ICacheState {
   IDLE,         // Idle state
   SWAP_IN,      // Swapping in state
-  SWAP_IN_OKAY, // Swapping in successful
+  SWAP_IN_OKEY, // Swapping in successful
 };
 // AXI Memory Channel State
 enum AXIState {

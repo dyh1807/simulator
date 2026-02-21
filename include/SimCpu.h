@@ -19,4 +19,7 @@ public:
   void front_cycle();
   void back2front_comb();
   uint32_t get_reg(uint8_t arch_idx) { return back.get_reg(arch_idx); }
+  // 由 SimContext 在提交路径调用的本地辅助逻辑。
+  void commit_sync(InstInfo *inst);
+  void difftest_prepare(InstEntry *inst_entry, bool *skip);
 };
