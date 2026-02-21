@@ -8,7 +8,7 @@ RESULT = .result
 $(shell > $(RESULT))
 
 # Find all test names based on .c files in cpu-tests/
-ALL ?= $(basename $(notdir $(shell find cpu-tests -name "*.c")))
+ALL ?= $(sort $(basename $(notdir $(shell find cpu-tests -name "*.c"))))
 
 .PHONY: all list run clean help $(ALL)
 
@@ -29,6 +29,11 @@ list:
 # Run all tests
 run: $(ALL)
 	@cat $(RESULT)
+	@if grep -q "\*\*\*FAIL\*\*\*" $(RESULT); then \
+		echo "Some tests failed."; \
+		rm -f $(RESULT); \
+		exit 1; \
+	fi
 	@rm -f $(RESULT)
 
 # Rule for individual tests

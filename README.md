@@ -58,7 +58,7 @@ make
 ## 4. 测试程序与基准测试
 测试程序位于 `baremetal/` 目录下，主要分为：
 
-- **小程序测试集**：位于 `baremetal/test/cpu-tests`，共 35 个功能测试用例。
+- **小程序测试集**：位于 `baremetal/test/cpu-tests`，共 38 个功能测试用例。
   - 运行方式：在 `baremetal/test` 目录下执行 `make run`。
 - **性能基准测试**：包含 **Coremark** (`baremetal/new_coremark`) 与 **Dhrystone** (`baremetal/new_dhrystone`)。
 
