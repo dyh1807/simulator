@@ -235,7 +235,7 @@ void ICache::comb_pipe2() {
     io.out.mem_req_valid = false;
     io.out.mem_resp_ready = false;
     // only accept new ppn when pipe2 is not holding valid data
-    io.out.ppn_ready = pipe1_to_pipe2.valid_r;
+    io.out.ppn_ready = !pipe1_to_pipe2.valid_r;
     break;
 
   case SWAP_IN:
@@ -246,7 +246,7 @@ void ICache::comb_pipe2() {
       io.out.mem_req_valid = true;
       io.out.mem_req_addr =
           (ppn_r << 12) | (pipe1_to_pipe2.index_r << offset_bits);
-      // Set next state to SWAP_IN_OKEY
+      // Stay in SWAP_IN until memory request is accepted
       state_next = SWAP_IN;
       mem_axi_state_next =
           (io.out.mem_req_valid && io.in.mem_req_ready) ? AXI_BUSY : AXI_IDLE;
@@ -262,7 +262,7 @@ void ICache::comb_pipe2() {
       // If memory response is valid, read data from memory
       if (mem_gnt) {
         // Read data from memory response
-        state_next = SWAP_IN_OKEY;
+        state_next = SWAP_IN_OKAY;
         mem_axi_state_next = AXI_IDLE;
         for (uint32_t offset = 0; offset < ICACHE_LINE_SIZE / 4; ++offset) {
           mem_resp_data_w[offset] = io.in.mem_resp_data[offset];
@@ -287,7 +287,7 @@ void ICache::comb_pipe2() {
     }
     break;
 
-  case SWAP_IN_OKEY:
+  case SWAP_IN_OKAY:
     /*
      * Memory data has been received, update cache and return to IDLE state
      *
@@ -338,7 +338,7 @@ void ICache::seq_pipe1() {
   }
 
   if (io.in.ppn_valid && io.out.ppn_ready) {
-    // store used ppn, which will be used in SWAP_IN_OKEY state
+    // store used ppn, which will be used in SWAP_IN_OKAY state
     ppn_r = io.in.ppn;
   }
 
@@ -355,7 +355,7 @@ void ICache::seq_pipe1() {
     replace_idx = replace_idx_next;
     break;
 
-  case SWAP_IN_OKEY:
+  case SWAP_IN_OKAY:
     /* update cache with new data from memory */
     for (uint32_t word = 0; word < word_num; ++word) {
       cache_data[pipe1_to_pipe2.index_r][replace_idx][word] =
@@ -386,8 +386,8 @@ void ICache::log_state() {
   case SWAP_IN:
     std::cout << "SWAP_IN";
     break;
-  case SWAP_IN_OKEY:
-    std::cout << "SWAP_IN_OKEY";
+  case SWAP_IN_OKAY:
+    std::cout << "SWAP_IN_OKAY";
     break;
   default:
     std::cout << "UNKNOWN";
@@ -401,8 +401,8 @@ void ICache::log_state() {
   case SWAP_IN:
     std::cout << "SWAP_IN";
     break;
-  case SWAP_IN_OKEY:
-    std::cout << "SWAP_IN_OKEY";
+  case SWAP_IN_OKAY:
+    std::cout << "SWAP_IN_OKAY";
     break;
   default:
     std::cout << "UNKNOWN";
