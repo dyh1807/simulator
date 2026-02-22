@@ -14,16 +14,7 @@ static constexpr int64_t REQ_WAIT_RETRY = 0x7FFFFFFFFFFFFFFF;
 static constexpr int64_t REQ_WAIT_SEND = 0x7FFFFFFFFFFFFFFD;
 static constexpr int64_t REQ_WAIT_RESP = 0x7FFFFFFFFFFFFFFE;
 static constexpr int64_t REQ_WAIT_EXEC = 0x7FFFFFFFFFFFFFFC;
-static constexpr bool LDQ_TRACE = false;
 
-static inline void ldq_trace(const char *evt, int idx, const MicroOp &uop) {
-  if (!LDQ_TRACE) {
-    return;
-  }
-  std::printf("[LDQ][t=%lld] %s idx=%d rob=%u tag=%u pc=0x%08x\n",
-              (long long)sim_time, evt, idx, (uint32_t)uop.rob_idx,
-              (uint32_t)uop.tag, (uint32_t)uop.pc);
-}
 
 SimpleLsu::SimpleLsu(SimContext *ctx) : AbstractLsu(ctx) {
   // Initialize MMU
@@ -56,7 +47,7 @@ void SimpleLsu::init() {
     stq[i].committed = false;
     stq[i].addr = 0;
     stq[i].data = 0;
-    stq[i].tag = 0;
+    stq[i].br_mask = 0;
     stq[i].rob_idx = 0;
     stq[i].rob_flag = 0;
     stq[i].func3 = 0;
@@ -171,7 +162,7 @@ void SimpleLsu::comb_recv() {
       entry.sent = true;
       entry.waiting_resp = true;
       entry.uop.cplt_time = REQ_WAIT_RESP;
-      ldq_trace("send-req", i, entry.uop);
+
       break;
     }
   }
@@ -194,7 +185,7 @@ void SimpleLsu::comb_load_res() {
       auto &entry = ldq[idx];
       if (entry.valid && entry.sent && entry.waiting_resp) {
         if (!entry.killed) {
-          ldq_trace("resp-live", idx, entry.uop);
+
           entry.uop.result = extract_data(
               in.dcache_resp->data, in.dcache_resp->addr, entry.uop.func3);
           entry.uop.difftest_skip = in.dcache_resp->uop.difftest_skip;
@@ -202,7 +193,7 @@ void SimpleLsu::comb_load_res() {
           entry.uop.is_cache_miss = in.dcache_resp->uop.is_cache_miss;
           finished_loads.push_back(entry.uop);
         } else {
-          ldq_trace("resp-killed-drain", idx, entry.uop);
+
         }
         free_ldq_entry(idx);
       }
@@ -292,7 +283,7 @@ void SimpleLsu::handle_store_data(const MicroOp &inst) {
   stq[inst.stq_idx].data_valid = true;
 }
 
-bool SimpleLsu::reserve_stq_entry(tag_t tag, uint32_t rob_idx,
+bool SimpleLsu::reserve_stq_entry(mask_t br_mask, uint32_t rob_idx,
                                   uint32_t rob_flag, uint32_t func3) {
   if (stq_count >= STQ_NUM) {
     return false;
@@ -301,7 +292,7 @@ bool SimpleLsu::reserve_stq_entry(tag_t tag, uint32_t rob_idx,
   stq[stq_tail].addr_valid = false;
   stq[stq_tail].data_valid = false;
   stq[stq_tail].committed = false;
-  stq[stq_tail].tag = tag;
+  stq[stq_tail].br_mask = br_mask;
   stq[stq_tail].rob_idx = rob_idx;
   stq[stq_tail].rob_flag = rob_flag;
   stq[stq_tail].func3 = func3;
@@ -314,14 +305,14 @@ void SimpleLsu::consume_stq_alloc_reqs(int &push_count) {
     if (!in.dis2lsu->alloc_req[i]) {
       continue;
     }
-    bool ok = reserve_stq_entry(in.dis2lsu->tag[i], in.dis2lsu->rob_idx[i],
+    bool ok = reserve_stq_entry(in.dis2lsu->br_mask[i], in.dis2lsu->rob_idx[i],
                                 in.dis2lsu->rob_flag[i], in.dis2lsu->func3[i]);
     Assert(ok && "STQ allocate overflow");
     push_count++;
   }
 }
 
-bool SimpleLsu::reserve_ldq_entry(int idx, tag_t tag, uint32_t rob_idx,
+bool SimpleLsu::reserve_ldq_entry(int idx, mask_t br_mask, uint32_t rob_idx,
                                   uint32_t rob_flag) {
   Assert(idx >= 0 && idx < MAX_INFLIGHT_LOADS);
   if (ldq[idx].valid) {
@@ -333,7 +324,7 @@ bool SimpleLsu::reserve_ldq_entry(int idx, tag_t tag, uint32_t rob_idx,
   ldq[idx].waiting_resp = false;
   ldq[idx].tlb_retry = false;
   ldq[idx].uop = {};
-  ldq[idx].uop.tag = tag;
+  ldq[idx].uop.br_mask = br_mask;
   ldq[idx].uop.rob_idx = rob_idx;
   ldq[idx].uop.rob_flag = rob_flag;
   ldq[idx].uop.ldq_idx = idx;
@@ -348,9 +339,8 @@ void SimpleLsu::consume_ldq_alloc_reqs() {
     if (!in.dis2lsu->ldq_alloc_req[i]) {
       continue;
     }
-    bool ok = reserve_ldq_entry(in.dis2lsu->ldq_idx[i], in.dis2lsu->ldq_tag[i],
-                                in.dis2lsu->ldq_rob_idx[i],
-                                in.dis2lsu->ldq_rob_flag[i]);
+    bool ok = reserve_ldq_entry(in.dis2lsu->ldq_idx[i], in.dis2lsu->ldq_br_mask[i],
+                                in.dis2lsu->ldq_rob_idx[i], in.dis2lsu->ldq_rob_flag[i]);
     Assert(ok && "LDQ allocate collision");
   }
 }
@@ -416,16 +406,18 @@ void SimpleLsu::handle_global_flush() {
 }
 
 void SimpleLsu::handle_mispred(mask_t mask) {
+  auto is_killed = [&](const MicroOp &u) { return (u.br_mask & mask) != 0; };
+
   for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
     if (!ldq[i].valid) {
       continue;
     }
-    if ((1ULL << ldq[i].uop.tag) & mask) {
+    if (is_killed(ldq[i].uop)) {
       if (ldq[i].sent) {
-        ldq_trace("mispred-mark-killed", i, ldq[i].uop);
+
         ldq[i].killed = true;
       } else {
-        ldq_trace("mispred-free-unsent", i, ldq[i].uop);
+
         free_ldq_entry(i);
       }
     }
@@ -433,7 +425,7 @@ void SimpleLsu::handle_mispred(mask_t mask) {
 
   auto it_sta = finished_sta_reqs.begin();
   while (it_sta != finished_sta_reqs.end()) {
-    if ((1ULL << it_sta->tag) & mask) {
+    if (is_killed(*it_sta)) {
       it_sta = finished_sta_reqs.erase(it_sta);
     } else {
       ++it_sta;
@@ -442,7 +434,7 @@ void SimpleLsu::handle_mispred(mask_t mask) {
 
   auto it_finished = finished_loads.begin();
   while (it_finished != finished_loads.end()) {
-    if ((1ULL << it_finished->tag) & mask) {
+    if (is_killed(*it_finished)) {
       it_finished = finished_loads.erase(it_finished);
     } else {
       ++it_finished;
@@ -451,7 +443,7 @@ void SimpleLsu::handle_mispred(mask_t mask) {
 
   auto it_sta_retry = pending_sta_addr_reqs.begin();
   while (it_sta_retry != pending_sta_addr_reqs.end()) {
-    if ((1ULL << it_sta_retry->tag) & mask) {
+    if (is_killed(*it_sta_retry)) {
       it_sta_retry = pending_sta_addr_reqs.erase(it_sta_retry);
     } else {
       ++it_sta_retry;
@@ -504,6 +496,7 @@ void SimpleLsu::retire_stq_head_if_ready(bool write_fire, int &pop_count) {
   head.data_valid = false;
   head.addr = 0;
   head.data = 0;
+  head.br_mask = 0;
 
   stq_head = (stq_head + 1) % STQ_NUM;
   pop_count++;
@@ -534,7 +527,7 @@ void SimpleLsu::progress_ldq_entries() {
     }
 
     if (entry.killed && !entry.sent) {
-      ldq_trace("seq-free-killed-unsent", i, entry.uop);
+
       free_ldq_entry(i);
       continue;
     }
@@ -638,7 +631,7 @@ void SimpleLsu::progress_pending_sta_addr() {
 void SimpleLsu::free_ldq_entry(int idx) {
   Assert(idx >= 0 && idx < MAX_INFLIGHT_LOADS);
   if (ldq[idx].valid) {
-    ldq_trace("free", idx, ldq[idx].uop);
+
     ldq[idx].valid = false;
     ldq[idx].killed = false;
     ldq[idx].sent = false;
@@ -662,10 +655,10 @@ void SimpleLsu::comb_flush() {
         continue;
       }
       if (ldq[i].sent) {
-        ldq_trace("flush-mark-killed", i, ldq[i].uop);
+
         ldq[i].killed = true;
       } else {
-        ldq_trace("flush-free-unsent", i, ldq[i].uop);
+
         free_ldq_entry(i);
       }
     }
@@ -693,6 +686,23 @@ void SimpleLsu::seq() {
   if (is_mispred) {
     mmu->flush();
     handle_mispred(in.dec_bcast->br_mask);
+  }
+
+  // 清除已解析分支的 br_mask bit（在 flush 之后，只影响存活条目）
+  mask_t clear = in.dec_bcast->clear_mask;
+  if (clear) {
+    for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
+      if (ldq[i].valid) ldq[i].uop.br_mask &= ~clear;
+    }
+    for (int i = 0; i < STQ_NUM; i++) {
+      if (stq[i].valid) stq[i].br_mask &= ~clear;
+    }
+    for (auto &e : finished_sta_reqs) e.br_mask &= ~clear;
+    for (auto &e : finished_loads)    e.br_mask &= ~clear;
+    for (auto &e : pending_sta_addr_reqs) e.br_mask &= ~clear;
+  }
+
+  if (is_mispred) {
     return;
   }
 
@@ -740,7 +750,7 @@ int SimpleLsu::find_recovery_tail(mask_t br_mask) {
 
   for (int i = 0; i < count; i++) {
     // 检查当前条目是否依赖于被误预测的分支
-    if (stq[ptr].valid && ((1ULL << stq[ptr].tag) & br_mask)) {
+    if (stq[ptr].valid && (stq[ptr].br_mask & br_mask)) {
       // 找到了！这个位置就是错误路径的开始
       // 新的 Tail 应该回滚到这里
       return ptr;

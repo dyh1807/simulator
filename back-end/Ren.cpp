@@ -51,6 +51,11 @@ void Ren::init() {
   memcpy(free_vec_flush, free_vec, PRF_NUM);
   memcpy(free_vec_normal, free_vec, PRF_NUM);
   memcpy(free_vec_1, free_vec, PRF_NUM);
+
+  std::memset(RAT_checkpoint, 0, sizeof(RAT_checkpoint));
+  std::memset(RAT_checkpoint_1, 0, sizeof(RAT_checkpoint_1));
+  std::memset(alloc_checkpoint, 0, sizeof(alloc_checkpoint));
+  std::memset(alloc_checkpoint_1, 0, sizeof(alloc_checkpoint_1));
 }
 
 void Ren::comb_alloc() {
@@ -212,15 +217,16 @@ void Ren::comb_fire() {
 
     // 保存检查点 (Checkpoint)
     if (fire[i] && is_branch(inst_r[i].uop.type)) {
+      const auto br_id = inst_r[i].uop.br_id;
       for (int j = 0; j < ARF_NUM + 1; j++) {
         // 注意这里存在隐藏的旁路 (Bypass)
         // 保存的是本条指令完成后的 spec_RAT，不包括同一周期后续指令对 spec_RAT
         // 的影响
-        RAT_checkpoint_1[inst_r[i].uop.tag][j] = spec_RAT_normal[j];
+        RAT_checkpoint_1[br_id][j] = spec_RAT_normal[j];
       }
 
       for (int j = 0; j < PRF_NUM; j++) {
-        alloc_checkpoint_1[inst_r[i].uop.tag][j] = false;
+        alloc_checkpoint_1[br_id][j] = false;
       }
     }
   }
@@ -237,17 +243,18 @@ void Ren::comb_branch() {
   if (in.dec_bcast
           ->mispred) { // 硬件永远都会生成相关的误预测和刷新信号，然后进行选择
                        // 模拟器进行判断是为了减少不必要的开销，运行得快一点
+    const auto br_idx = in.dec_bcast->br_id;
+    Assert(br_idx != 0 && "Ren: mispred br_id should not be zero");
     // 恢复重命名表
     for (int i = 0; i < ARF_NUM + 1; i++) {
-      spec_RAT_mispred[i] = RAT_checkpoint[in.dec_bcast->br_tag][i];
+      spec_RAT_mispred[i] = RAT_checkpoint[br_idx][i];
     }
 
     // 恢复空闲列表 (Free List)
     for (int j = 0; j < PRF_NUM; j++) {
-      free_vec_mispred[j] =
-          free_vec[j] || alloc_checkpoint[in.dec_bcast->br_tag][j];
+      free_vec_mispred[j] = free_vec[j] || alloc_checkpoint[br_idx][j];
       spec_alloc_mispred[j] =
-          spec_alloc[j] && !alloc_checkpoint[in.dec_bcast->br_tag][j];
+          spec_alloc[j] && !alloc_checkpoint[br_idx][j];
     }
   }
 }
@@ -311,6 +318,7 @@ void Ren ::comb_commit() {
 }
 
 void Ren ::comb_pipeline() {
+  mask_t clear_mask = in.dec_bcast->clear_mask;
   if (in.rob_bcast->flush || in.dec_bcast->mispred) {
 #ifdef CONFIG_PERF_COUNTER
     uint64_t killed = 0;
@@ -337,9 +345,19 @@ void Ren ::comb_pipeline() {
       inst_r_1[i].valid = false;
     } else if (out.ren2dec->ready) {
       inst_r_1[i].uop = in.dec2ren->uop[i];
+      inst_r_1[i].uop.br_mask &= ~clear_mask;
       inst_r_1[i].valid = in.dec2ren->valid[i];
     } else {
       inst_r_1[i].valid = inst_r[i].valid && !fire[i];
+    }
+  }
+
+  // Ren 阶段清理：对保留在流水寄存器中的存活条目同步清除已解析分支 bit。
+  if (clear_mask) {
+    for (int i = 0; i < DECODE_WIDTH; i++) {
+      if (inst_r_1[i].valid) {
+        inst_r_1[i].uop.br_mask &= ~clear_mask;
+      }
     }
   }
 

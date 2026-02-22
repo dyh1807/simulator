@@ -1,7 +1,7 @@
 #pragma once
 #include "AbstractFU.h" // for __builtin_clz
-#include "IO.h"
 #include "FTQ.h"
+#include "IO.h"
 #include "config.h"
 // #include <cassert>
 #include <climits>
@@ -91,8 +91,6 @@ protected:
 // ==========================================
 // AGU: 地址生成单元 (IO 精确修改版)
 // ==========================================
-extern long long sim_time;
-
 class AguUnit : public FixedLatencyFU {
   ExeLsuIO *exe2lsu;
   int agu_port_idx; // 标记这是第几个 AGU 端口
@@ -111,8 +109,6 @@ protected:
     uint64_t vaddr = inst.src1_rdata + inst.imm;
     inst.result =
         vaddr; // 记录结果，如果是 Load，这个值是地址；如果是 STA，也是地址
-
-
 
     // 2. 驱动 LSU IO 接口
     // 我们不再调用函数，而是模拟“连线”，将请求置为 valid
@@ -325,8 +321,9 @@ protected:
 
 // ==========================================
 // DIV: 除法单元 (Fixed Latency for simulation correctness)
-// Note: While real dividers are non-pipelined (IterativeFU), using FixedLatencyFU
-// eliminates race conditions with register recycling in this implementation
+// Note: While real dividers are non-pipelined (IterativeFU), using
+// FixedLatencyFU eliminates race conditions with register recycling in this
+// implementation
 // ==========================================
 class DivUnit : public IterativeFU {
 public:
@@ -375,21 +372,20 @@ protected:
     }
   }
 
-
   // int calculate_latency(const InstUop &inst) override {
-    // 固定返回DIV_MAX_LATENCY以消除竞态条件
-    // 原始的SRT动态延迟计算会导致与唤醒管道不匹配
-    // uint64_t divisor = inst.src2_rdata;
-    // uint64_t dividend = inst.src1_rdata;
-    // if (divisor == 0 || dividend == 0)
-    //   return 4;
-    // int clz_n = __builtin_clzl(dividend);
-    // int clz_d = __builtin_clzl(divisor);
-    // int effective_bits = (64 - clz_n) - (64 - clz_d);
-    // if (effective_bits < 0)
-    //   effective_bits = 0;
-    // return (effective_bits / radix_log2) + 4;
-    // return DIV_MAX_LATENCY;
+  // 固定返回DIV_MAX_LATENCY以消除竞态条件
+  // 原始的SRT动态延迟计算会导致与唤醒管道不匹配
+  // uint64_t divisor = inst.src2_rdata;
+  // uint64_t dividend = inst.src1_rdata;
+  // if (divisor == 0 || dividend == 0)
+  //   return 4;
+  // int clz_n = __builtin_clzl(dividend);
+  // int clz_d = __builtin_clzl(divisor);
+  // int effective_bits = (64 - clz_n) - (64 - clz_d);
+  // if (effective_bits < 0)
+  //   effective_bits = 0;
+  // return (effective_bits / radix_log2) + 4;
+  // return DIV_MAX_LATENCY;
   // }
 };
 

@@ -274,6 +274,7 @@ void Rob::comb_commit() {
 
     Assert(0 && "ROB Deadlock detected (stall_cycle > 1000)");
   }
+
 }
 
 void Rob::comb_complete() {
@@ -284,6 +285,10 @@ void Rob::comb_complete() {
       int line_idx = get_rob_line(in.exu2rob->entry[i].uop.rob_idx);
 
       entry_1[bank_idx][line_idx].uop.cplt_num++;
+      if (entry_1[bank_idx][line_idx].uop.cplt_num >
+          entry_1[bank_idx][line_idx].uop.uop_num) {
+        Assert(0 && "ROB: completion overflow (cplt_num > uop_num)");
+      }
 
       for (int k = 0; k < LSU_LDU_COUNT; k++) {
         if (i == IQ_LD_PORT_BASE + k) {

@@ -245,7 +245,7 @@ public:
     // printf("\033[1;32m*********STALL COUNTER************\033[0m\n");
     // printf("\033[1;32mrob     stall : %ld\033[0m\n", rob_entry_stall);
     // printf("\033[1;32midu br  stall : %ld\033[0m\n", idu_br_stall);
-    // printf("\033[1;32midu tag stall : %ld\033[0m\n", idu_tag_stall);
+    printf("\033[1;32midu tag stall : %ld\033[0m\n", idu_tag_stall);
     // printf("\033[1;32mren reg stall : %ld\033[0m\n", ren_reg_stall);
     // printf("\n");
     // printf("\033[1;32m*********Isu COUNTER************\033[0m\n");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.h"
+#include "util.h"
 #include <cassert>
 #include <cstdint>
 #include <vector>
@@ -126,9 +127,23 @@ public:
   // Flush
   void flush_br(mask_t br_mask) {
     for (int i = 0; i < size; i++) {
-      if (entry_1[i].valid && ((1ULL << entry_1[i].uop.tag) & br_mask)) {
+      if (!entry_1[i].valid) {
+        continue;
+      }
+      bool match_mask = (entry_1[i].uop.br_mask & br_mask) != 0;
+      if (match_mask) {
         entry_1[i].valid = false;
         count_1--;
+      }
+    }
+  }
+
+  // Clear resolved branch bits from surviving entries
+  void clear_br(mask_t clear_mask) {
+    if (clear_mask == 0) return;
+    for (int i = 0; i < size; i++) {
+      if (entry_1[i].valid) {
+        entry_1[i].uop.br_mask &= ~clear_mask;
       }
     }
   }

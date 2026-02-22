@@ -26,7 +26,9 @@ struct LatencyEntry {
   bool valid;
   int countdown; // 剩余周期数
   uint32_t dest_preg;
-  tag_t tag;
+  mask_t br_mask;
+  uint32_t rob_idx;
+  uint32_t rob_flag;
 };
 
 class Isu {

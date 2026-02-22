@@ -86,7 +86,8 @@ typedef struct InstInfo {
   wire<7> func7;
   wire<32> imm;
   wire<32> pc;
-  wire<BR_TAG_WIDTH> tag;
+  wire<BR_TAG_WIDTH> br_id;
+  wire<BR_MASK_WIDTH> br_mask;
   wire<CSR_IDX_WIDTH> csr_idx;
   wire<ROB_IDX_WIDTH> rob_idx;
   wire<STQ_IDX_WIDTH> stq_idx;
@@ -143,7 +144,8 @@ typedef struct MicroOp {
   wire<7> func7;
   wire<32> imm;
   wire<32> pc;
-  wire<BR_TAG_WIDTH> tag;
+  wire<BR_TAG_WIDTH> br_id;
+  wire<BR_MASK_WIDTH> br_mask;
   wire<CSR_IDX_WIDTH> csr_idx;
   wire<ROB_IDX_WIDTH> rob_idx;
   wire<STQ_IDX_WIDTH> stq_idx;
@@ -196,7 +198,8 @@ typedef struct MicroOp {
     this->func7 = info.func7;
     this->imm = info.imm;
     this->pc = info.pc;
-    this->tag = info.tag;
+    this->br_id = info.br_id;
+    this->br_mask = info.br_mask;
     this->csr_idx = info.csr_idx;
     this->rob_idx = info.rob_idx;
     this->stq_idx = info.stq_idx;

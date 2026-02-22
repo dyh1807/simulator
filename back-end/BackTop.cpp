@@ -44,7 +44,6 @@ void BackTop::init() {
   idu->in.issue = &pre_idu_issue;
   idu->in.ren2dec = &ren2dec;
   idu->in.rob_bcast = &rob_bcast;
-  idu->in.commit = &rob_commit;
   idu->in.exu2id = &exu2id;
 
   rename->in.dec2ren = &dec2ren;
@@ -197,7 +196,6 @@ void BackTop::comb() {
   rob->comb_ready();
   rob->comb_commit();
 
-  idu->comb_release_tag();
   dis->comb_alloc();
   lsu->comb_load_res();
 

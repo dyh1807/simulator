@@ -1,6 +1,7 @@
 #pragma once
 
 #include "config.h"
+#include "util.h"
 #include <deque>
 #include <string>
 
@@ -35,8 +36,8 @@ public:
 
   // 动作：结果被取走了，从 FU 里移除它
   virtual void pop_finished() = 0;
-
   virtual void flush(mask_t br_mask) = 0;
+  virtual void clear_br(mask_t clear_mask) = 0;
 };
 
 // 固定延迟、可流水化：ALU、MUL、FADD、FMUL
@@ -79,16 +80,12 @@ public:
 
   void flush(mask_t br_mask) override {
     if (br_mask == (mask_t)-1) {
-      // 全局 Flush
       pipeline.clear();
     } else {
-      // 分支恢复：仅移除受影响的指令
-      // 使用迭代器遍历 deque
       auto it = pipeline.begin();
       while (it != pipeline.end()) {
-        // 假设 MicroOp 有 br_mask 域 (依赖掩码) 或 tag 域
-        // 检查：如果指令依赖于被误预测的分支
-        if ((1ULL << it->tag) & br_mask) { // 或者 check dependency mask
+        bool kill_by_mask = (it->br_mask & br_mask) != 0;
+        if (kill_by_mask) {
           it = pipeline.erase(it);
         } else {
           ++it;
@@ -97,12 +94,19 @@ public:
     }
   }
 
+  void clear_br(mask_t clear_mask) override {
+    for (auto &inst : pipeline) {
+      inst.br_mask &= ~clear_mask;
+    }
+  }
+
   MicroOp *get_finished_uop() override {
     // For latency=1 FUs, instruction completes in the SAME cycle it's accepted
     // cplt_time = sim_time + latency - 1 = sim_time + 1 - 1 = sim_time
     // The newest instruction (back) is the one that just completed!
     // For latency>1, return the oldest (front) as usual
-    if (latency == 1 && !pipeline.empty() && pipeline.back().cplt_time <= sim_time) {
+    if (latency == 1 && !pipeline.empty() &&
+        pipeline.back().cplt_time <= sim_time) {
       return &pipeline.back();
     } else if (!pipeline.empty() && pipeline.front().cplt_time <= sim_time) {
       return &pipeline.front();
@@ -144,18 +148,10 @@ public:
   }
 
   void accept(MicroOp inst) override {
-    // === 1. 功能计算 (Functional) ===
-    // 在这里调用虚函数，计算 result = src1 / src2
     impl_compute(inst);
-
-    // === 2. 时序计算 (Timing) ===
-    // 在这里调用虚函数，计算 SRT 需要多少周期
     int dyn_latency = calculate_latency(inst);
-
-    // 更新状态
-    current_inst = inst; // 拷贝指令到内部寄存器
-    current_inst.cplt_time = sim_time + dyn_latency; // 标记完成时刻
-
+    current_inst = inst;
+    current_inst.cplt_time = sim_time + dyn_latency;
     remaining_cycles = dyn_latency;
     busy = true;
   }
@@ -173,7 +169,9 @@ public:
     return nullptr;
   }
 
-  void pop_finished() override { busy = false; }
+  void pop_finished() override {
+    busy = false;
+  }
 
   void flush(mask_t br_mask) override {
     if (!busy)
@@ -183,16 +181,21 @@ public:
     if (br_mask == (mask_t)-1) {
       kill = true;
     } else {
-      // 检查当前正在计算的指令是否在错误路径上
-      if ((1ULL << current_inst.tag) & br_mask) {
+      bool kill_by_mask = (current_inst.br_mask & br_mask) != 0;
+      if (kill_by_mask) {
         kill = true;
       }
     }
 
     if (kill) {
-      busy = false; // 立即释放 FU！
+      busy = false;
       remaining_cycles = 0;
-      // 这样下一拍 comb_ready 就会发现 DIV 变空闲了
+    }
+  }
+
+  void clear_br(mask_t clear_mask) override {
+    if (busy) {
+      current_inst.br_mask &= ~clear_mask;
     }
   }
 

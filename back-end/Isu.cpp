@@ -190,7 +190,9 @@ void Isu::comb_calc_latency_next() {
         new_entry.valid = true;
         new_entry.countdown = lat - 1;
         new_entry.dest_preg = inst.uop.dest_preg;
-        new_entry.tag = inst.uop.tag;
+        new_entry.br_mask = inst.uop.br_mask;
+        new_entry.rob_idx = inst.uop.rob_idx;
+        new_entry.rob_flag = inst.uop.rob_flag;
 
         latency_pipe_1.push_back(new_entry);
       }
@@ -264,11 +266,22 @@ void Isu::comb_flush() {
     // 清空延迟流水线管道条目
     auto it = latency_pipe_1.begin();
     while (it != latency_pipe_1.end()) {
-      if ((1ULL << it->tag) & in.dec_bcast->br_mask) {
+      bool match_mask = (it->br_mask & in.dec_bcast->br_mask) != 0;
+      if (match_mask) {
         it = latency_pipe_1.erase(it);
-      } else {
-        ++it;
+        continue;
       }
+      ++it;
+    }
+  }
+
+  // 清除已解析分支的 br_mask bit（在 flush 之后，只影响存活条目）
+  mask_t clear = in.dec_bcast->clear_mask;
+  if (clear) {
+    for (auto &q : iqs)
+      q.clear_br(clear);
+    for (auto &entry : latency_pipe_1) {
+      entry.br_mask &= ~clear;
     }
   }
 }

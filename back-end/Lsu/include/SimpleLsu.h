@@ -96,10 +96,11 @@ private:
   void handle_store_data(const MicroOp &uop);
   int find_recovery_tail(mask_t br_mask);
   bool is_store_older(int s_idx, int s_flag, int l_idx, int l_flag);
-  bool reserve_stq_entry(tag_t tag, uint32_t rob_idx, uint32_t rob_flag,
+  bool reserve_stq_entry(mask_t br_mask, uint32_t rob_idx, uint32_t rob_flag,
                          uint32_t func3);
   void consume_stq_alloc_reqs(int &push_count);
-  bool reserve_ldq_entry(int idx, tag_t tag, uint32_t rob_idx, uint32_t rob_flag);
+  bool reserve_ldq_entry(int idx, mask_t br_mask, uint32_t rob_idx,
+                         uint32_t rob_flag);
   void consume_ldq_alloc_reqs();
   void free_ldq_entry(int idx);
   bool is_mmio_addr(uint32_t paddr) const;

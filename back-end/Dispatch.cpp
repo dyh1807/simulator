@@ -48,19 +48,24 @@ void Dispatch::init() {
 void Dispatch::comb_alloc() {
   int store_alloc_count = 0; // 当前周期已分配的 store 数量
   int load_alloc_count = 0;  // 当前周期已分配的 load 数量
+  mask_t clear_mask = in.dec_bcast->clear_mask;
 
   // 初始化输出
   for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
     out.dis2lsu->alloc_req[k] = false;
+    out.dis2lsu->br_mask[k] = 0;
     stq_port_owner[k] = -1;
   }
   for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
     out.dis2lsu->ldq_alloc_req[k] = false;
+    out.dis2lsu->ldq_br_mask[k] = 0;
     ldq_port_owner[k] = -1;
   }
 
   for (int i = 0; i < DECODE_WIDTH; i++) {
     inst_alloc[i] = inst_r[i];
+    // 入队口强制清理：本拍已解析分支对应 bit 不应继续进入后端缓冲结构。
+    inst_alloc[i].uop.br_mask &= ~clear_mask;
     out.dis2rob->valid[i] = inst_r[i].valid;
 
     // 分配 ROB ID (重排序缓存索引)
@@ -94,9 +99,6 @@ void Dispatch::comb_alloc() {
         int allocated_idx =
             (in.lsu2dis->stq_tail + store_alloc_count) % STQ_NUM;
         inst_alloc[i].uop.stq_idx = allocated_idx;
-
-        // 填充 STQ 请求
-        out.dis2lsu->tag[store_alloc_count] = inst_r[i].uop.tag;
 
         stq_port_owner[store_alloc_count] = i;
 
@@ -188,6 +190,7 @@ void Dispatch::comb_dispatch() {
 void Dispatch::comb_fire() {
   bool pre_stall = false;
   bool pre_fire = false;
+  mask_t clear_mask = in.dec_bcast->clear_mask;
   bool global_flush =
       in.rob_bcast->flush || in.dec_bcast->mispred || in.rob2dis->stall;
 
@@ -252,7 +255,7 @@ void Dispatch::comb_fire() {
     int inst_idx = stq_port_owner[k];
     if (inst_idx >= 0 && out.dis2rob->dis_fire[inst_idx]) {
       out.dis2lsu->alloc_req[k] = true;
-      out.dis2lsu->tag[k] = out.dis2rob->uop[inst_idx].tag;
+      out.dis2lsu->br_mask[k] = out.dis2rob->uop[inst_idx].br_mask & ~clear_mask;
       out.dis2lsu->rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
       out.dis2lsu->rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
       out.dis2lsu->func3[k] = out.dis2rob->uop[inst_idx].func3;
@@ -265,7 +268,7 @@ void Dispatch::comb_fire() {
     if (inst_idx >= 0 && out.dis2rob->dis_fire[inst_idx]) {
       out.dis2lsu->ldq_alloc_req[k] = true;
       out.dis2lsu->ldq_idx[k] = out.dis2rob->uop[inst_idx].ldq_idx;
-      out.dis2lsu->ldq_tag[k] = out.dis2rob->uop[inst_idx].tag;
+      out.dis2lsu->ldq_br_mask[k] = out.dis2rob->uop[inst_idx].br_mask & ~clear_mask;
       out.dis2lsu->ldq_rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
       out.dis2lsu->ldq_rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
     }
@@ -351,6 +354,7 @@ void Dispatch::comb_fire() {
 }
 
 void Dispatch::comb_pipeline() {
+  mask_t clear_mask = in.dec_bcast->clear_mask;
   if (in.rob_bcast->flush || in.dec_bcast->mispred) {
 #ifdef CONFIG_PERF_COUNTER
     uint64_t killed = 0;
@@ -384,6 +388,7 @@ void Dispatch::comb_pipeline() {
     }
     if (out.dis2ren->ready) {
       inst_r_1[i].uop = in.ren2dis->uop[i];
+      inst_r_1[i].uop.br_mask &= ~clear_mask;
       inst_r_1[i].valid = in.ren2dis->valid[i];
       continue;
     }
@@ -391,6 +396,7 @@ void Dispatch::comb_pipeline() {
     inst_r_1[i].valid = inst_r[i].valid && !out.dis2rob->dis_fire[i];
     if (inst_r_1[i].valid) {
       apply_wakeup_to_uop(inst_r_1[i].uop);
+      inst_r_1[i].uop.br_mask &= ~clear_mask;
     }
   }
 }

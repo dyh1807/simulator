@@ -85,14 +85,16 @@ struct DecBroadcastIO {
 
   wire<1> mispred;
   wire<BR_MASK_WIDTH> br_mask;
-  wire<BR_TAG_WIDTH> br_tag;
+  wire<BR_TAG_WIDTH> br_id;
   wire<ROB_IDX_WIDTH> redirect_rob_idx;
+  mask_t clear_mask; // Bits to clear from all in-flight br_masks (resolved branches)
 
   DecBroadcastIO() {
     mispred = {};
     br_mask = {};
-    br_tag = {};
+    br_id = {};
     redirect_rob_idx = {};
+    clear_mask = 0;
   }
 };
 
@@ -301,15 +303,17 @@ struct ExuIdIO {
   wire<1> mispred;
   wire<32> redirect_pc;
   wire<ROB_IDX_WIDTH> redirect_rob_idx;
-  wire<BR_TAG_WIDTH> br_tag;
+  wire<BR_TAG_WIDTH> br_id;
   int ftq_idx; // FTQ index of mispredicting branch, for tail recovery
+  mask_t clear_mask; // OR of all resolved branches' (1 << br_id) this cycle
 
   ExuIdIO() {
     mispred = {};
     redirect_pc = {};
     redirect_rob_idx = {};
-    br_tag = {};
+    br_id = {};
     ftq_idx = 0;
+    clear_mask = 0;
   }
 };
 
@@ -705,21 +709,21 @@ struct LsuExeIO {
 struct DisLsuIO {
 
   bool alloc_req[MAX_STQ_DISPATCH_WIDTH];
-  uint32_t tag[MAX_STQ_DISPATCH_WIDTH]; // TODO: use wire<BR_TAG_WIDTH>?
+  mask_t br_mask[MAX_STQ_DISPATCH_WIDTH];
   uint32_t func3[MAX_STQ_DISPATCH_WIDTH];
   uint32_t rob_idx[MAX_STQ_DISPATCH_WIDTH];
   uint32_t rob_flag[MAX_STQ_DISPATCH_WIDTH];
 
   bool ldq_alloc_req[MAX_LDQ_DISPATCH_WIDTH];
   uint32_t ldq_idx[MAX_LDQ_DISPATCH_WIDTH];
-  uint32_t ldq_tag[MAX_LDQ_DISPATCH_WIDTH];
+  mask_t ldq_br_mask[MAX_LDQ_DISPATCH_WIDTH];
   uint32_t ldq_rob_idx[MAX_LDQ_DISPATCH_WIDTH];
   uint32_t ldq_rob_flag[MAX_LDQ_DISPATCH_WIDTH];
 
   DisLsuIO() {
     for (auto &v : alloc_req)
       v = false;
-    for (auto &v : tag)
+    for (auto &v : br_mask)
       v = 0;
     for (auto &v : func3)
       v = 0;
@@ -731,7 +735,7 @@ struct DisLsuIO {
       v = false;
     for (auto &v : ldq_idx)
       v = 0;
-    for (auto &v : ldq_tag)
+    for (auto &v : ldq_br_mask)
       v = 0;
     for (auto &v : ldq_rob_idx)
       v = 0;

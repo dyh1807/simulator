@@ -14,17 +14,16 @@ void Idu::init() {
   for (int i = 0; i < MAX_BR_NUM; i++) {
     tag_vec[i] = true;
     tag_vec_1[i] = true;
-    tag_list[i] = 0;
-    tag_list_1[i] = 0;
+    br_mask_cp[i] = 0;
+    br_mask_cp_1[i] = 0;
   }
   tag_vec[0] = false;
   tag_vec_1[0] = false;
-  now_tag = 0;
-  now_tag_1 = 0;
-  enq_ptr = 1;
-  enq_ptr_1 = 1;
+  now_br_mask = 0;
+  now_br_mask_1 = 0;
+  pending_free_mask = 0;
+  pending_free_mask_1 = 0;
   br_latch = {};
-  br_latch_1 = {};
 }
 
 // 译码并分配 Tag
@@ -76,14 +75,19 @@ void Idu::comb_decode() {
   }
 
   int br_num = 0;
+  // ID 阶段旁路清理：本拍已解析分支的 bit 不应继续传播到新译码指令。
+  // clear_mask 来自上拍锁存的 BRU 解析结果（br_latch）。
+  mask_t clear = br_latch.clear_mask;
+  mask_t running_mask = now_br_mask & ~clear;
   bool stall = false;
   int i = 0;
   for (; i < DECODE_WIDTH; i++) {
     if (!out.dec2ren->valid[i]) {
-      out.dec2ren->uop[i].tag = 0;
+      out.dec2ren->uop[i].br_id = 0;
+      out.dec2ren->uop[i].br_mask = running_mask;
       continue;
     }
-    out.dec2ren->uop[i].tag = (br_num == 0) ? now_tag : alloc_tag[br_num - 1];
+    
     if (is_branch(out.dec2ren->uop[i].type)) {
       if (!alloc_valid[br_num]) {
 #ifdef CONFIG_PERF_COUNTER
@@ -92,14 +96,23 @@ void Idu::comb_decode() {
         stall = true;
         break;
       }
+      tag_t new_tag = alloc_tag[br_num];
+      out.dec2ren->uop[i].br_id = new_tag;
+      // 分支自身不依赖自己；self bit 只作用于后续更年轻指令。
+      out.dec2ren->uop[i].br_mask = running_mask;
+      running_mask |= (mask_t(1) << new_tag);
       br_num++;
+    } else {
+      out.dec2ren->uop[i].br_id = 0;
+      out.dec2ren->uop[i].br_mask = running_mask;
     }
   }
 
   if (stall) {
     for (; i < DECODE_WIDTH; i++) {
       out.dec2ren->valid[i] = false;
-      out.dec2ren->uop[i].tag = 0;
+      out.dec2ren->uop[i].br_id = 0;
+      out.dec2ren->uop[i].br_mask = 0;
     }
   }
 }
@@ -108,41 +121,60 @@ void Idu::comb_branch() {
   // Init next state
   for (int i = 0; i < MAX_BR_NUM; i++) {
     tag_vec_1[i] = tag_vec[i];
-    tag_list_1[i] = tag_list[i];
+    br_mask_cp_1[i] = br_mask_cp[i];
   }
-  enq_ptr_1 = enq_ptr;
-  now_tag_1 = now_tag;
+  now_br_mask_1 = now_br_mask;
+  pending_free_mask_1 = pending_free_mask;
 
-  // 如果一周期实现不方便，可以用状态机多周期实现
+  // 0. 先应用上拍累积的释放请求（延迟一拍生效）
+  mask_t matured_free = pending_free_mask;
+  for (int i = 1; i < MAX_BR_NUM; i++) {
+    if ((matured_free >> i) & 1) {
+      tag_vec_1[i] = true;
+      pending_free_mask_1 &= ~(mask_t(1) << i);
+    }
+  }
+
+  // 1. 处理 clear_mask: 所有已解析的 branch 立即释放 (IDU 本地状态)
+  mask_t clear = br_latch.clear_mask;
+  for (int i = 1; i < MAX_BR_NUM; i++) {
+    if ((clear >> i) & 1) {
+      // 延迟到下一拍再真正释放 tag_vec，避免同拍复用
+      pending_free_mask_1 |= (mask_t(1) << i);
+      now_br_mask_1 &= ~(mask_t(1) << i);
+    }
+  }
+
+  // 1.5. 全局更新 br_mask_cp：已解析分支的 bit 从所有快照中清除
+  //      硬件实现：每个 br_mask_cp 寄存器加一个 AND 门，清除 clear_mask 对应的位
+  //      这防止了 tag 被复用后，旧快照仍然"保护"新指令的问题
+  if (clear != 0) {
+    for (int i = 1; i < MAX_BR_NUM; i++) {
+      br_mask_cp_1[i] &= ~clear;
+    }
+  }
+
+  // 2. 处理误预测
   if (br_latch.mispred) {
     out.dec_bcast->mispred = true;
-    out.dec_bcast->br_tag = br_latch.br_tag;
+    out.dec_bcast->br_id = br_latch.br_id;
     out.dec_bcast->redirect_rob_idx = br_latch.redirect_rob_idx;
+    out.dec_bcast->br_mask = 1ULL << br_latch.br_id;
 
-    // 保持原语义：从最新分支回扫，回收误预测分支之后的所有分支 tag。
-    LOOP_DEC(enq_ptr_1, MAX_BR_NUM);
-    int enq_pre = (enq_ptr_1 + MAX_BR_NUM - 1) % MAX_BR_NUM;
-    out.dec_bcast->br_mask = 0;
-
-    bool found = false;
-    for (int i = 0; i < MAX_BR_NUM; i++) {
-      if (tag_list[enq_pre] == br_latch.br_tag) {
-        found = true;
-        break;
-      }
-      out.dec_bcast->br_mask |= 1ULL << tag_list[enq_ptr_1];
-      tag_vec_1[tag_list[enq_ptr_1]] = true;
-      LOOP_DEC(enq_ptr_1, MAX_BR_NUM);
-      LOOP_DEC(enq_pre, MAX_BR_NUM);
-    }
-    Assert(found && "Idu::comb_branch: mispred br_tag not found in tag_list");
-    out.dec_bcast->br_mask |= 1ULL << tag_list[enq_ptr_1];
-    now_tag_1 = tag_list[enq_ptr_1];
-    LOOP_INC(enq_ptr_1, MAX_BR_NUM);
+    // 释放误预测分支之后分配的更年轻的 tag
+    mask_t tags_to_free = now_br_mask & ~br_mask_cp[br_latch.br_id];
+    now_br_mask_1 &= ~tags_to_free;
+    // 同样延迟到下一拍释放空闲位图
+    pending_free_mask_1 |= tags_to_free;
   } else {
     out.dec_bcast->br_mask = 0;
     out.dec_bcast->mispred = false;
+    out.dec_bcast->br_id = 0;
   }
+
+  // 广播 clear_mask（包含误预测分支的 bit）
+  // 下游模块负责: 先 flush，再对存活条目清除 bit
+  out.dec_bcast->clear_mask = clear;
 }
 
 void Idu::comb_flush() {
@@ -152,9 +184,8 @@ void Idu::comb_flush() {
       tag_vec_1[i] = true;
     }
     tag_vec_1[0] = false;
-    now_tag_1 = 0;
-    enq_ptr_1 = 1;
-    tag_list_1[0] = 0;
+    now_br_mask_1 = 0;
+    pending_free_mask_1 = 0;
   }
 }
 
@@ -172,32 +203,22 @@ void Idu::comb_fire() {
   for (int i = 0; i < DECODE_WIDTH; i++) {
     wire<1> fire = out.dec2ren->valid[i] && in.ren2dec->ready;
     if (fire && is_branch(out.dec2ren->uop[i].type)) {
-      now_tag_1 = alloc_tag[br_num];
-      tag_vec_1[alloc_tag[br_num]] = false;
-      tag_list_1[enq_ptr_1] = alloc_tag[br_num];
-      LOOP_INC(enq_ptr_1, MAX_BR_NUM);
+      tag_t new_tag = alloc_tag[br_num];
+      tag_vec_1[new_tag] = false;
+      now_br_mask_1 |= (mask_t(1) << new_tag);
+      br_mask_cp_1[new_tag] = now_br_mask_1;
       br_num++;
     }
   }
 }
 
-void Idu::comb_release_tag() {
-  Assert(in.commit != nullptr && "Idu::comb_release_tag: commit is null");
-  for (int i = 0; i < COMMIT_WIDTH; i++) {
-    if (in.commit->commit_entry[i].valid &&
-        is_branch(in.commit->commit_entry[i].uop.type)) {
-      tag_vec_1[in.commit->commit_entry[i].uop.tag] = true;
-    }
-  }
-}
-
 void Idu::seq() {
-  now_tag = now_tag_1;
+  now_br_mask = now_br_mask_1;
+  pending_free_mask = pending_free_mask_1;
   for (int i = 0; i < MAX_BR_NUM; i++) {
     tag_vec[i] = tag_vec_1[i];
-    tag_list[i] = tag_list_1[i];
+    br_mask_cp[i] = br_mask_cp_1[i];
   }
-  enq_ptr = enq_ptr_1;
 
   // Latch Exu Branch Result
   Assert(in.rob_bcast != nullptr && "Idu::seq: rob_bcast is null");
@@ -206,8 +227,9 @@ void Idu::seq() {
     br_latch.mispred = in.exu2id->mispred;
     br_latch.redirect_pc = in.exu2id->redirect_pc;
     br_latch.redirect_rob_idx = in.exu2id->redirect_rob_idx;
-    br_latch.br_tag = in.exu2id->br_tag;
+    br_latch.br_id = in.exu2id->br_id;
     br_latch.ftq_idx = in.exu2id->ftq_idx;
+    br_latch.clear_mask = in.exu2id->clear_mask;
   } else {
     br_latch = {};
   }
@@ -476,7 +498,7 @@ IduIO Idu::get_hardware_io() {
 
   hardware.from_back.flush = in.rob_bcast->flush;
   hardware.from_back.mispred = br_latch.mispred;
-  hardware.from_back.br_tag = br_latch.br_tag;
+  hardware.from_back.br_id = br_latch.br_id;
 
   // --- Outputs ---
   hardware.to_front.ready = false;
@@ -491,7 +513,7 @@ IduIO Idu::get_hardware_io() {
 
   hardware.to_back.mispred = out.dec_bcast->mispred;
   hardware.to_back.br_mask = out.dec_bcast->br_mask;
-  hardware.to_back.br_tag = out.dec_bcast->br_tag;
+  hardware.to_back.br_id = out.dec_bcast->br_id;
 
   return hardware;
 }

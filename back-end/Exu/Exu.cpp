@@ -2,6 +2,11 @@
 #include "FPU.h"
 #include "config.h"
 
+static inline bool is_br_killed(const MicroOp &uop, const DecBroadcastIO *db) {
+  if (!db->mispred) return false;
+  return (uop.br_mask & db->br_mask) != 0;
+}
+
 Exu::Exu(SimContext *ctx, FTQLookupIO *ftq_lookup)
     : ctx(ctx), ftq_lookup(ftq_lookup) {
   // 可以在这里或 init 创建 backend
@@ -115,8 +120,7 @@ void Exu::comb_ready() {
   for (int i = 0; i < ISSUE_WIDTH; i++) {
 
     bool is_killed = false;
-    if (inst_r[i].valid && in.dec_bcast->mispred &&
-        ((1ULL << inst_r[i].uop.tag) & in.dec_bcast->br_mask)) {
+    if (inst_r[i].valid && is_br_killed(inst_r[i].uop, in.dec_bcast)) {
       is_killed = true;
     }
 
@@ -159,7 +163,6 @@ void Exu::comb_to_csr() {
 
 void Exu::comb_pipeline() {
   // 1. 全局 Flush (最高优先级)
-  // 如果 Flush，所有东西都清空，没商量
   if (in.rob_bcast->flush) {
     for (int i = 0; i < ISSUE_WIDTH; i++) {
       inst_r_1[i].valid = false;
@@ -169,20 +172,26 @@ void Exu::comb_pipeline() {
     return;
   }
 
-  // 2. 分支误预测选择性冲刷：同步冲刷 FU 内部状态。
+  mask_t clear = in.dec_bcast->clear_mask;
+
+  // 2. 分支误预测选择性冲刷（先 flush，再 clear）
   if (in.dec_bcast->mispred) {
     mask_t mask = in.dec_bcast->br_mask;
     for (auto fu : units)
       fu->flush(mask);
   }
 
-  // 3. 主循环：计算下一拍流水寄存器。
+  // 3. 清除已解析分支的 br_mask bit（在 flush 之后）
+  if (clear) {
+    for (auto fu : units)
+      fu->clear_br(clear);
+  }
+
+  // 4. 主循环：计算下一拍流水寄存器
   for (int i = 0; i < ISSUE_WIDTH; i++) {
     bool current_killed = false;
-    if (inst_r[i].valid && in.dec_bcast->mispred) {
-      if ((1ULL << inst_r[i].uop.tag) & in.dec_bcast->br_mask) {
-        current_killed = true;
-      }
+    if (inst_r[i].valid && is_br_killed(inst_r[i].uop, in.dec_bcast)) {
+      current_killed = true;
     }
 
     if (current_killed) {
@@ -190,7 +199,6 @@ void Exu::comb_pipeline() {
       continue;
     }
 
-    // 未被冲刷时，按 stall/新输入更新。
     if (inst_r[i].valid && issue_stall[i]) {
       inst_r_1[i] = inst_r[i];
     } else if (in.prf2exe->iss_entry[i].valid) {
@@ -199,8 +207,9 @@ void Exu::comb_pipeline() {
       inst_r_1[i].valid = false;
     }
 
-    if (inst_r_1[i].valid) {
-      // debug removed
+    // 对存活条目清除已解析分支的 bit
+    if (inst_r_1[i].valid && clear) {
+      inst_r_1[i].uop.br_mask &= ~clear;
     }
   }
 }
@@ -219,8 +228,7 @@ void Exu::comb_exec() {
       bool is_killed = false;
       if (in.rob_bcast->flush)
         is_killed = true;
-      if (in.dec_bcast->mispred &&
-          ((1ULL << inst_r[i].uop.tag) & in.dec_bcast->br_mask)) {
+      if (is_br_killed(inst_r[i].uop, in.dec_bcast)) {
         is_killed = true;
       }
 
@@ -303,8 +311,7 @@ void Exu::comb_exec() {
     }
     if (!u) continue;
 
-    bool flushed = in.rob_bcast->flush || 
-                  (in.dec_bcast->mispred && ((1ULL << u->tag) & in.dec_bcast->br_mask));
+    bool flushed = in.rob_bcast->flush || is_br_killed(*u, in.dec_bcast);
 
     // A. 立即驱动 ROB (非访存指令在此完成)
     // 注意：LOAD/STA 的完成通报由 LSU 回调阶段处理
@@ -333,7 +340,9 @@ void Exu::comb_exec() {
       int_res[idx].valid = true;
     }
     // 收集 BR 信息 (用于分支仲裁)
-    if (p_idx >= IQ_BR_PORT_BASE && p_idx < IQ_BR_PORT_BASE + BRU_NUM) {
+    // 仅保留存活分支结果；被 flush/kill 的分支不应继续驱动恢复广播。
+    if (!flushed && p_idx >= IQ_BR_PORT_BASE &&
+        p_idx < IQ_BR_PORT_BASE + BRU_NUM) {
       int idx = p_idx - IQ_BR_PORT_BASE;
       br_res[idx].uop = *u;
       br_res[idx].valid = true;
@@ -359,9 +368,7 @@ void Exu::comb_exec() {
     if (in.lsu2exe->wb_req[i].valid) {
       int p_idx = IQ_LD_PORT_BASE + i;
       MicroOp &u = in.lsu2exe->wb_req[i].uop;
-      bool flushed = in.rob_bcast->flush ||
-                     (in.dec_bcast->mispred &&
-                      ((1ULL << u.tag) & in.dec_bcast->br_mask));
+      bool flushed = in.rob_bcast->flush || is_br_killed(u, in.dec_bcast);
       Assert(!out.exe2prf->entry[p_idx].valid);
       out.exe2prf->entry[p_idx].valid = true;
       out.exe2prf->entry[p_idx].uop = u;
@@ -376,9 +383,7 @@ void Exu::comb_exec() {
     if (in.lsu2exe->sta_wb_req[i].valid) {
       int p_idx = IQ_STA_PORT_BASE + i;
       MicroOp &u = in.lsu2exe->sta_wb_req[i].uop;
-      bool flushed = in.rob_bcast->flush ||
-                     (in.dec_bcast->mispred &&
-                      ((1ULL << u.tag) & in.dec_bcast->br_mask));
+      bool flushed = in.rob_bcast->flush || is_br_killed(u, in.dec_bcast);
       Assert(!out.exe2prf->entry[p_idx].valid);
       out.exe2prf->entry[p_idx].valid = true;
       out.exe2prf->entry[p_idx].uop = u;
@@ -394,28 +399,36 @@ void Exu::comb_exec() {
   // ==========================================
   bool mispred = false;
   MicroOp *mispred_uop = nullptr;
+  mask_t clear_mask = 0;
 
   for (int i = 0; i < BRU_NUM; i++) {
-    if (br_res[i].valid && br_res[i].uop.mispred) {
-      if (!mispred) {
-        mispred = true;
-        mispred_uop = &br_res[i].uop;
-      } else if (cmp_inst_age(*mispred_uop, br_res[i].uop)) {
-        mispred_uop = &br_res[i].uop;
+    if (br_res[i].valid) {
+      // 所有已解析的 branch 贡献 clear_mask
+      clear_mask |= (mask_t(1) << br_res[i].uop.br_id);
+
+      if (br_res[i].uop.mispred) {
+        if (!mispred) {
+          mispred = true;
+          mispred_uop = &br_res[i].uop;
+        } else if (cmp_inst_age(*mispred_uop, br_res[i].uop)) {
+          mispred_uop = &br_res[i].uop;
+        }
       }
     }
   }
 
+  // clear_mask 统一经由 IDU 广播到各模块，EXU 不再本地同拍清除
+  out.exu2id->clear_mask = clear_mask;
   out.exu2id->mispred = mispred;
   if (mispred) {
     out.exu2id->redirect_pc = mispred_uop->diag_val;
     out.exu2id->redirect_rob_idx = mispred_uop->rob_idx;
-    out.exu2id->br_tag = mispred_uop->tag;
+    out.exu2id->br_id = mispred_uop->br_id;
     out.exu2id->ftq_idx = mispred_uop->ftq_idx;
   } else {
     out.exu2id->redirect_pc = 0;
     out.exu2id->redirect_rob_idx = 0;
-    out.exu2id->br_tag = 0;
+    out.exu2id->br_id = 0;
     out.exu2id->ftq_idx = 0;
   }
 }

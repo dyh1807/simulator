@@ -9,7 +9,6 @@ public:
   PreIduIssueIO *issue;
   RenDecIO *ren2dec;
   RobBroadcastIO *rob_bcast;
-  RobCommitIO *commit;
   ExuIdIO *exu2id; // [New] From Exu
 };
 
@@ -38,22 +37,20 @@ public:
   void comb_branch(); // 分支处理
   void comb_fire();  // 发射握手与分支tag推进
   void comb_flush(); // flush处理
-  void comb_release_tag(); // 释放分支tag
   void seq();              // 时钟跳变，状态更新
 
   IduIO get_hardware_io(); // 获取硬件级别 IO (Hardware Reference)
 
   // 状态
-  reg<BR_TAG_WIDTH> tag_list[MAX_BR_NUM];
-  reg<BR_TAG_WIDTH> enq_ptr;
-  reg<BR_TAG_WIDTH> now_tag;
+  reg<BR_MASK_WIDTH> now_br_mask;
+  reg<BR_MASK_WIDTH> br_mask_cp[MAX_BR_NUM];
+  reg<BR_MASK_WIDTH> pending_free_mask; // 延迟一拍释放，避免同拍复用 br_id
   reg<1> tag_vec[MAX_BR_NUM];
   ExuIdIO br_latch;
 
   // 下一周期状态
-  wire<BR_TAG_WIDTH> tag_list_1[MAX_BR_NUM];
-  wire<BR_TAG_WIDTH> enq_ptr_1;
-  wire<BR_TAG_WIDTH> now_tag_1;
+  wire<BR_MASK_WIDTH> now_br_mask_1;
+  wire<BR_MASK_WIDTH> br_mask_cp_1[MAX_BR_NUM];
+  wire<BR_MASK_WIDTH> pending_free_mask_1;
   wire<1> tag_vec_1[MAX_BR_NUM];
-  ExuIdIO br_latch_1;
 };

@@ -44,7 +44,7 @@ typedef struct DecRenUop {
     slim.func7     = full.func7;
     slim.dest_areg = full.dest_areg;
     slim.src1_areg = full.src1_areg;
-    slim.tag       = full.tag;
+    slim.tag       = full.br_id;
     slim.uop_num   = full.uop_num;
     slim.dest_en   = full.dest_en;
     slim.src1_en   = full.src1_en;
@@ -113,7 +113,7 @@ typedef struct DisIssUop {
     slim.stq_idx   = full.stq_idx;
     slim.ldq_idx   = full.ldq_idx;
     slim.csr_idx   = full.csr_idx;
-    slim.tag       = full.tag;
+    slim.tag       = full.br_id;
     slim.func3     = full.func3;
     slim.func7     = full.func7;
     slim.src1_busy = full.src1_busy;
@@ -147,7 +147,7 @@ typedef struct IssExeUop {
     slim.dest_preg = full.dest_preg;
     slim.rob_idx   = full.rob_idx;
     slim.csr_idx   = full.csr_idx;
-    slim.tag       = full.tag;
+    slim.tag       = full.br_id;
     slim.func3     = full.func3;
     slim.func7     = full.func7;
     slim.src1_is_pc = full.src1_is_pc;
@@ -175,7 +175,7 @@ typedef struct ExeWbUop {
     slim.result           = full.result;
     slim.dest_preg        = full.dest_preg;
     slim.rob_idx          = full.rob_idx;
-    slim.tag              = full.tag;
+    slim.tag              = full.br_id;
     slim.page_fault_inst  = full.page_fault_inst;
     slim.page_fault_load  = full.page_fault_load;
     slim.page_fault_store = full.page_fault_store;
@@ -216,7 +216,7 @@ typedef struct RobUop {
     slim.old_dest_preg   = full.old_dest_preg;
     slim.dest_areg       = full.dest_areg;
     slim.dest_en         = full.dest_en;
-    slim.tag             = full.tag;
+    slim.tag             = full.br_id;
     slim.uop_num         = full.uop_num;
     slim.cplt_num        = full.cplt_num;
     slim.page_fault_inst = full.page_fault_inst;
@@ -250,7 +250,7 @@ typedef struct IduIO {
   struct {
     wire<1>  flush;              // Global pipeline flush
     wire<1>  mispred;            // Misprediction detected from PRF/EXE
-    wire<BR_TAG_WIDTH>  br_tag;             // Tag that mispredicted
+    wire<BR_TAG_WIDTH>  br_id;              // Branch ID that mispredicted
   } from_back;
 
   // --- Outputs ---
@@ -267,7 +267,7 @@ typedef struct IduIO {
   struct {
     wire<1>  mispred;            // Broadcast mispred to squash backend
     wire<BR_MASK_WIDTH> br_mask;            // Branch mask to clear (TODO: parameterize)
-    wire<BR_TAG_WIDTH>  br_tag;
+    wire<BR_TAG_WIDTH>  br_id;
   } to_back;
 } IduIO;
 

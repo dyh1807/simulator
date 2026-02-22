@@ -43,7 +43,7 @@ struct StqEntry {
   uint32_t data;
 
   uint32_t func3;
-  tag_t tag;
+  mask_t br_mask;
   uint32_t rob_idx;
   uint32_t rob_flag;
 };

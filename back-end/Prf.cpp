@@ -5,6 +5,11 @@
 #include <cstring>
 
 namespace {
+static inline bool is_killed(const MicroOp &uop, const DecBroadcastIO *db) {
+  if (!db->mispred) return false;
+  return (uop.br_mask & db->br_mask) != 0;
+}
+
 inline uint32_t read_operand_with_bypass(
     uint32_t preg, bool src_en, const reg<32> *reg_file, const UopEntry *inst_r,
     const ExePrfIO *exe2prf) {
@@ -80,9 +85,7 @@ void Prf::comb_awake() {
   // 遍历寻找有效的 Load 唤醒 (支持多端口)
   for (int i = 0; i < ISSUE_WIDTH; i++) {
     if (inst_r[i].valid && inst_r[i].uop.dest_en && is_load(inst_r[i].uop)) {
-      // 跳过被误预测冲刷的指令，避免错误唤醒。
-      bool is_squashed = in.dec_bcast->mispred &&
-                         (in.dec_bcast->br_mask & (1ULL << inst_r[i].uop.tag));
+      bool is_squashed = is_killed(inst_r[i].uop, in.dec_bcast);
       if (is_squashed) {
         continue;
       }
@@ -117,17 +120,17 @@ void Prf::comb_write() {
 // 4. 流水寄存器更新
 // ==========================================
 void Prf::comb_pipeline() {
-  // 从 Exu 接收结果（Exec -> WB），并在本函数统一处理 flush/mispred 的 kill。
   bool global_flush = in.rob_bcast->flush;
-  bool br_flush = in.dec_bcast->mispred;
+  mask_t clear = in.dec_bcast->clear_mask;
   for (int i = 0; i < ISSUE_WIDTH; i++) {
     if (global_flush) {
       inst_r_1[i].valid = false;
     } else if (in.exe2prf->entry[i].valid) {
       inst_r_1[i] = in.exe2prf->entry[i];
-      if (br_flush &&
-          (in.dec_bcast->br_mask & (1ULL << inst_r_1[i].uop.tag))) {
+      if (is_killed(inst_r_1[i].uop, in.dec_bcast)) {
         inst_r_1[i].valid = false;
+      } else if (inst_r_1[i].valid && clear) {
+        inst_r_1[i].uop.br_mask &= ~clear;
       }
     } else {
       inst_r_1[i].valid = false;
