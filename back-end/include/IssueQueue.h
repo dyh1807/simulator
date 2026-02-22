@@ -1,4 +1,7 @@
+#pragma once
+
 #include "config.h"
+#include <cassert>
 #include <cstdint>
 #include <vector>
 
@@ -43,6 +46,7 @@ public:
       : id(cfg.id), size(cfg.size),
         dispatch_width(cfg.dispatch_width), // <--- 初始化
         ports(cfg.ports) {
+    assert(size <= 64 && "IssueQueue size must be <= 64 for wake_matrix bitmask");
 
     entry.resize(size);
     entry_1.resize(size);
@@ -159,7 +163,9 @@ public:
 
     // 1. 端口忙闲状态标记
     int num_ports = ports.size();
-    std::vector<bool> port_busy(num_ports, false);
+    bool port_busy[ISSUE_WIDTH] = {false};
+    assert(num_ports <= ISSUE_WIDTH &&
+           "IssueQueue ports exceed ISSUE_WIDTH capacity");
 
     // 2. 遍历队列 (Oldest-First Scan)
     int issued_count = 0;

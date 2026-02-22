@@ -51,6 +51,7 @@ public:
   wire<1> deq_flag_1;
 
 private:
+  int stall_cycle = 0;
   bool is_empty() { return (enq_ptr == deq_ptr) && (enq_flag == deq_flag); };
   bool is_full() { return (enq_ptr == deq_ptr) && (enq_flag != deq_flag); };
 };

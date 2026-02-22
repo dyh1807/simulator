@@ -55,8 +55,6 @@ enum enum_csr {
   csr_satp,
   csr_mhartid,
   csr_misa,
-  csr_time,
-  csr_timeh,
 };
 
 inline int cvt_number_to_csr(int csr_idx) {
@@ -126,10 +124,8 @@ inline int cvt_number_to_csr(int csr_idx) {
     ret = csr_misa;
     break;
   case number_time:
-    ret = csr_time;
-    break;
   case number_timeh:
-    ret = csr_timeh;
+    Assert(0 && "time/timeh are not implemented in Csr RegFile");
     break;
   default:
     Assert(0);
@@ -164,7 +160,7 @@ public:
   void comb_exception();
   void seq();
 
-  reg<32> CSR_RegFile[21];
+  reg<32> CSR_RegFile[CSR_NUM];
   reg<2> privilege = 0b11;
 
   // 执行时存下需要写入的idx，cmd和data
@@ -175,7 +171,7 @@ public:
   reg<2> csr_wcmd;
   reg<1> csr_we;
 
-  wire<32> CSR_RegFile_1[21];
+  wire<32> CSR_RegFile_1[CSR_NUM];
   wire<2> privilege_1 = 0b11;
 
   wire<12> csr_idx_1;

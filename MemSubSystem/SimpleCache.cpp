@@ -180,6 +180,8 @@ void SimpleCache::accept_req(const MemReqIO &req) {
   if (!req.en) {
     return;
   }
+  Assert(pending_reqs.size() < MAX_PENDING_REQS &&
+         "SimpleCache: pending read queue overflow");
 
   int latency = cache_access(req.addr);
   PendingReq pending{};

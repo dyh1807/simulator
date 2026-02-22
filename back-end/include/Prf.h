@@ -24,11 +24,9 @@ public:
   PrfIn in;
   PrfOut out;
 
-  void comb_branch();
   void comb_complete();
   void comb_awake();
   void comb_read();
-  void comb_flush();
   void comb_write();
   void comb_pipeline();
   void init();

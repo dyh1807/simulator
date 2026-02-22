@@ -1,5 +1,4 @@
 #pragma once
-#pragma once
 #include "IO.h"
 #include "Fu.h" // 包含具体的 FU 定义
 #include "config.h"

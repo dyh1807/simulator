@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 
 // 外部辅助函数声明
 extern uint32_t *p_memory;
@@ -27,9 +28,9 @@ static inline void ldq_trace(const char *evt, int idx, const MicroOp &uop) {
 SimpleLsu::SimpleLsu(SimContext *ctx) : AbstractLsu(ctx) {
   // Initialize MMU
 #ifdef CONFIG_TLB_MMU
-  mmu = new TlbMmu(ctx, nullptr, DTLB_ENTRIES);
+  mmu = std::make_unique<TlbMmu>(ctx, nullptr, DTLB_ENTRIES);
 #else
-  mmu = new SimpleMmu(ctx, this);
+  mmu = std::make_unique<SimpleMmu>(ctx, this);
 #endif
 
   init();
@@ -45,9 +46,7 @@ void SimpleLsu::init() {
   finished_loads.clear();
   finished_sta_reqs.clear();
   pending_sta_addr_reqs.clear();
-  if (mmu != nullptr) {
-    mmu->flush();
-  }
+  mmu->flush();
 
   // 初始化所有 STQ LDQ 条目，防止未初始化内存导致的破坏
   for (int i = 0; i < STQ_NUM; i++) {
@@ -111,16 +110,9 @@ void SimpleLsu::comb_lsu2dis_info() {
 // 2. Execute 阶段: 接收 AGU/SDU 请求 (多端口轮询)
 // =========================================================
 void SimpleLsu::comb_recv() {
-  if (mmu != nullptr) {
-    if (last_bound_ptw_mem_port != ptw_mem_port) {
-      mmu->set_ptw_mem_port(ptw_mem_port);
-      last_bound_ptw_mem_port = ptw_mem_port;
-    }
-    if (last_bound_ptw_walk_port != ptw_walk_port) {
-      mmu->set_ptw_walk_port(ptw_walk_port);
-      last_bound_ptw_walk_port = ptw_walk_port;
-    }
-  }
+  // 顶层当前采用直接变量赋值连线；这里每拍将端口硬连到 MMU。
+  mmu->set_ptw_mem_port(ptw_mem_port);
+  mmu->set_ptw_walk_port(ptw_walk_port);
 
   Assert(out.dcache_req != nullptr && "out.dcache_req is not connected");
   Assert(out.dcache_wreq != nullptr && "out.dcache_wreq is not connected");
@@ -269,17 +261,15 @@ void SimpleLsu::handle_load_req(const MicroOp &inst) {
 
     // [Fix] Disable Store-to-Load Forwarding for MMIO ranges
     // These addresses involve side effects and must read from consistent memory
-    bool is_mmio = ((p_addr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
-                   ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+    bool is_mmio = is_mmio_addr(p_addr);
 
     task.flush_pipe = is_mmio;
-    auto fwd_res =
-        is_mmio ? std::make_pair(0, 0u) : check_store_forward(p_addr, inst);
+    auto fwd_res = is_mmio ? StoreForwardResult{} : check_store_forward(p_addr, inst);
 
-    if (fwd_res.first == 1) {
-      task.result = fwd_res.second;
+    if (fwd_res.state == StoreForwardState::Hit) {
+      task.result = fwd_res.data;
       task.cplt_time = sim_time + 0; // 这一拍直接完成！
-    } else if (fwd_res.first == 0) {
+    } else if (fwd_res.state == StoreForwardState::NoHit) {
       task.cplt_time = REQ_WAIT_SEND;
     } else {
       task.cplt_time = REQ_WAIT_RETRY;
@@ -297,6 +287,7 @@ void SimpleLsu::handle_store_addr(const MicroOp &inst) {
 }
 
 void SimpleLsu::handle_store_data(const MicroOp &inst) {
+  Assert(inst.stq_idx >= 0 && inst.stq_idx < STQ_NUM);
   stq[inst.stq_idx].data = inst.result;
   stq[inst.stq_idx].data_valid = true;
 }
@@ -525,6 +516,7 @@ void SimpleLsu::commit_stores_from_rob() {
       continue;
     }
     int idx = in.rob_commit->commit_entry[i].uop.stq_idx;
+    Assert(idx >= 0 && idx < STQ_NUM);
     if (idx == stq_commit) {
       stq[idx].committed = true;
       stq_commit = (stq_commit + 1) % STQ_NUM;
@@ -563,15 +555,14 @@ void SimpleLsu::progress_ldq_entries() {
         entry.uop.cplt_time = sim_time + 1;
       } else {
         entry.uop.diag_val = p_addr;
-        bool is_mmio = ((p_addr & UART_ADDR_MASK) == UART_ADDR_BASE) ||
-                       ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+        bool is_mmio = is_mmio_addr(p_addr);
         entry.uop.flush_pipe = is_mmio;
-        auto fwd_res = is_mmio ? std::make_pair(0, 0u)
-                               : check_store_forward(p_addr, entry.uop);
-        if (fwd_res.first == 1) {
-          entry.uop.result = fwd_res.second;
+        auto fwd_res =
+            is_mmio ? StoreForwardResult{} : check_store_forward(p_addr, entry.uop);
+        if (fwd_res.state == StoreForwardState::Hit) {
+          entry.uop.result = fwd_res.data;
           entry.uop.cplt_time = sim_time;
-        } else if (fwd_res.first == 0) {
+        } else if (fwd_res.state == StoreForwardState::NoHit) {
           entry.uop.cplt_time = REQ_WAIT_SEND;
         } else {
           entry.uop.cplt_time = REQ_WAIT_RETRY;
@@ -582,10 +573,10 @@ void SimpleLsu::progress_ldq_entries() {
 
     if (entry.uop.cplt_time == REQ_WAIT_RETRY) {
       auto fwd_res = check_store_forward(entry.uop.diag_val, entry.uop);
-      if (fwd_res.first == 1) {
-        entry.uop.result = fwd_res.second;
+      if (fwd_res.state == StoreForwardState::Hit) {
+        entry.uop.result = fwd_res.data;
         entry.uop.cplt_time = sim_time;
-      } else if (fwd_res.first == 0) {
+      } else if (fwd_res.state == StoreForwardState::NoHit) {
         entry.uop.cplt_time = REQ_WAIT_SEND;
       }
     }
@@ -601,6 +592,7 @@ void SimpleLsu::progress_ldq_entries() {
 
 bool SimpleLsu::finish_store_addr_once(const MicroOp &inst) {
   int idx = inst.stq_idx;
+  Assert(idx >= 0 && idx < STQ_NUM);
   stq[idx].addr = inst.result; // VA
 
   uint32_t pa = inst.result;
@@ -621,8 +613,7 @@ bool SimpleLsu::finish_store_addr_once(const MicroOp &inst) {
 
   MicroOp success_op = inst;
   success_op.cplt_time = sim_time;
-  bool is_mmio = ((pa & UART_ADDR_MASK) == UART_ADDR_BASE) ||
-                 ((pa & PLIC_ADDR_MASK) == PLIC_ADDR_BASE);
+  bool is_mmio = is_mmio_addr(pa);
   success_op.flush_pipe = is_mmio;
   finished_sta_reqs.push_back(success_op);
   stq[idx].p_addr = pa;
@@ -772,7 +763,7 @@ bool SimpleLsu::is_store_older(int s_idx, int s_flag, int l_idx, int l_flag) {
 // =========================================================
 // 🛡️ [Nanako Implementation] 完整的 STLF 模拟逻辑
 // =========================================================
-std::pair<int, uint32_t>
+SimpleLsu::StoreForwardResult
 SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
 
   uint32_t current_word = p_memory[p_addr >> 2];
@@ -795,7 +786,7 @@ SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
     // If it's valid, it's an older store that this load must respect.
     if (entry.valid) {
       if (!entry.addr_valid)
-        return {2, 0}; // Unknown address -> Stall (Retry)
+        return {StoreForwardState::Retry, 0}; // Unknown address -> Stall (Retry)
 
       // Address is valid, check overlap
       int store_width = get_mem_width(entry.func3);
@@ -811,7 +802,7 @@ SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
       if (overlap_start < overlap_end) {
         hit_any = true;
         if (!entry.data_valid)
-          return {2, 0}; // Data unknown -> Stall (Retry)
+          return {StoreForwardState::Retry, 0}; // Data unknown -> Stall (Retry)
         current_word = merge_data_to_word(current_word, entry.data,
                                           entry.p_addr, entry.func3);
       }
@@ -820,26 +811,16 @@ SimpleLsu::check_store_forward(uint32_t p_addr, const MicroOp &load_uop) {
   }
 
   if (!hit_any)
-    return {false, 0};
+    return {StoreForwardState::NoHit, 0};
 
   uint32_t final_data = extract_data(current_word, p_addr, load_uop.func3);
-  return {true, final_data};
+  return {StoreForwardState::Hit, final_data};
 }
 
-uint32_t SimpleLsu::get_load_addr(int rob_idx) {
-  for (int i = 0; i < MAX_INFLIGHT_LOADS; i++) {
-    if (ldq[i].valid && ldq[i].uop.rob_idx == rob_idx) {
-      return ldq[i].uop.result; // For LOADS, result holds the VA
-    }
-  }
-  for (const auto &it : finished_loads) {
-    if (it.rob_idx == rob_idx)
-      return it.result;
-  }
-  return 0;
+StqEntry SimpleLsu::get_stq_entry(int stq_idx) {
+  Assert(stq_idx >= 0 && stq_idx < STQ_NUM);
+  return stq[stq_idx];
 }
-
-StqEntry SimpleLsu::get_stq_entry(int stq_idx) { return stq[stq_idx]; }
 
 uint32_t SimpleLsu::coherent_read(uint32_t p_addr) {
   // 1. 基准值：读物理内存 (假设 p_addr 已对齐到 4)

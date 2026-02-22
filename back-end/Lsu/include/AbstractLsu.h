@@ -75,7 +75,6 @@ public:
 
   // debug接口
   virtual StqEntry get_stq_entry(int stq_idx) = 0;
-  virtual uint32_t get_load_addr(int rob_idx) = 0;
 
   virtual void set_csr(Csr *csr) {}
   virtual void set_ptw_mem_port(PtwMemPort *port) { ptw_mem_port = port; }

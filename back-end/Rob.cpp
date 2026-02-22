@@ -7,11 +7,25 @@
 #include <iostream>
 #include "util.h"
 
+namespace {
+inline uint32_t load_alignment_mask(uint32_t func3) {
+  switch (func3 & 0x3) {
+  case 0:
+    return 0;
+  case 1:
+    return 1;
+  default:
+    return 3;
+  }
+}
+} // namespace
+
 void Rob::init() {
   deq_ptr = deq_ptr_1 = 0;
   enq_ptr = enq_ptr_1 = 0;
   enq_flag = enq_flag_1 = false;
   deq_flag = deq_flag_1 = false;
+  stall_cycle = 0;
 
   for (int i = 0; i < ROB_LINE_NUM; i++) {
     for (int j = 0; j < ROB_BANK_NUM; j++) {
@@ -82,8 +96,6 @@ void Rob::comb_ready() {
 }
 
 void Rob::comb_commit() {
-
-  static int stall_cycle = 0; // 检查是否卡死
   out.rob_bcast->flush = out.rob_bcast->exception = out.rob_bcast->mret =
       out.rob_bcast->sret = out.rob_bcast->ecall = out.rob_bcast->fence =
           out.rob_bcast->fence_i = false;
@@ -144,9 +156,7 @@ void Rob::comb_commit() {
         // 仅在 Load 已完成且非异常语义时检查地址对齐，避免中断单提交/异常路径下
         // 将 diag_val 的其他语义（如指令字、异常地址）误当作物理地址检查。
         if (is_load(uop) && (uop.cplt_num == uop.uop_num) && !is_page_fault(uop)) {
-          uint32_t alignment_mask = (uop.func3 & 0x3) == 0   ? 0
-                                    : (uop.func3 & 0x3) == 1 ? 1
-                                                             : 3;
+          uint32_t alignment_mask = load_alignment_mask(uop.func3);
           Assert((uop.diag_val & alignment_mask) == 0 &&
                  "DUT: Load address misaligned at commit!");
         }
@@ -174,9 +184,7 @@ void Rob::comb_commit() {
       const auto &uop = entry[single_idx][deq_ptr].uop;
       // 中断触发 single_commit 时，首条指令可能尚未完成，diag_val 可能不是地址语义。
       if (is_load(uop) && (uop.cplt_num == uop.uop_num) && !is_page_fault(uop)) {
-        uint32_t alignment_mask = (uop.func3 & 0x3) == 0   ? 0
-                                  : (uop.func3 & 0x3) == 1 ? 1
-                                                           : 3;
+        uint32_t alignment_mask = load_alignment_mask(uop.func3);
         Assert((uop.diag_val & alignment_mask) == 0 &&
                "DUT: Load address misaligned at single commit!");
       }

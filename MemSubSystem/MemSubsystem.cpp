@@ -1,5 +1,6 @@
 #include "MemSubsystem.h"
 #include "SimpleCache.h"
+#include <memory>
 
 class MemSubsystemPtwMemPortAdapter : public PtwMemPort {
 public:
@@ -55,11 +56,7 @@ void MemSubsystem::refresh_ptw_client_outputs() {
 }
 
 bool MemSubsystem::ptw_mem_send_read_req(PtwClient client, uint32_t paddr) {
-  auto &req_io = ptw_mem_req_ios[ptw_client_idx(client)];
-  req_io.en = true;
-  req_io.paddr = paddr;
   bool fire = ptw_block.client_send_read_req(to_block_client(client), paddr);
-  req_io.en = false;
   refresh_ptw_client_outputs();
   return fire;
 }
@@ -78,11 +75,7 @@ void MemSubsystem::ptw_mem_consume_resp(PtwClient client) {
 }
 
 bool MemSubsystem::ptw_walk_send_req(PtwClient client, const PtwWalkReq &req) {
-  auto &req_io = ptw_walk_req_ios[ptw_client_idx(client)];
-  req_io.en = true;
-  req_io.req = req;
   bool fire = ptw_block.walk_client_send_req(to_block_client(client), req);
-  req_io.en = false;
   refresh_ptw_client_outputs();
   return fire;
 }
@@ -106,27 +99,23 @@ void MemSubsystem::ptw_walk_flush(PtwClient client) {
 }
 
 MemSubsystem::MemSubsystem(SimContext *ctx) : ctx(ctx) {
-  dcache = new SimpleCache(ctx);
+  dcache = std::make_unique<SimpleCache>(ctx);
   ptw_block.bind_context(ctx);
-  dtlb_ptw_port_inst = new MemSubsystemPtwMemPortAdapter(this, PtwClient::DTLB);
-  itlb_ptw_port_inst = new MemSubsystemPtwMemPortAdapter(this, PtwClient::ITLB);
+  dtlb_ptw_port_inst =
+      std::make_unique<MemSubsystemPtwMemPortAdapter>(this, PtwClient::DTLB);
+  itlb_ptw_port_inst =
+      std::make_unique<MemSubsystemPtwMemPortAdapter>(this, PtwClient::ITLB);
   dtlb_walk_port_inst =
-      new MemSubsystemPtwWalkPortAdapter(this, PtwClient::DTLB);
+      std::make_unique<MemSubsystemPtwWalkPortAdapter>(this, PtwClient::DTLB);
   itlb_walk_port_inst =
-      new MemSubsystemPtwWalkPortAdapter(this, PtwClient::ITLB);
-  dtlb_ptw_port = dtlb_ptw_port_inst;
-  itlb_ptw_port = itlb_ptw_port_inst;
-  dtlb_walk_port = dtlb_walk_port_inst;
-  itlb_walk_port = itlb_walk_port_inst;
+      std::make_unique<MemSubsystemPtwWalkPortAdapter>(this, PtwClient::ITLB);
+  dtlb_ptw_port = dtlb_ptw_port_inst.get();
+  itlb_ptw_port = itlb_ptw_port_inst.get();
+  dtlb_walk_port = dtlb_walk_port_inst.get();
+  itlb_walk_port = itlb_walk_port_inst.get();
 }
 
-MemSubsystem::~MemSubsystem() {
-  delete dcache;
-  delete dtlb_ptw_port_inst;
-  delete itlb_ptw_port_inst;
-  delete dtlb_walk_port_inst;
-  delete itlb_walk_port_inst;
-}
+MemSubsystem::~MemSubsystem() = default;
 
 void MemSubsystem::init() {
   Assert(lsu_req_io != nullptr && "MemSubsystem: lsu_req_io is not connected");
@@ -151,9 +140,7 @@ void MemSubsystem::init() {
 
   ptw_block.init();
   resp_route_block.init();
-  ptw_mem_req_ios = {};
   ptw_mem_resp_ios = {};
-  ptw_walk_req_ios = {};
   ptw_walk_resp_ios = {};
   refresh_ptw_client_outputs();
 
@@ -161,12 +148,8 @@ void MemSubsystem::init() {
   dcache_wreq_mux = {};
   dcache_resp_raw = {};
   dcache_wready_raw = {};
-  if (lsu_resp_io != nullptr) {
-    *lsu_resp_io = {};
-  }
-  if (lsu_wready_io != nullptr) {
-    *lsu_wready_io = {};
-  }
+  *lsu_resp_io = {};
+  *lsu_wready_io = {};
 
   dcache->init();
 }
@@ -177,8 +160,7 @@ void MemSubsystem::on_commit_store(uint32_t paddr, uint32_t data) {
 
 void MemSubsystem::comb() {
   // 子模块按组合逻辑顺序推进。
-  ptw_block.comb_prepare();
-  ptw_block.comb();
+  ptw_block.comb_select_walk_owner();
 
   // Default outputs every cycle.
   *lsu_resp_io = {};
@@ -186,9 +168,7 @@ void MemSubsystem::comb() {
   dcache_wreq_mux = {};
 
   // Pass write channel (currently only LSU issues writes).
-  if (lsu_wreq_io != nullptr) {
-    dcache_wreq_mux = *lsu_wreq_io;
-  }
+  dcache_wreq_mux = *lsu_wreq_io;
 
   uint32_t ptw_walk_read_addr = 0;
   bool issue_ptw_walk_read = ptw_block.walk_read_req(ptw_walk_read_addr);
@@ -237,5 +217,4 @@ void MemSubsystem::comb() {
 
 void MemSubsystem::seq() {
   dcache->seq();
-  ptw_block.seq();
 }

@@ -21,7 +21,7 @@ public:
 
     if (paddr == UART_ADDR_BASE) {
       char temp = new_val & 0xFF;
-      std::cout << temp << std::flush;
+      std::cout << temp;
       memory[UART_ADDR_BASE / 4] &= 0xffffff00;
       return;
     }

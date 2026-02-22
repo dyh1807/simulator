@@ -33,7 +33,7 @@ public:
     walk_l1_pte = 0;
     walk_drop_resp_credit = 0;
   }
-  void comb_prepare() {
+  void comb_select_walk_owner() {
     if (!walk_active && walk_state == WalkState::IDLE) {
       auto grant_walk_owner = [&](Client owner) {
         auto &wc = walk_clients[client_idx(owner)];
@@ -57,9 +57,6 @@ public:
       }
     }
   }
-  void comb() {}
-  void seq() {}
-
   void count_wait_cycles() {
     if (ctx == nullptr) {
       return;

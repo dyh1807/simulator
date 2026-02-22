@@ -9,6 +9,7 @@
 #include "PtwMemPort.h"
 #include "PtwWalkPort.h"
 #include <array>
+#include <memory>
 
 class SimContext;
 class MemSubsystemPtwMemPortAdapter;
@@ -46,7 +47,7 @@ public:
 
 private:
   SimContext *ctx;
-  AbstractDcache *dcache;
+  std::unique_ptr<AbstractDcache> dcache;
   PeripheralModel peripheral;
   MemPtwBlock ptw_block;
   MemReadArbBlock read_arb_block;
@@ -74,17 +75,15 @@ private:
   void ptw_walk_flush(PtwClient client);
 
   // PTW 对外端口显式 IO（定义在 IO.h）。
-  std::array<PtwMemReqIO, kPtwClientCount> ptw_mem_req_ios{};
   std::array<PtwMemRespIO, kPtwClientCount> ptw_mem_resp_ios{};
-  std::array<PtwWalkReqIO, kPtwClientCount> ptw_walk_req_ios{};
   std::array<PtwWalkRespIO, kPtwClientCount> ptw_walk_resp_ios{};
 
   friend class MemSubsystemPtwMemPortAdapter;
   friend class MemSubsystemPtwWalkPortAdapter;
 
   // Dedicated PTW client ports for DTLB/ITLB shared PTW access.
-  PtwMemPort *dtlb_ptw_port_inst = nullptr;
-  PtwMemPort *itlb_ptw_port_inst = nullptr;
-  PtwWalkPort *dtlb_walk_port_inst = nullptr;
-  PtwWalkPort *itlb_walk_port_inst = nullptr;
+  std::unique_ptr<PtwMemPort> dtlb_ptw_port_inst;
+  std::unique_ptr<PtwMemPort> itlb_ptw_port_inst;
+  std::unique_ptr<PtwWalkPort> dtlb_walk_port_inst;
+  std::unique_ptr<PtwWalkPort> itlb_walk_port_inst;
 };

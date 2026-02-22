@@ -157,18 +157,19 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     struct front2back_FIFO_in front2back_fifo_in;
     struct front2back_FIFO_out front2back_fifo_out;
     
-    memset(&bpu_in, 0, sizeof(bpu_in));
-    memset(&bpu_out, 0, sizeof(bpu_out));
-    memset(&fetch_addr_fifo_in, 0, sizeof(fetch_addr_fifo_in));
-    memset(&fetch_addr_fifo_out, 0, sizeof(fetch_addr_fifo_out));
-    memset(&icache_in, 0, sizeof(icache_in));
-    memset(&icache_out, 0, sizeof(icache_out));
-    memset(&fifo_in, 0, sizeof(fifo_in));
-    memset(&fifo_out, 0, sizeof(fifo_out));
-    memset(&ptab_in, 0, sizeof(ptab_in));
-    memset(&ptab_out, 0, sizeof(ptab_out));
-    memset(&front2back_fifo_in, 0, sizeof(front2back_fifo_in));
-    memset(&front2back_fifo_out, 0, sizeof(front2back_fifo_out));
+    // 性能优化（临时）：按需字段赋值，先禁用全量 memset。
+    // memset(&bpu_in, 0, sizeof(bpu_in));
+    // memset(&bpu_out, 0, sizeof(bpu_out));
+    // memset(&fetch_addr_fifo_in, 0, sizeof(fetch_addr_fifo_in));
+    // memset(&fetch_addr_fifo_out, 0, sizeof(fetch_addr_fifo_out));
+    // memset(&icache_in, 0, sizeof(icache_in));
+    // memset(&icache_out, 0, sizeof(icache_out));
+    // memset(&fifo_in, 0, sizeof(fifo_in));
+    // memset(&fifo_out, 0, sizeof(fifo_out));
+    // memset(&ptab_in, 0, sizeof(ptab_in));
+    // memset(&ptab_out, 0, sizeof(ptab_out));
+    // memset(&front2back_fifo_in, 0, sizeof(front2back_fifo_in));
+    // memset(&front2back_fifo_out, 0, sizeof(front2back_fifo_out));
     
     // ========================================================================
     // 阶段 1: 计算全局 flush/refetch 信号
@@ -230,16 +231,6 @@ void front_top(struct front_top_in *in, struct front_top_out *out) {
     bool inst_fifo_read_enable = predecode_can_run_old;
     // bool ptab_read_enable = predecode_can_run;
     bool ptab_read_enable = predecode_can_run_old;
-    // if(predecode_can_run_old) {
-    //     bool ptab_stay_more = ptab_peek_mini_flush();
-    //     if(!ptab_stay_more){
-    //         ptab_read_enable = true;
-    //     }else {
-    //         DEBUG_LOG_SMALL_4("peek-ptab\n");
-    //         ptab_read_enable = false;
-    //     }
-    // }
-    // bool predecode_can_run = ptab_read_enable && inst_fifo_read_enable;
     
     // front2back_FIFO 读使能：后端请求读取
     // refetch and reset deal when running

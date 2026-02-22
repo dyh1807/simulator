@@ -11,10 +11,31 @@ void Isu::add_iq(const IssueQueueConfig &cfg) {
   configs.push_back(cfg);
 }
 
+void Isu::apply_wakeup_to_uop(MicroOp &uop) const {
+  for (int k = 0; k < MAX_WAKEUP_PORTS; k++) {
+    if (!out.iss_awake->wake[k].valid) {
+      continue;
+    }
+    uint32_t preg = out.iss_awake->wake[k].preg;
+    if (uop.src1_en && uop.src1_preg == preg) {
+      uop.src1_busy = false;
+    }
+    if (uop.src2_en && uop.src2_preg == preg) {
+      uop.src2_busy = false;
+    }
+  }
+}
+
 void Isu::init() {
 
   iqs.clear();
   configs.clear();
+  latency_pipe.clear();
+  latency_pipe_1.clear();
+  for (int i = 0; i < IQ_NUM; i++) {
+    committed_indices_buf[i].clear();
+    committed_indices_buf[i].reserve(GLOBAL_IQ_CONFIG[i].size);
+  }
 
   // 遍历每一个 IQ 配置
   for (int i = 0; i < IQ_NUM; i++) {
@@ -81,21 +102,9 @@ void Isu::comb_enq() {
     for (int w = 0; w < max_w; w++) {
       // 使用新接口结构 req[i][w]
       if (in.dis2iss->req[i][w].valid) {
-        MicroOp &uop = in.dis2iss->req[i][w].uop;
-
-
-
-        // 修正：检查本周期的寄存器唤醒 (快速/慢速唤醒)
-        // out.iss_awake 包含在 comb_awake 中生成的所有唤醒信号
-        for (int k = 0; k < MAX_WAKEUP_PORTS; k++) {
-          if (out.iss_awake->wake[k].valid) {
-            uint32_t preg = out.iss_awake->wake[k].preg;
-            if (uop.src1_en && uop.src1_preg == preg)
-              uop.src1_busy = false;
-            if (uop.src2_en && uop.src2_preg == preg)
-              uop.src2_busy = false;
-          }
-        }
+        MicroOp uop = in.dis2iss->req[i][w].uop;
+        // 本拍入队前叠加唤醒总线，避免把“可读源”误标成 busy。
+        apply_wakeup_to_uop(uop);
 
         UopEntry new_entry;
         new_entry.uop = uop;
@@ -126,7 +135,8 @@ void Isu::comb_issue() {
     // 调用新的 schedule
     auto scheduled_pairs = q.schedule();
 
-    std::vector<int> committed_indices;
+    auto &committed_indices = committed_indices_buf[i];
+    committed_indices.clear();
 
     for (auto &pair : scheduled_pairs) {
       int entry_idx = pair.first;

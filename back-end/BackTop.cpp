@@ -1,11 +1,9 @@
 #include "BackTop.h"
 #include "Csr.h"
 #include "IO.h"
-#include "MemSubsystem.h"
 #include "SimpleLsu.h"
 #include "config.h"
 #include "diff.h"
-#include "front_module.h"
 #include "oracle.h"
 #include "ref.h"
 #include "util.h"
@@ -18,21 +16,32 @@
 void init_diff_ckpt(CPU_state ckpt_state, uint32_t *ckpt_memory);
 
 void BackTop::init() {
+  pre_idu_queue = new PreIduQueue();
   idu = new Idu(ctx, MAX_BR_PER_CYCLE);
   rename = new Ren(ctx);
   dis = new Dispatch(ctx);
   isu = new Isu(ctx);
   prf = new Prf(ctx);
-  exu = new Exu(ctx, idu->out.ftq_lookup);
+  exu = new Exu(ctx, &ftq_lookup);
   csr = new Csr();
   rob = new Rob(ctx);
   lsu = new SimpleLsu(ctx);
   lsu->set_csr(csr);
 
-  idu->out.dec2front = &dec2front;
+  pre_idu_queue->out.dec2front = &dec2front;
+  pre_idu_queue->out.issue = &pre_idu_issue;
+  pre_idu_queue->out.ftq_lookup = &ftq_lookup;
+  pre_idu_queue->in.front2dec = &front2dec;
+  pre_idu_queue->in.ren2dec = &ren2dec;
+  pre_idu_queue->in.idu_dec2ren = &dec2ren;
+  pre_idu_queue->in.rob_bcast = &rob_bcast;
+  pre_idu_queue->in.rob_commit = &rob_commit;
+  pre_idu_queue->in.exu2id = &exu2id;
+
   idu->out.dec2ren = &dec2ren;
   idu->out.dec_bcast = &dec_bcast;
-  idu->in.front2dec = &front2dec;
+  idu->out.ftq_lookup = &ftq_lookup;
+  idu->in.issue = &pre_idu_issue;
   idu->in.ren2dec = &ren2dec;
   idu->in.rob_bcast = &rob_bcast;
   idu->in.commit = &rob_commit;
@@ -130,6 +139,7 @@ void BackTop::init() {
   lsu->out.dcache_req = &lsu2dcache_req;
   lsu->out.dcache_wreq = &lsu2dcache_wreq;
 
+  pre_idu_queue->init();
   idu->init();
   rename->init();
   dis->init();
@@ -151,26 +161,27 @@ void BackTop::comb_csr_status() {
 
 void BackTop::comb() {
   // CSR 状态由 SimCpu::cycle() 在进入 front/back 组合逻辑前统一刷新。
-  idu->comb_ftq_begin();
+  pre_idu_queue->comb_begin();
   // 输出提交的指令
   for (int i = 0; i < FETCH_WIDTH; i++) {
-    idu->in.front2dec->valid[i] = in.valid[i];
-    idu->in.front2dec->pc[i] = in.pc[i];
-    idu->in.front2dec->inst[i] = in.inst[i];
-    idu->in.front2dec->predict_dir[i] = in.predict_dir[i];
-    idu->in.front2dec->alt_pred[i] = in.alt_pred[i];
-    idu->in.front2dec->altpcpn[i] = in.altpcpn[i];
-    idu->in.front2dec->pcpn[i] = in.pcpn[i];
-    idu->in.front2dec->predict_next_fetch_address[i] =
+    pre_idu_queue->in.front2dec->valid[i] = in.valid[i];
+    pre_idu_queue->in.front2dec->pc[i] = in.pc[i];
+    pre_idu_queue->in.front2dec->inst[i] = in.inst[i];
+    pre_idu_queue->in.front2dec->predict_dir[i] = in.predict_dir[i];
+    pre_idu_queue->in.front2dec->alt_pred[i] = in.alt_pred[i];
+    pre_idu_queue->in.front2dec->altpcpn[i] = in.altpcpn[i];
+    pre_idu_queue->in.front2dec->pcpn[i] = in.pcpn[i];
+    pre_idu_queue->in.front2dec->predict_next_fetch_address[i] =
         in.predict_next_fetch_address[i];
-    idu->in.front2dec->page_fault_inst[i] = in.page_fault_inst[i];
+    pre_idu_queue->in.front2dec->page_fault_inst[i] = in.page_fault_inst[i];
     for (int j = 0; j < 4; j++) { // TN_MAX = 4
-      idu->in.front2dec->tage_idx[i][j] = in.tage_idx[i][j];
-      idu->in.front2dec->tage_tag[i][j] = in.tage_tag[i][j];
+      pre_idu_queue->in.front2dec->tage_idx[i][j] = in.tage_idx[i][j];
+      pre_idu_queue->in.front2dec->tage_tag[i][j] = in.tage_tag[i][j];
     }
   }
 
   // 每个空行表示分层  下层会依赖上层产生的某个信号
+  pre_idu_queue->comb_accept_front();
   idu->comb_decode();
   csr->comb_interrupt();
   rename->comb_alloc();
@@ -213,6 +224,7 @@ void BackTop::comb() {
   rename->comb_fire();
   rob->comb_fire();
   idu->comb_fire();
+  pre_idu_queue->comb_consume_issue();
 
   // 用于调试
   // 修正pc_next 以及difftest对应的pc_next
@@ -222,7 +234,7 @@ void BackTop::comb() {
   // 1. Normal case (No Rob flush)
   if (!rob->out.rob_bcast->flush) {
     out.mispred = idu->out.dec_bcast->mispred;
-    out.stall = !idu->out.dec2front->ready;
+    out.stall = !dec2front.ready;
     out.redirect_pc = idu->br_latch.redirect_pc;
   } else {
     out.mispred = true;
@@ -250,14 +262,13 @@ void BackTop::comb() {
   isu->comb_enq();
   rename->comb_commit();
   rob->comb_flush();
-  prf->comb_flush();
   rename->comb_flush();
   idu->comb_flush();
+  pre_idu_queue->comb_flush_recover();
   isu->comb_flush();
   lsu->comb_flush();
-  idu->comb_ftq_commit_reclaim();
+  pre_idu_queue->comb_commit_reclaim();
   rob->comb_branch();
-  prf->comb_branch();
   rename->comb_branch();
   prf->comb_pipeline();
   exu->comb_pipeline();
@@ -268,6 +279,7 @@ void BackTop::comb() {
 void BackTop::seq() {
   // rename -> isu/stq/rob
   // exu -> prf
+  pre_idu_queue->seq();
   rename->seq();
   dis->seq();
   idu->seq();
@@ -278,7 +290,7 @@ void BackTop::seq() {
   csr->seq();
   lsu->seq();
   for (int i = 0; i < FETCH_WIDTH; i++) {
-    out.fire[i] = idu->out.dec2front->fire[i];
+    out.fire[i] = dec2front.fire[i];
   }
 }
 
@@ -405,8 +417,8 @@ void BackTop::restore_checkpoint(const std::string &filename) {
   state.inst_idx = 0;
 
   number_PC = state.pc;
-  // 约束：当前 checkpoint 生成流程要求快照时处于 U 态，因此恢复时固定回到 U 态。
-  // 若未来支持在 S/M 态打点，需要把特权级一并写入并按快照值恢复。
+  // 约束：当前 checkpoint 生成流程要求快照时处于 U 态，因此恢复时固定回到 U
+  // 态。 若未来支持在 S/M 态打点，需要把特权级一并写入并按快照值恢复。
   csr->privilege = csr->privilege_1 = RISCV_MODE_U;
 
   for (int i = 0; i < ARF_NUM; i++) {

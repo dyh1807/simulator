@@ -26,6 +26,7 @@ class SimpleCache : public AbstractDcache {
   bool cache_valid[WAY_NUM][1 << INDEX_WIDTH];
   uint8_t plru_tree[1 << INDEX_WIDTH][(WAY_NUM - 1 + 7) / 8];
   std::deque<PendingReq> pending_reqs;
+  static constexpr size_t MAX_PENDING_REQS = 256;
   MemRespIO pending_resp;
   bool stress_mode;
   int write_ready_pct;

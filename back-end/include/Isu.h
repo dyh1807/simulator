@@ -41,6 +41,7 @@ private:
   // 2. 延迟唤醒
   std::list<LatencyEntry> latency_pipe;
   std::list<LatencyEntry> latency_pipe_1; // 用于时序更新
+  std::vector<int> committed_indices_buf[IQ_NUM];
 
 public:
   uint32_t port_attributes[ISSUE_WIDTH];
@@ -67,4 +68,5 @@ public:
 private:
   void add_iq(const IssueQueueConfig &cfg);
   int get_latency(UopType uop_type);
+  void apply_wakeup_to_uop(MicroOp &uop) const;
 };

@@ -3,6 +3,29 @@
 #include "SimCpu.h"
 #include "util.h"
 
+void Dispatch::apply_wakeup_to_uop(InstInfo &uop) const {
+  for (int w = 0; w < LSU_LOAD_WB_WIDTH; w++) {
+    if (!in.prf_awake->wake[w].valid)
+      continue;
+    if (uop.src1_preg == in.prf_awake->wake[w].preg) {
+      uop.src1_busy = false;
+    }
+    if (uop.src2_preg == in.prf_awake->wake[w].preg) {
+      uop.src2_busy = false;
+    }
+  }
+  for (int w = 0; w < MAX_WAKEUP_PORTS; w++) {
+    if (!in.iss_awake->wake[w].valid)
+      continue;
+    if (uop.src1_preg == in.iss_awake->wake[w].preg) {
+      uop.src1_busy = false;
+    }
+    if (uop.src2_preg == in.iss_awake->wake[w].preg) {
+      uop.src2_busy = false;
+    }
+  }
+}
+
 void Dispatch::init() {
   for (int i = 0; i < DECODE_WIDTH; i++) {
     inst_r[i] = {};
@@ -15,10 +38,10 @@ void Dispatch::init() {
     }
   }
   for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
-    stq_port_mask[k] = 0;
+    stq_port_owner[k] = -1;
   }
   for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
-    ldq_port_mask[k] = 0;
+    ldq_port_owner[k] = -1;
   }
 }
 
@@ -29,11 +52,11 @@ void Dispatch::comb_alloc() {
   // 初始化输出
   for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
     out.dis2lsu->alloc_req[k] = false;
-    stq_port_mask[k] = 0;
+    stq_port_owner[k] = -1;
   }
   for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
     out.dis2lsu->ldq_alloc_req[k] = false;
-    ldq_port_mask[k] = 0;
+    ldq_port_owner[k] = -1;
   }
 
   for (int i = 0; i < DECODE_WIDTH; i++) {
@@ -55,7 +78,7 @@ void Dispatch::comb_alloc() {
           load_alloc_count < MAX_LDQ_DISPATCH_WIDTH &&
           in.lsu2dis->ldq_alloc_idx[load_alloc_count] >= 0) {
         inst_alloc[i].uop.ldq_idx = in.lsu2dis->ldq_alloc_idx[load_alloc_count];
-        ldq_port_mask[load_alloc_count] = (1 << i);
+        ldq_port_owner[load_alloc_count] = i;
         load_alloc_count++;
       } else {
         out.dis2rob->valid[i] = false;
@@ -75,8 +98,7 @@ void Dispatch::comb_alloc() {
         // 填充 STQ 请求
         out.dis2lsu->tag[store_alloc_count] = inst_r[i].uop.tag;
 
-        stq_port_mask[store_alloc_count] =
-            (1 << i); // 记录这条指令占用了这个端口
+        stq_port_owner[store_alloc_count] = i;
 
         store_alloc_count++;
       } else {
@@ -90,34 +112,11 @@ void Dispatch::comb_alloc() {
 
 // BusyTable 旁路 (BusyTable Bypass)
 void Dispatch::comb_wake() {
-  for (int w = 0; w < LSU_LOAD_WB_WIDTH; w++) {
-    if (in.prf_awake->wake[w].valid) {
-      for (int i = 0; i < DECODE_WIDTH; i++) {
-        if (inst_alloc[i].uop.src1_preg == in.prf_awake->wake[w].preg) {
-          inst_alloc[i].uop.src1_busy = false;
-          inst_r_1[i].uop.src1_busy = false;
-        }
-        if (inst_alloc[i].uop.src2_preg == in.prf_awake->wake[w].preg) {
-          inst_alloc[i].uop.src2_busy = false;
-          inst_r_1[i].uop.src2_busy = false;
-        }
-      }
+  for (int i = 0; i < DECODE_WIDTH; i++) {
+    if (!inst_alloc[i].valid) {
+      continue;
     }
-  }
-
-  for (int i = 0; i < MAX_WAKEUP_PORTS; i++) {
-    if (in.iss_awake->wake[i].valid) {
-      for (int j = 0; j < DECODE_WIDTH; j++) {
-        if (inst_alloc[j].uop.src1_preg == in.iss_awake->wake[i].preg) {
-          inst_alloc[j].uop.src1_busy = false;
-          inst_r_1[j].uop.src1_busy = false;
-        }
-        if (inst_alloc[j].uop.src2_preg == in.iss_awake->wake[i].preg) {
-          inst_alloc[j].uop.src2_busy = false;
-          inst_r_1[j].uop.src2_busy = false;
-        }
-      }
-    }
+    apply_wakeup_to_uop(inst_alloc[i].uop);
   }
 }
 
@@ -250,30 +249,25 @@ void Dispatch::comb_fire() {
 
   // === 步骤 3: 更新 STQ 的 Fire 信号 ===
   for (int k = 0; k < MAX_STQ_DISPATCH_WIDTH; k++) {
-    // 如果端口 k 分配给了指令 i，且指令 i Fire 了，则 STQ Fire
-    if (stq_port_mask[k] != 0) {
-      int inst_idx = __builtin_ctz(stq_port_mask[k]); // 找到对应的指令索引
-      if (out.dis2rob->dis_fire[inst_idx]) {
-        out.dis2lsu->alloc_req[k] = true;
-        out.dis2lsu->tag[k] = out.dis2rob->uop[inst_idx].tag;
-        out.dis2lsu->rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
-        out.dis2lsu->rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
-        out.dis2lsu->func3[k] = out.dis2rob->uop[inst_idx].func3;
-      }
+    int inst_idx = stq_port_owner[k];
+    if (inst_idx >= 0 && out.dis2rob->dis_fire[inst_idx]) {
+      out.dis2lsu->alloc_req[k] = true;
+      out.dis2lsu->tag[k] = out.dis2rob->uop[inst_idx].tag;
+      out.dis2lsu->rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
+      out.dis2lsu->rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
+      out.dis2lsu->func3[k] = out.dis2rob->uop[inst_idx].func3;
     }
   }
 
   // === 步骤 4: 更新 LDQ 的 Fire 信号 ===
   for (int k = 0; k < MAX_LDQ_DISPATCH_WIDTH; k++) {
-    if (ldq_port_mask[k] != 0) {
-      int inst_idx = __builtin_ctz(ldq_port_mask[k]);
-      if (out.dis2rob->dis_fire[inst_idx]) {
-        out.dis2lsu->ldq_alloc_req[k] = true;
-        out.dis2lsu->ldq_idx[k] = out.dis2rob->uop[inst_idx].ldq_idx;
-        out.dis2lsu->ldq_tag[k] = out.dis2rob->uop[inst_idx].tag;
-        out.dis2lsu->ldq_rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
-        out.dis2lsu->ldq_rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
-      }
+    int inst_idx = ldq_port_owner[k];
+    if (inst_idx >= 0 && out.dis2rob->dis_fire[inst_idx]) {
+      out.dis2lsu->ldq_alloc_req[k] = true;
+      out.dis2lsu->ldq_idx[k] = out.dis2rob->uop[inst_idx].ldq_idx;
+      out.dis2lsu->ldq_tag[k] = out.dis2rob->uop[inst_idx].tag;
+      out.dis2lsu->ldq_rob_idx[k] = out.dis2rob->uop[inst_idx].rob_idx;
+      out.dis2lsu->ldq_rob_flag[k] = out.dis2rob->uop[inst_idx].rob_flag;
     }
   }
 
@@ -378,14 +372,25 @@ void Dispatch::comb_pipeline() {
 #endif
   }
 
+  // 默认保持，再按条件覆盖。
+  for (int i = 0; i < DECODE_WIDTH; i++) {
+    inst_r_1[i] = inst_r[i];
+  }
+
   for (int i = 0; i < DECODE_WIDTH; i++) {
     if (in.rob_bcast->flush || in.dec_bcast->mispred) {
       inst_r_1[i].valid = false;
-    } else if (out.dis2ren->ready) {
+      continue;
+    }
+    if (out.dis2ren->ready) {
       inst_r_1[i].uop = in.ren2dis->uop[i];
       inst_r_1[i].valid = in.ren2dis->valid[i];
-    } else {
-      inst_r_1[i].valid = inst_r[i].valid && !out.dis2rob->dis_fire[i];
+      continue;
+    }
+
+    inst_r_1[i].valid = inst_r[i].valid && !out.dis2rob->dis_fire[i];
+    if (inst_r_1[i].valid) {
+      apply_wakeup_to_uop(inst_r_1[i].uop);
     }
   }
 }

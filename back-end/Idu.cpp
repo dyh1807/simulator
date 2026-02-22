@@ -1,52 +1,30 @@
-#include "Csr.h"
-#include "config.h"
 #include "Idu.h"
+#include "Csr.h"
 #include "RISCV.h"
+#include "config.h"
 #include "ref.h"
+#include "util.h"
 #include <cstdint>
 #include <cstdlib>
-#include "util.h"
 
 // 中间信号
 static tag_t alloc_tag[DECODE_WIDTH]; // 分配的新 Tag
-static wire<1> issue_fire[DECODE_WIDTH];
-static wire<1> front_accept;
-
-void decode(InstInfo &uop, uint32_t instructinn);
 
 void Idu::init() {
-  ftq.init();
-  ftq.in.rob_commit = in.commit;
-  ftq.in.alloc_req = &ftq_alloc_req;
-  ftq.out.alloc_resp = &ftq_alloc_resp;
-  ftq.out.status = &ftq_status;
-  ftq.out.lookup = &ftq_lookup;
-
-  for (int i = 1; i < MAX_BR_NUM; i++) {
+  for (int i = 0; i < MAX_BR_NUM; i++) {
     tag_vec[i] = true;
     tag_vec_1[i] = true;
-  }
-
-  tag_vec_1[0] = false;
-  now_tag_1 = now_tag = 0;
-  enq_ptr_1 = enq_ptr = 1;
-  for (int i = 0; i < MAX_BR_NUM; i++) {
     tag_list[i] = 0;
     tag_list_1[i] = 0;
   }
+  tag_vec[0] = false;
+  tag_vec_1[0] = false;
+  now_tag = 0;
+  now_tag_1 = 0;
+  enq_ptr = 1;
+  enq_ptr_1 = 1;
   br_latch = {};
   br_latch_1 = {};
-
-  ibuf_head = 0;
-  ibuf_tail = 0;
-  ibuf_count = 0;
-  for (int i = 0; i < IDU_INST_BUFFER_SIZE; i++) {
-    ibuf[i] = {};
-  }
-  for (int i = 0; i < DECODE_WIDTH; i++) {
-    issue_fire[i] = false;
-  }
-  front_accept = false;
 }
 
 // 译码并分配 Tag
@@ -70,10 +48,9 @@ void Idu::comb_decode() {
     out.dec2ren->uop[i] = {};
   }
 
-  int decode_slots = ibuf_count < DECODE_WIDTH ? ibuf_count : DECODE_WIDTH;
-  for (int i = 0; i < decode_slots; i++) {
-    int idx = (ibuf_head + i) % IDU_INST_BUFFER_SIZE;
-    const IbufEntry &entry = ibuf[idx];
+  Assert(in.issue != nullptr && "Idu::comb_decode: issue input is null");
+  for (int i = 0; i < DECODE_WIDTH; i++) {
+    const InstructionBufferEntry &entry = in.issue->entries[i];
     if (!entry.valid)
       continue;
 
@@ -125,7 +102,6 @@ void Idu::comb_decode() {
       out.dec2ren->uop[i].tag = 0;
     }
   }
-
 }
 
 void Idu::comb_branch() {
@@ -143,16 +119,23 @@ void Idu::comb_branch() {
     out.dec_bcast->br_tag = br_latch.br_tag;
     out.dec_bcast->redirect_rob_idx = br_latch.redirect_rob_idx;
 
+    // 保持原语义：从最新分支回扫，回收误预测分支之后的所有分支 tag。
     LOOP_DEC(enq_ptr_1, MAX_BR_NUM);
     int enq_pre = (enq_ptr_1 + MAX_BR_NUM - 1) % MAX_BR_NUM;
     out.dec_bcast->br_mask = 0;
-    // TODO: 换while
-    while (tag_list[enq_pre] != br_latch.br_tag) {
+
+    bool found = false;
+    for (int i = 0; i < MAX_BR_NUM; i++) {
+      if (tag_list[enq_pre] == br_latch.br_tag) {
+        found = true;
+        break;
+      }
       out.dec_bcast->br_mask |= 1ULL << tag_list[enq_ptr_1];
       tag_vec_1[tag_list[enq_ptr_1]] = true;
       LOOP_DEC(enq_ptr_1, MAX_BR_NUM);
       LOOP_DEC(enq_pre, MAX_BR_NUM);
     }
+    Assert(found && "Idu::comb_branch: mispred br_tag not found in tag_list");
     out.dec_bcast->br_mask |= 1ULL << tag_list[enq_ptr_1];
     now_tag_1 = tag_list[enq_ptr_1];
     LOOP_INC(enq_ptr_1, MAX_BR_NUM);
@@ -162,16 +145,8 @@ void Idu::comb_branch() {
   }
 }
 
-void Idu::comb_ftq_begin() {
-  ftq.comb_begin();
-  ftq.comb_status();
-}
-
 void Idu::comb_flush() {
-  ftq.in.flush_req = false;
-  ftq.in.recover_req = false;
-  ftq.in.recover_tail = 0;
-
+  Assert(in.rob_bcast != nullptr && "Idu::comb_flush: rob_bcast is null");
   if (in.rob_bcast->flush) {
     for (int i = 1; i < MAX_BR_NUM; i++) {
       tag_vec_1[i] = true;
@@ -180,73 +155,23 @@ void Idu::comb_flush() {
     now_tag_1 = 0;
     enq_ptr_1 = 1;
     tag_list_1[0] = 0;
-
-    ftq.in.flush_req = true;
   }
-
-  // Mispred: 回滚 FTQ tail 到误预测分支的下一个条目
-  if (br_latch.mispred) {
-    int mispred_ftq = br_latch.ftq_idx;
-    int new_tail = (mispred_ftq + 1) % FTQ_SIZE;
-    ftq.in.recover_req = true;
-    ftq.in.recover_tail = new_tail;
-  }
-
-  ftq.comb_ctrl();
 }
 
 void Idu::comb_fire() {
-  for (int i = 0; i < DECODE_WIDTH; i++) {
-    issue_fire[i] = false;
-  }
-  for (int i = 0; i < FETCH_WIDTH; i++) {
-    out.dec2front->fire[i] = false;
-  }
-  front_accept = false;
-  ftq_alloc_req.valid = false;
-  ftq_alloc_req.entry = {};
-
+  Assert(in.ren2dec != nullptr && "Idu::comb_fire: ren2dec is null");
+  Assert(in.rob_bcast != nullptr && "Idu::comb_fire: rob_bcast is null");
   if (br_latch.mispred || in.rob_bcast->flush) {
-    out.dec2front->ready = false;
     for (int i = 0; i < DECODE_WIDTH; i++) {
       out.dec2ren->valid[i] = false;
     }
     return;
   }
 
-  int incoming_valid_num = 0;
-  for (int i = 0; i < FETCH_WIDTH; i++) {
-    incoming_valid_num += in.front2dec->valid[i] ? 1 : 0;
-  }
-  int free_slots = IDU_INST_BUFFER_SIZE - ibuf_count;
-  out.dec2front->ready = !ftq_status.full && (incoming_valid_num <= free_slots);
-
-  if (out.dec2front->ready && incoming_valid_num > 0) {
-    FTQEntry ftq_entry;
-    ftq_entry.start_pc = in.front2dec->pc[0];
-    ftq_entry.next_pc = in.front2dec->predict_next_fetch_address[0];
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      ftq_entry.pred_taken_mask[i] = in.front2dec->predict_dir[i];
-      ftq_entry.alt_pred[i] = in.front2dec->alt_pred[i];
-      ftq_entry.altpcpn[i] = in.front2dec->altpcpn[i];
-      ftq_entry.pcpn[i] = in.front2dec->pcpn[i];
-      for (int j = 0; j < 4; j++) {
-        ftq_entry.tage_idx[i][j] = in.front2dec->tage_idx[i][j];
-        ftq_entry.tage_tag[i][j] = in.front2dec->tage_tag[i][j];
-      }
-    }
-    ftq_alloc_req.valid = true;
-    ftq_alloc_req.entry = ftq_entry;
-    front_accept = true;
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      out.dec2front->fire[i] = in.front2dec->valid[i];
-    }
-  }
-
   int br_num = 0;
   for (int i = 0; i < DECODE_WIDTH; i++) {
-    issue_fire[i] = out.dec2ren->valid[i] && in.ren2dec->ready;
-    if (issue_fire[i] && is_branch(out.dec2ren->uop[i].type)) {
+    wire<1> fire = out.dec2ren->valid[i] && in.ren2dec->ready;
+    if (fire && is_branch(out.dec2ren->uop[i].type)) {
       now_tag_1 = alloc_tag[br_num];
       tag_vec_1[alloc_tag[br_num]] = false;
       tag_list_1[enq_ptr_1] = alloc_tag[br_num];
@@ -254,13 +179,10 @@ void Idu::comb_fire() {
       br_num++;
     }
   }
-
-  ftq.comb_alloc_req();
 }
 
-void Idu::comb_ftq_commit_reclaim() { ftq.comb_commit_reclaim(); }
-
 void Idu::comb_release_tag() {
+  Assert(in.commit != nullptr && "Idu::comb_release_tag: commit is null");
   for (int i = 0; i < COMMIT_WIDTH; i++) {
     if (in.commit->commit_entry[i].valid &&
         is_branch(in.commit->commit_entry[i].uop.type)) {
@@ -277,82 +199,9 @@ void Idu::seq() {
   }
   enq_ptr = enq_ptr_1;
 
-  if (in.rob_bcast->flush || br_latch.mispred) {
-#ifdef CONFIG_PERF_COUNTER
-    if (ibuf_count > 0) {
-      if (in.rob_bcast->flush) {
-        ctx->perf.squash_flush_idu += ibuf_count;
-        ctx->perf.squash_flush_total += ibuf_count;
-      } else {
-        ctx->perf.squash_mispred_idu += ibuf_count;
-        ctx->perf.squash_mispred_total += ibuf_count;
-      }
-      ctx->perf.pending_squash_slots += ibuf_count;
-    }
-#endif
-    ibuf_head = 0;
-    ibuf_tail = 0;
-    ibuf_count = 0;
-    for (int i = 0; i < IDU_INST_BUFFER_SIZE; i++) {
-      ibuf[i] = {};
-    }
-  } else {
-    int deq_num = 0;
-    for (int i = 0; i < DECODE_WIDTH; i++) {
-      if (issue_fire[i]) {
-        deq_num++;
-      } else {
-        break;
-      }
-    }
-    for (int i = 0; i < deq_num; i++) {
-      ibuf[ibuf_head] = {};
-      ibuf_head = (ibuf_head + 1) % IDU_INST_BUFFER_SIZE;
-    }
-    ibuf_count -= deq_num;
-    if (ibuf_count < 0) {
-      ibuf_count = 0;
-    }
-
-    if (front_accept) {
-      Assert(ftq_alloc_resp.success && "FTQ alloc failed in Idu::seq");
-      int idx = ftq_alloc_resp.idx;
-      Assert(idx >= 0 && "Invalid FTQ allocation index");
-      int last_fire_idx = -1;
-      for (int i = FETCH_WIDTH - 1; i >= 0; i--) {
-        if (out.dec2front->fire[i]) {
-          last_fire_idx = i;
-          break;
-        }
-      }
-
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        if (!out.dec2front->fire[i]) {
-          continue;
-        }
-        Assert(ibuf_count < IDU_INST_BUFFER_SIZE && "IDU ibuf overflow");
-        IbufEntry &entry = ibuf[ibuf_tail];
-        entry.valid = true;
-        entry.inst = in.front2dec->inst[i];
-        entry.pc = in.front2dec->pc[i];
-        entry.page_fault_inst = in.front2dec->page_fault_inst[i];
-        entry.predict_dir = in.front2dec->predict_dir[i];
-        entry.alt_pred = in.front2dec->alt_pred[i];
-        entry.altpcpn = in.front2dec->altpcpn[i];
-        entry.pcpn = in.front2dec->pcpn[i];
-        for (int j = 0; j < 4; j++) {
-          entry.tage_idx[j] = in.front2dec->tage_idx[i][j];
-        }
-        entry.ftq_idx = idx;
-        entry.ftq_offset = i;
-        entry.ftq_is_last = (i == last_fire_idx);
-        ibuf_tail = (ibuf_tail + 1) % IDU_INST_BUFFER_SIZE;
-        ibuf_count++;
-      }
-    }
-  }
-
   // Latch Exu Branch Result
+  Assert(in.rob_bcast != nullptr && "Idu::seq: rob_bcast is null");
+  Assert(in.exu2id != nullptr && "Idu::seq: exu2id is null");
   if (!in.rob_bcast->flush) {
     br_latch.mispred = in.exu2id->mispred;
     br_latch.redirect_pc = in.exu2id->redirect_pc;
@@ -362,8 +211,6 @@ void Idu::seq() {
   } else {
     br_latch = {};
   }
-
-  ftq.seq();
 }
 
 void Idu::decode(InstInfo &uop, uint32_t inst) {
@@ -621,21 +468,20 @@ IduIO Idu::get_hardware_io() {
   IduIO hardware;
 
   // --- Inputs ---
-  for (int i = 0; i < FETCH_WIDTH; i++) {
-    hardware.from_front.valid[i] = in.front2dec->valid[i];
-    hardware.from_front.inst[i] = in.front2dec->inst[i];
+  for (int i = 0; i < DECODE_WIDTH; i++) {
+    hardware.from_front.valid[i] = in.issue->entries[i].valid;
+    hardware.from_front.inst[i] = in.issue->entries[i].inst;
   }
   hardware.from_ren.ready = in.ren2dec->ready;
 
-  hardware.from_back.flush = in.rob_bcast->flush;
   hardware.from_back.flush = in.rob_bcast->flush;
   hardware.from_back.mispred = br_latch.mispred;
   hardware.from_back.br_tag = br_latch.br_tag;
 
   // --- Outputs ---
-  hardware.to_front.ready = out.dec2front->ready;
+  hardware.to_front.ready = false;
   for (int i = 0; i < FETCH_WIDTH; i++) {
-    hardware.to_front.fire[i] = out.dec2front->fire[i];
+    hardware.to_front.fire[i] = false;
   }
 
   for (int i = 0; i < DECODE_WIDTH; i++) {

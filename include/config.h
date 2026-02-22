@@ -218,6 +218,8 @@ static_assert(MAX_BR_NUM <= 64, "MAX_BR_NUM exceeds maximum wire width (64)");
 static_assert(STQ_NUM <= 64, "STQ_NUM exceeds maximum wire width (64)");
 static_assert(ROB_NUM % ROB_BANK_NUM == 0,
               "ROB_NUM must be a multiple of ROB_BANK_NUM");
+static_assert(DECODE_WIDTH <= ROB_BANK_NUM,
+              "DECODE_WIDTH must be <= ROB_BANK_NUM for ROB row enqueue");
 static_assert(PRF_NUM >= ARF_NUM,
               "PRF_NUM must be greater than or equal to ARF_NUM");
 static_assert(MAX_INFLIGHT_LOADS <= STQ_NUM,

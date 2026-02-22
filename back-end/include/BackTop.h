@@ -6,6 +6,7 @@
 #include "IO.h"
 #include "Idu.h"
 #include "Isu.h"
+#include "PreIduQueue.h"
 #include "Prf.h"
 #include "Ren.h"
 #include "Rob.h"
@@ -103,10 +104,13 @@ private:
   CsrFrontIO csr2front;
   CsrStatusIO csr_status;
   ExeCsrIO exe2csr;
+  PreIduIssueIO pre_idu_issue;
+  FTQLookupIO ftq_lookup;
 
 public:
   SimContext *ctx;
 
+  PreIduQueue *pre_idu_queue;
   Idu *idu;
   Ren *rename;
   Dispatch *dis;
@@ -130,12 +134,14 @@ public:
 
   BackTop(SimContext *ctx) {
     this->ctx = ctx;
+    pre_idu_queue = nullptr;
     lsu_dcache_req_io = &lsu2dcache_req;
     lsu_dcache_wreq_io = &lsu2dcache_wreq;
     lsu_dcache_resp_io = &dcache2lsu_resp;
     lsu_dcache_wready_io = &dcache2lsu_wready;
   };
   ~BackTop() {
+    delete pre_idu_queue;
     delete rename;
     delete dis;
     delete idu;

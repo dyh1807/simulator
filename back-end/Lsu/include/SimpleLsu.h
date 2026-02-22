@@ -4,6 +4,7 @@
 #include "config.h"
 #include <cstdint>
 #include <deque>
+#include <memory>
 
 class Csr;
 class PtwMemPort;
@@ -20,8 +21,19 @@ private:
     MicroOp uop;
   };
 
+  enum class StoreForwardState : uint8_t {
+    NoHit = 0,
+    Hit = 1,
+    Retry = 2,
+  };
+
+  struct StoreForwardResult {
+    StoreForwardState state = StoreForwardState::NoHit;
+    uint32_t data = 0;
+  };
+
   // MMU Instance (Composition)
-  AbstractMmu *mmu;
+  std::unique_ptr<AbstractMmu> mmu;
 
   // === 内部状态寄存器 (对应 seq 更新) ===
 
@@ -59,22 +71,15 @@ public:
   void seq() override;
 
   StqEntry get_stq_entry(int stq_idx) override;
-  uint32_t get_load_addr(int rob_idx) override;
 
   void set_csr(Csr *c) override { this->csr_module = c; }
   void set_ptw_mem_port(PtwMemPort *port) override {
     ptw_mem_port = port;
-    if (mmu != nullptr) {
-      mmu->set_ptw_mem_port(port);
-    }
-    last_bound_ptw_mem_port = port;
+    mmu->set_ptw_mem_port(port);
   }
   void set_ptw_walk_port(PtwWalkPort *port) override {
     ptw_walk_port = port;
-    if (mmu != nullptr) {
-      mmu->set_ptw_walk_port(port);
-    }
-    last_bound_ptw_walk_port = port;
+    mmu->set_ptw_walk_port(port);
   }
 
   // 一致性访存接口 (供 MMU 使用)
@@ -85,8 +90,6 @@ public:
 
 private:
   Csr *csr_module = nullptr;
-  PtwMemPort *last_bound_ptw_mem_port = nullptr;
-  PtwWalkPort *last_bound_ptw_walk_port = nullptr;
   // 内部辅助函数
   void handle_load_req(const MicroOp &uop);
   void handle_store_addr(const MicroOp &uop);
@@ -109,6 +112,6 @@ private:
   void progress_pending_sta_addr();
   bool finish_store_addr_once(const MicroOp &inst);
 
-  std::pair<int, uint32_t> check_store_forward(uint32_t p_addr,
-                                                const MicroOp &load_uop);
+  StoreForwardResult check_store_forward(uint32_t p_addr,
+                                         const MicroOp &load_uop);
 };

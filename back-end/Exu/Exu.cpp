@@ -169,28 +169,15 @@ void Exu::comb_pipeline() {
     return;
   }
 
-  // 2. 分支误预测 (Selective Flush)
-  // 这里必须做两件事：
-  // A. Flush FU 内部 (您已经做了)
-  // B. Flush inst_r 本身！(您漏了)
-
+  // 2. 分支误预测选择性冲刷：同步冲刷 FU 内部状态。
   if (in.dec_bcast->mispred) {
     mask_t mask = in.dec_bcast->br_mask;
-
-    // A. Flush FU
     for (auto fu : units)
       fu->flush(mask);
-
-    // 步骤 B：明确检查并清除 inst_r 中的待冲刷指令
-    // 注意：我们在计算 Next State (inst_r_1) 时，
-    // 需要基于“过滤后”的 inst_r 状态来决定是 Hold 还是 Accept New。
-    // 为了简单，我们可以直接在下面的主循环中进行判断。
   }
 
-  // 3. 主循环：计算 Next State (inst_r_1)
+  // 3. 主循环：计算下一拍流水寄存器。
   for (int i = 0; i < ISSUE_WIDTH; i++) {
-
-    // 🔍 Step 1: 检查当前 inst_r 是否被 Kill (Mispred)
     bool current_killed = false;
     if (inst_r[i].valid && in.dec_bcast->mispred) {
       if ((1ULL << inst_r[i].uop.tag) & in.dec_bcast->br_mask) {
@@ -198,22 +185,14 @@ void Exu::comb_pipeline() {
       }
     }
 
-    // 🚦 Step 2: 决定 Next State
-
     if (current_killed) {
-      // 💀 如果当前指令被杀死了
-      // 那么不管是否停顿 (Stall)，它都不能留到下一拍！
-      // 此时 inst_r_1 应该置空 (或者查看发射阶段是否有新指令补位)
-      // 通常误预测发生的那一拍，发射阶段也会被冲刷 (Flush)，所以大概率无新指令
       inst_r_1[i].valid = false;
-
-      // 注意：如果被杀了，issue_stall[i] 应该被忽略
       continue;
     }
 
-    // --- 下面是未被冲刷指令的逻辑 ---
+    // 未被冲刷时，按 stall/新输入更新。
     if (inst_r[i].valid && issue_stall[i]) {
-      inst_r_1[i] = inst_r[i]; // 保持不变 (Hold)
+      inst_r_1[i] = inst_r[i];
     } else if (in.prf2exe->iss_entry[i].valid) {
       inst_r_1[i] = in.prf2exe->iss_entry[i];
     } else {
@@ -305,9 +284,9 @@ void Exu::comb_exec() {
   // 二、写回逻辑 (Writeback) - 终极解耦重构
   // ==========================================
 
-  // 结果收集容器 (利用现有 UopEntry 静态数组)
-  UopEntry int_res[ALU_NUM];
-  UopEntry br_res[BRU_NUM];
+  // 结果收集容器
+  UopEntry int_res[ALU_NUM] = {};
+  UopEntry br_res[BRU_NUM] = {};
 
   // 1. 全局端口扫描与立即分发 (Total Port Scan)
   for (int p_idx = 0; p_idx < ISSUE_WIDTH; p_idx++) {
@@ -329,7 +308,7 @@ void Exu::comb_exec() {
 
     // A. 立即驱动 ROB (非访存指令在此完成)
     // 注意：LOAD/STA 的完成通报由 LSU 回调阶段处理
-    if (u->op != UOP_LOAD && u->op != UOP_STA) {
+    if (!flushed && u->op != UOP_LOAD && u->op != UOP_STA) {
       out.exu2rob->entry[p_idx].valid = true;
       out.exu2rob->entry[p_idx].uop = *u;
     }
@@ -380,11 +359,16 @@ void Exu::comb_exec() {
     if (in.lsu2exe->wb_req[i].valid) {
       int p_idx = IQ_LD_PORT_BASE + i;
       MicroOp &u = in.lsu2exe->wb_req[i].uop;
+      bool flushed = in.rob_bcast->flush ||
+                     (in.dec_bcast->mispred &&
+                      ((1ULL << u.tag) & in.dec_bcast->br_mask));
       Assert(!out.exe2prf->entry[p_idx].valid);
       out.exe2prf->entry[p_idx].valid = true;
       out.exe2prf->entry[p_idx].uop = u;
-      out.exu2rob->entry[p_idx].valid = true;
-      out.exu2rob->entry[p_idx].uop = u;
+      if (!flushed) {
+        out.exu2rob->entry[p_idx].valid = true;
+        out.exu2rob->entry[p_idx].uop = u;
+      }
     }
   }
 
@@ -392,11 +376,16 @@ void Exu::comb_exec() {
     if (in.lsu2exe->sta_wb_req[i].valid) {
       int p_idx = IQ_STA_PORT_BASE + i;
       MicroOp &u = in.lsu2exe->sta_wb_req[i].uop;
+      bool flushed = in.rob_bcast->flush ||
+                     (in.dec_bcast->mispred &&
+                      ((1ULL << u.tag) & in.dec_bcast->br_mask));
       Assert(!out.exe2prf->entry[p_idx].valid);
       out.exe2prf->entry[p_idx].valid = true;
       out.exe2prf->entry[p_idx].uop = u;
-      out.exu2rob->entry[p_idx].valid = true;
-      out.exu2rob->entry[p_idx].uop = u;
+      if (!flushed) {
+        out.exu2rob->entry[p_idx].valid = true;
+        out.exu2rob->entry[p_idx].uop = u;
+      }
     }
   }
 

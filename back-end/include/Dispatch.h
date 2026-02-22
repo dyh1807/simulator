@@ -32,16 +32,16 @@ struct UopPacket {
 class Dispatch {
 private:
   int decompose_inst(const InstEntry &original_inst, UopPacket *out_uops);
+  void apply_wakeup_to_uop(InstInfo &uop) const;
 
   InstEntry inst_alloc[DECODE_WIDTH];
 
   // 记录每条指令 Dispatch 是否成功 (comb_dispatch -> comb_fire)
   bool dispatch_success_flags[DECODE_WIDTH];
 
-  // 辅助 Mask，用于追踪每条指令占用了哪个 STQ 端口
-  wire<DECODE_WIDTH> stq_port_mask[MAX_STQ_DISPATCH_WIDTH];
-  // 辅助 Mask，用于追踪每条指令占用了哪个 LDQ 端口
-  wire<DECODE_WIDTH> ldq_port_mask[MAX_LDQ_DISPATCH_WIDTH];
+  // 记录每个端口分配到的指令槽位，-1 表示该端口本拍未分配。
+  int stq_port_owner[MAX_STQ_DISPATCH_WIDTH];
+  int ldq_port_owner[MAX_LDQ_DISPATCH_WIDTH];
 
   struct DispatchCache {
     int count;                     // 拆分数量
