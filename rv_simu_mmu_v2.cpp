@@ -77,7 +77,7 @@ void SimCpu::commit_sync(InstInfo *inst) {
 
   if (is_store(*inst) && !inst->page_fault_store) {
     StqEntry e = back->lsu->get_stq_entry(inst->stq_idx);
-    this->mem_subsystem.on_commit_store(e.p_addr, e.data);
+    this->mem_subsystem.on_commit_store(e.p_addr, e.data, e.func3);
   }
 }
 
@@ -176,6 +176,8 @@ void SimCpu::init() {
   // 第四阶段：统一执行各模块复位逻辑
   front.init();
   mem_subsystem.init();
+  oracle_pending_valid = false;
+  oracle_pending_out = {};
 }
 
 // 强制重置前端 PC (用于 FAST 模式切换)
@@ -224,7 +226,7 @@ void SimCpu::cycle() {
 }
 
 void SimCpu::front_cycle() {
-
+#ifdef CONFIG_BPU
   if (!back.out.stall || back.out.mispred || back.out.flush) {
 
     front.in.FIFO_read_enable = true;
@@ -236,8 +238,6 @@ void SimCpu::front_cycle() {
 
 #ifdef CONFIG_BPU
     front.step_bpu();
-#else
-    front.step_oracle();
 #endif
 
     bool no_taken = true;
@@ -272,8 +272,54 @@ void SimCpu::front_cycle() {
     front.in.FIFO_read_enable = false;
     front.in.refetch = false;
     front.step_bpu();
+#else
 #endif
   }
+#else
+  // Oracle 模式：每拍都执行握手，利用 1-entry pending 防止“当拍后端阻塞”丢指令。
+  front.in.FIFO_read_enable = true;
+  front.in.refetch = (back.out.mispred || back.out.flush);
+  if (front.in.refetch) {
+    front.in.refetch_address = back.out.redirect_pc;
+  }
+
+  // 上一拍后端非阻塞，认为 pending 已被接收。
+  if (oracle_pending_valid && !back.out.stall) {
+    oracle_pending_valid = false;
+  }
+  // 重定向优先：丢弃旧 pending，立即让 oracle 同步到新 PC。
+  if (front.in.refetch) {
+    oracle_pending_valid = false;
+  }
+
+  if (!oracle_pending_valid) {
+    front.step_oracle();
+    oracle_pending_out = front.out;
+    oracle_pending_valid = true;
+  } else {
+    front.out = oracle_pending_out;
+  }
+
+  bool no_taken = true;
+  for (int j = 0; j < FETCH_WIDTH; j++) {
+    back.in.valid[j] = no_taken && front.out.FIFO_valid && front.out.inst_valid[j];
+    back.in.pc[j] = front.out.pc[j];
+    back.in.predict_next_fetch_address[j] = front.out.predict_next_fetch_address;
+    back.in.page_fault_inst[j] = front.out.page_fault_inst[j];
+    back.in.inst[j] = front.out.instructions[j];
+    back.in.predict_dir[j] = front.out.predict_dir[j];
+    back.in.alt_pred[j] = front.out.alt_pred[j];
+    back.in.altpcpn[j] = front.out.altpcpn[j];
+    back.in.pcpn[j] = front.out.pcpn[j];
+    for (int k = 0; k < 4; k++) {
+      back.in.tage_idx[j][k] = front.out.tage_idx[j][k];
+      back.in.tage_tag[j][k] = front.out.tage_tag[j][k];
+    }
+    if (back.in.valid[j] && front.out.predict_dir[j]) {
+      no_taken = false;
+    }
+  }
+#endif
 }
 
 void SimCpu::back2front_comb() {

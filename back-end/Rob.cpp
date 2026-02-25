@@ -137,7 +137,10 @@ void Rob::comb_commit() {
         }
         if (entry[i][deq_ptr].uop.type == SFENCE_VMA && in.lsu2rob != nullptr &&
             in.lsu2rob->committed_store_pending) {
+          // SFENCE.VMA 需要单提交并触发 flush；当提交侧仍有已提交 store 未落地时，
+          // 必须阻塞提交，不能退化为组提交吞掉该指令。
           single_commit = false;
+          commit = false;
         }
         break;
       }
@@ -314,8 +317,10 @@ void Rob::comb_complete() {
         }
       }
 
-      // for debug
+      // 同一条指令可能由多个 uop 回写（例如 STA/STD），flush_pipe 需要保持置位，
+      // 不能被后到达的 uop 覆盖为 0。
       entry_1[bank_idx][line_idx].uop.flush_pipe =
+          entry_1[bank_idx][line_idx].uop.flush_pipe ||
           in.exu2rob->entry[i].uop.flush_pipe;
       entry_1[bank_idx][line_idx].uop.difftest_skip =
           in.exu2rob->entry[i].uop.difftest_skip;

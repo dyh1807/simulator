@@ -362,9 +362,23 @@ void BackTop::restore_from_ref() {
     csr->CSR_RegFile_1[i] = state.csr[i];
   }
 
+  // 同步 dut_cpu，全局参考路径（oracle/refetch 校验）依赖该镜像状态。
+  std::memcpy(dut_cpu.gpr, state.gpr, sizeof(dut_cpu.gpr));
+  std::memcpy(dut_cpu.csr, state.csr, sizeof(dut_cpu.csr));
+  dut_cpu.pc = state.pc;
+  dut_cpu.store = state.store;
+  dut_cpu.store_addr = state.store_addr;
+  dut_cpu.store_data = state.store_data;
+
   // Ensure the pipeline starts with a refetch from the restored PC
   out.flush = true;
   out.redirect_pc = state.pc;
+
+#ifndef CONFIG_BPU
+  // FAST 模式从 ref 切换到 O3+oracle 时，oracle 也必须恢复到同一状态，
+  // 否则首拍 refetch 会因为 PC 不一致触发断言。
+  init_oracle_ckpt(state, p_memory, privilege);
+#endif
 }
 
 void BackTop::restore_checkpoint(const std::string &filename) {
@@ -471,7 +485,7 @@ void BackTop::restore_checkpoint(const std::string &filename) {
 
   init_diff_ckpt(state, p_memory);
 #ifndef CONFIG_BPU
-  init_oracle_ckpt(state, p_memory);
+  init_oracle_ckpt(state, p_memory, RISCV_MODE_U);
 #endif
 
   // Ensure the pipeline starts with a refetch from the restored PC

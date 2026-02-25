@@ -185,9 +185,10 @@ void SimpleLsu::comb_load_res() {
       auto &entry = ldq[idx];
       if (entry.valid && entry.sent && entry.waiting_resp) {
         if (!entry.killed) {
-
-          entry.uop.result = extract_data(
-              in.dcache_resp->data, in.dcache_resp->addr, entry.uop.func3);
+          uint32_t raw = in.dcache_resp->data;
+          uint32_t res =
+              extract_data(raw, in.dcache_resp->addr, entry.uop.func3);
+          entry.uop.result = res;
           entry.uop.difftest_skip = in.dcache_resp->uop.difftest_skip;
           entry.uop.cplt_time = sim_time;
           entry.uop.is_cache_miss = in.dcache_resp->uop.is_cache_miss;
@@ -253,7 +254,6 @@ void SimpleLsu::handle_load_req(const MicroOp &inst) {
     // [Fix] Disable Store-to-Load Forwarding for MMIO ranges
     // These addresses involve side effects and must read from consistent memory
     bool is_mmio = is_mmio_addr(p_addr);
-
     task.flush_pipe = is_mmio;
     auto fwd_res = is_mmio ? StoreForwardResult{} : check_store_forward(p_addr, inst);
 

@@ -3,6 +3,7 @@
 #include "RISCV.h"
 #include "SimCpu.h"
 #include "config.h"
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -1059,7 +1060,6 @@ void RefCpu::RV32IM() {
           ((p_addr & PLIC_ADDR_MASK) == PLIC_ADDR_BASE)) {
         is_mmio_load = true;
       }
-
       // Timer MMIO 特殊处理：使用 oracle_timer 保持与 DUT 同步
       uint64_t data_l = (uint64_t)memory[p_addr >> 2];
       uint64_t data_h = (uint64_t)memory[(p_addr >> 2) + 1];
@@ -1094,7 +1094,6 @@ void RefCpu::RV32IM() {
       if (!(funct3 & 0b100)) {
         data = data | sign;
       }
-
       state.gpr[reg_d_index] = data;
     }
     break;

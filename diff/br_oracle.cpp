@@ -5,6 +5,7 @@
 #include "ref.h"
 #include "util.h"
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 static RefCpu oracle;
@@ -30,10 +31,11 @@ void init_oracle(int img_size) {
   oracle.memory[uint32_t(0x00001020 / 4)] = 0x8fe00000;
 }
 
-void init_oracle_ckpt(CPU_state ckpt_state, uint32_t *ckpt_memory) {
+void init_oracle_ckpt(CPU_state ckpt_state, uint32_t *ckpt_memory,
+                      uint8_t privilege) {
   oracle.init(0);
   oracle.state = ckpt_state;
-  oracle.privilege = RISCV_MODE_U;
+  oracle.privilege = privilege;
 
   std::memcpy(oracle.memory, ckpt_memory,
               (uint64_t)PHYSICAL_MEMORY_LENGTH * sizeof(uint32_t));
@@ -81,13 +83,6 @@ void get_oracle(struct front_top_in &in, struct front_top_out &out) {
   }
 
   if (stall) {
-    // 添加stall状态日志
-    if (LOG) {
-      printf("[ORACLE] Still stalled at PC 0x%08x, waiting for flush. Flags: "
-             "Ex:%d CSR:%d MMIO:%d\n",
-             oracle.state.pc, oracle.is_exception, oracle.is_csr,
-             oracle.is_mmio_load);
-    }
     out.FIFO_valid = false;
     for (i = 0; i < FETCH_WIDTH; i++) {
       out.inst_valid[i] = false;
@@ -106,13 +101,8 @@ void get_oracle(struct front_top_in &in, struct front_top_out &out) {
     out.instructions[i] = oracle.Instruction;
 
 
-    if (oracle.is_exception || oracle.is_csr || oracle.is_mmio_load) {
-      if (LOG) {
-        printf("[ORACLE] Stalling at PC 0x%08x, Inst 0x%08x (Ex:%d, CSR:%d, "
-               "MMIO:%d)\n",
-               out.pc[i], out.instructions[i], oracle.is_exception,
-               oracle.is_csr, oracle.is_mmio_load);
-      }
+    if (oracle.is_exception || oracle.is_csr || oracle.is_mmio_load ||
+        oracle.is_mmio_store) {
       out.predict_dir[i] = false;
       stall = true;
 

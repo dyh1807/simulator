@@ -12,6 +12,9 @@ public:
   FrontTop front;
   MemSubsystem mem_subsystem;
   SimContext ctx;
+  // Oracle 模式下的一拍保留寄存，避免“后端当拍阻塞”导致前端指令丢失。
+  bool oracle_pending_valid = false;
+  front_top_out oracle_pending_out = {};
 
   void init();
   void restore_pc(uint32_t pc);

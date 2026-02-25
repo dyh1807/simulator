@@ -154,8 +154,8 @@ void MemSubsystem::init() {
   dcache->init();
 }
 
-void MemSubsystem::on_commit_store(uint32_t paddr, uint32_t data) {
-  peripheral.on_commit_store(paddr, data);
+void MemSubsystem::on_commit_store(uint32_t paddr, uint32_t data, uint8_t func3) {
+  peripheral.on_commit_store(paddr, data, func3);
 }
 
 void MemSubsystem::comb() {

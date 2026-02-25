@@ -130,10 +130,9 @@ inline bool is_exception(MicroOp uop) {
 inline bool is_flush_inst(InstInfo uop) {
   return uop.type == CSR || uop.type == ECALL || uop.type == MRET ||
          uop.type == SRET || uop.type == SFENCE_VMA || is_exception(uop) ||
-         uop.type == EBREAK || (uop.flush_pipe && is_load(uop));
+         uop.type == EBREAK || uop.flush_pipe;
 }
 
 inline bool is_flush_inst(MicroOp uop) {
-  return is_CSR_uop(uop.op) || is_exception(uop) ||
-         (uop.flush_pipe && is_load(uop));
+  return is_CSR_uop(uop.op) || is_exception(uop) || uop.flush_pipe;
 }

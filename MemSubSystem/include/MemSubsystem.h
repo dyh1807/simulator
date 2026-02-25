@@ -43,7 +43,7 @@ public:
   void init();
   void comb();
   void seq();
-  void on_commit_store(uint32_t paddr, uint32_t data);
+  void on_commit_store(uint32_t paddr, uint32_t data, uint8_t func3);
 
 private:
   SimContext *ctx;
