@@ -66,6 +66,15 @@ void TrueICacheTop::set_ptw_walk_port(PtwWalkPort *port) {
 }
 
 void TrueICacheTop::comb() {
+  out->icache_read_ready_2 = false;
+  out->icache_read_complete_2 = false;
+  out->fetch_pc_2 = 0;
+  for (int i = 0; i < FETCH_WIDTH; i++) {
+    out->fetch_group_2[i] = INST_NOP;
+    out->page_fault_inst_2[i] = false;
+    out->inst_valid_2[i] = false;
+  }
+
   static IcacheBlockingPtwPort ptw_port;
   if (mmu_model == nullptr && ctx != nullptr) {
 #ifdef CONFIG_TLB_MMU
@@ -274,6 +283,15 @@ void TrueICacheTop::seq() {
 // --- SimpleICacheTop Implementation ---
 
 void SimpleICacheTop::comb() {
+  out->icache_read_ready_2 = false;
+  out->icache_read_complete_2 = false;
+  out->fetch_pc_2 = 0;
+  for (int i = 0; i < FETCH_WIDTH; i++) {
+    out->fetch_group_2[i] = INST_NOP;
+    out->page_fault_inst_2[i] = false;
+    out->inst_valid_2[i] = false;
+  }
+
   static IcacheBlockingPtwPort ptw_port;
   if (mmu_model == nullptr && ctx != nullptr) {
 #ifdef CONFIG_TLB_MMU

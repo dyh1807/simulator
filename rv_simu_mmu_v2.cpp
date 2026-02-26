@@ -14,13 +14,6 @@
 
 uint32_t *p_memory;
 
-constexpr int BR_DIRECT = 0;
-constexpr int BR_CALL = 1;
-constexpr int BR_RET = 2;
-constexpr int BR_IDIRECT = 3;
-constexpr int BR_NONCTL = 4;
-constexpr int BR_JAL = 5;
-
 void SimCpu::commit_sync(InstInfo *inst) {
   BackTop *back = &this->back;
   if (inst->type == JALR) {

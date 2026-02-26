@@ -2,10 +2,11 @@
 #define BPU_TOP_H
 
 #include "../frontend.h"
+#include "../wire_types.h"
 #include "./dir_predictor/TAGE_top.h"
 #include "./target_predictor/BTB_top.h"
 #include "BPU_configs.h"
-#include "SimCpu.h"
+#include <SimCpu.h>
 
 #include <cassert>
 #include <cstring>
@@ -17,39 +18,211 @@ extern BPU_TOP *g_bpu_top; // 再声明全局指针
 
 uint32_t bpu_sim_time = 0; // only for debug
 
-// comb helper function
-int get_bank_sel(uint32_t pc) {
-  int bank_sel = (pc >> 2) % BPU_BANK_NUM;
-  return bank_sel;
+struct BankSelCombIn {
+  uint32_t pc;
+};
+
+struct BankSelCombOut {
+  int bank_sel;
+};
+
+inline void bank_sel_comb(const BankSelCombIn &in, BankSelCombOut &out) {
+  out = BankSelCombOut{};
+  out.bank_sel = static_cast<int>((in.pc >> 2) % BPU_BANK_NUM);
 }
 
-// comb helper function
-uint32_t get_bank_pc(uint32_t pc) {
-  if((BPU_BANK_NUM & (BPU_BANK_NUM - 1)) != 0) {
-    // return pc;
-    uint32_t bank_pc = pc >> 2;
+inline int bank_sel_from_pc(uint32_t pc) {
+  BankSelCombOut out{};
+  bank_sel_comb(BankSelCombIn{pc}, out);
+  return out.bank_sel;
+}
+
+struct BankPcCombIn {
+  uint32_t pc;
+};
+
+struct BankPcCombOut {
+  uint32_t bank_pc;
+};
+
+inline void bank_pc_comb(const BankPcCombIn &in, BankPcCombOut &out) {
+  out = BankPcCombOut{};
+  if ((BPU_BANK_NUM & (BPU_BANK_NUM - 1)) != 0) {
+    uint32_t bank_pc = in.pc >> 2;
     bank_pc = bank_pc / BPU_BANK_NUM;
     bank_pc = bank_pc << 2;
-    return bank_pc;
+    out.bank_pc = bank_pc;
+    return;
   }
-  else{
-    uint32_t n = BPU_BANK_NUM;
-    int highest_bit_pos = 0;
-    while (n > 1) {
-      n >>= 1;
-      highest_bit_pos++;
-    }
-    uint32_t bank_pc = pc >> highest_bit_pos; // 2 + highest_bit_pos - 2
-    return bank_pc;
+
+  uint32_t n = BPU_BANK_NUM;
+  int highest_bit_pos = 0;
+  while (n > 1) {
+    n >>= 1;
+    highest_bit_pos++;
   }
+  out.bank_pc = in.pc >> highest_bit_pos;
+}
+
+inline uint32_t bank_pc_from_pc(uint32_t pc) {
+  BankPcCombOut out{};
+  bank_pc_comb(BankPcCombIn{pc}, out);
+  return out.bank_pc;
+}
+
+struct AheadSlot1PredictCombIn {
+  bool valid;
+  bool taken;
+  uint8_t conf;
+  uint32_t target;
+  uint32_t fallback_target;
+};
+
+struct AheadSlot1PredictCombOut {
+  bool hit;
+  bool low_conf_fallback;
+  uint32_t target;
+};
+
+inline void ahead_slot1_predict_comb(const AheadSlot1PredictCombIn &in,
+                                     AheadSlot1PredictCombOut &out) {
+  out = AheadSlot1PredictCombOut{};
+  const bool conf_ready = (in.conf >= AHEAD_SLOT1_CONF_THRESHOLD);
+  out.hit = in.valid && in.taken && conf_ready;
+  out.low_conf_fallback = in.valid && in.taken && !conf_ready;
+  out.target = out.hit ? in.target : in.fallback_target;
+}
+
+struct AheadSlot1ConfUpdateCombIn {
+  uint8_t current_conf;
+  bool prediction_correct;
+};
+
+struct AheadSlot1ConfUpdateCombOut {
+  uint8_t next_conf;
+};
+
+inline void ahead_slot1_conf_update_comb(const AheadSlot1ConfUpdateCombIn &in,
+                                         AheadSlot1ConfUpdateCombOut &out) {
+  out = AheadSlot1ConfUpdateCombOut{};
+  if (in.prediction_correct) {
+    out.next_conf = (in.current_conf >= AHEAD_SLOT1_CONF_MAX)
+                        ? static_cast<uint8_t>(AHEAD_SLOT1_CONF_MAX)
+                        : static_cast<uint8_t>(in.current_conf + 1);
+  } else {
+    out.next_conf = 0;
+  }
+}
+
+struct AheadGateUpdateCombIn {
+  bool gate_enable;
+  uint32_t sample_count;
+  uint32_t success_count;
+  bool sample_valid;
+  bool sample_success;
+};
+
+struct AheadGateUpdateCombOut {
+  bool gate_enable_next;
+  uint32_t sample_count_next;
+  uint32_t success_count_next;
+  bool toggled_disable;
+  bool toggled_enable;
+};
+
+inline void ahead_gate_update_comb(const AheadGateUpdateCombIn &in,
+                                   AheadGateUpdateCombOut &out) {
+  out = AheadGateUpdateCombOut{};
+  out.gate_enable_next = in.gate_enable;
+  out.sample_count_next = in.sample_count;
+  out.success_count_next = in.success_count;
+  out.toggled_disable = false;
+  out.toggled_enable = false;
+
+  if (!in.sample_valid) {
+    return;
+  }
+
+  uint32_t next_samples = in.sample_count + 1;
+  uint32_t next_success = in.success_count + (in.sample_success ? 1U : 0U);
+  out.sample_count_next = next_samples;
+  out.success_count_next = next_success;
+
+  if (next_samples < static_cast<uint32_t>(AHEAD_GATE_WINDOW)) {
+    return;
+  }
+
+  const uint32_t success_rate = (next_success * 100U) / next_samples;
+  bool gate_next = in.gate_enable;
+  if (in.gate_enable &&
+      success_rate < static_cast<uint32_t>(AHEAD_GATE_DISABLE_THRESHOLD)) {
+    gate_next = false;
+    out.toggled_disable = true;
+  } else if (!in.gate_enable &&
+             success_rate > static_cast<uint32_t>(AHEAD_GATE_ENABLE_THRESHOLD)) {
+    gate_next = true;
+    out.toggled_enable = true;
+  }
+  out.gate_enable_next = gate_next;
+  out.sample_count_next = 0;
+  out.success_count_next = 0;
+}
+
+struct NlpIndexCombIn {
+  uint32_t pc;
+};
+
+struct NlpIndexCombOut {
+  uint32_t index;
+};
+
+inline void nlp_index_comb(const NlpIndexCombIn &in, NlpIndexCombOut &out) {
+  out = NlpIndexCombOut{};
+  uint32_t mixed = (in.pc >> 2) ^ (in.pc >> 11) ^ (in.pc >> 19);
+  if ((NLP_TABLE_SIZE & (NLP_TABLE_SIZE - 1)) == 0) {
+    out.index = mixed & (NLP_TABLE_SIZE - 1);
+  } else {
+    out.index = mixed % NLP_TABLE_SIZE;
+  }
+}
+
+inline uint32_t nlp_index_from_pc(uint32_t pc) {
+  NlpIndexCombOut out{};
+  nlp_index_comb(NlpIndexCombIn{pc}, out);
+  return out.index;
+}
+
+struct NlpTagCombIn {
+  uint32_t pc;
+};
+
+struct NlpTagCombOut {
+  uint32_t tag;
+};
+
+inline void nlp_tag_comb(const NlpTagCombIn &in, NlpTagCombOut &out) {
+  out = NlpTagCombOut{};
+  out.tag = in.pc >> 2;
+}
+
+inline uint32_t nlp_tag_from_pc(uint32_t pc) {
+  NlpTagCombOut out{};
+  nlp_tag_comb(NlpTagCombIn{pc}, out);
+  return out.tag;
+}
+
+inline uint32_t nlp_fallback_next_pc(uint32_t base_pc) {
+  const uint32_t cache_mask = ~(ICACHE_LINE_SIZE - 1);
+  const uint32_t pc_plus_width = base_pc + (FETCH_WIDTH * 4);
+  return ((base_pc & cache_mask) != (pc_plus_width & cache_mask))
+             ? (pc_plus_width & cache_mask)
+             : pc_plus_width;
 }
 
 
 class BPU_TOP {
-  // 友元声明：允许TAGE_TOP访问BPU_TOP的私有成员（用于读取GHR/FH）
-  friend class TAGE_TOP;
-  friend const bool* BPU_get_Arch_GHR();
-  friend const bool* BPU_get_Spec_GHR();
+  friend const bool *BPU_get_Arch_GHR();
+  friend const bool *BPU_get_Spec_GHR();
   friend const uint32_t (*BPU_get_Arch_FH())[TN_MAX];
   friend const uint32_t (*BPU_get_Spec_FH())[TN_MAX];
 
@@ -64,15 +237,15 @@ public:
     uint32_t in_update_base_pc[COMMIT_WIDTH];
     bool in_upd_valid[COMMIT_WIDTH];
     bool in_actual_dir[COMMIT_WIDTH];
-    uint8_t in_actual_br_type[COMMIT_WIDTH]; // 3-bit each
+    br_type_t in_actual_br_type[COMMIT_WIDTH]; // 3-bit each
     uint32_t in_actual_targets[COMMIT_WIDTH];
 
     bool in_pred_dir[COMMIT_WIDTH];
     bool in_alt_pred[COMMIT_WIDTH];
-    uint8_t in_pcpn[COMMIT_WIDTH];    // 3-bit each
-    uint8_t in_altpcpn[COMMIT_WIDTH]; // 3-bit each
-    uint8_t in_tage_tags[COMMIT_WIDTH][TN_MAX];
-    uint32_t in_tage_idxs[COMMIT_WIDTH][TN_MAX];
+    pcpn_t in_pcpn[COMMIT_WIDTH];    // 3-bit each
+    pcpn_t in_altpcpn[COMMIT_WIDTH]; // 3-bit each
+    tage_tag_t in_tage_tags[COMMIT_WIDTH][TN_MAX];
+    tage_idx_t in_tage_idxs[COMMIT_WIDTH][TN_MAX];
   };
 
   struct OutputPayload {
@@ -82,14 +255,15 @@ public:
     bool PTAB_write_enable;
     bool out_pred_dir[FETCH_WIDTH];
     bool out_alt_pred[FETCH_WIDTH];
-    uint8_t out_pcpn[FETCH_WIDTH];
-    uint8_t out_altpcpn[FETCH_WIDTH];
-    uint8_t out_tage_tags[FETCH_WIDTH][TN_MAX];
-    uint32_t out_tage_idxs[FETCH_WIDTH][TN_MAX];
+    pcpn_t out_pcpn[FETCH_WIDTH];
+    pcpn_t out_altpcpn[FETCH_WIDTH];
+    tage_tag_t out_tage_tags[FETCH_WIDTH][TN_MAX];
+    tage_idx_t out_tage_idxs[FETCH_WIDTH][TN_MAX];
     uint32_t out_pred_base_pc; // used for predecode
     bool update_queue_full;
     // 2-Ahead Predictor outputs
     // 下下行取指地址
+    bool two_ahead_valid;
     uint32_t two_ahead_target;
     // 指示要不要多消耗inst FIFO
     bool mini_flush_req;
@@ -97,6 +271,215 @@ public:
     bool mini_flush_correct;
     // 如果要多写，多写的地址
     uint32_t mini_flush_target;
+  };
+
+  // 顶层三阶段兼容接口的数据容器
+  struct ReadData {
+    struct QueueEntrySnapshot {
+      uint32_t base_pc;
+      bool valid_mask;
+      bool actual_dir;
+      br_type_t br_type;
+      uint32_t targets;
+      bool pred_dir;
+      bool alt_pred;
+      pcpn_t pcpn;
+      pcpn_t altpcpn;
+      tage_tag_t tage_tags[TN_MAX];
+      tage_idx_t tage_idxs[TN_MAX];
+    };
+    struct NlpEntrySnapshot {
+      bool entry_valid;
+      uint32_t entry_tag;
+      uint32_t entry_target;
+      uint8_t entry_conf;
+    };
+
+    int state_snapshot;
+    uint32_t pc_reg_snapshot;
+    bool pc_can_send_to_icache_snapshot;
+    uint32_t pred_base_pc_fired_snapshot;
+    bool do_pred_latch_snapshot;
+    bool do_upd_latch_snapshot[BPU_BANK_NUM];
+
+    bool tage_calc_pred_dir_latch_snapshot[FETCH_WIDTH];
+    bool tage_calc_altpred_latch_snapshot[FETCH_WIDTH];
+    pcpn_t tage_calc_pcpn_latch_snapshot[FETCH_WIDTH];
+    pcpn_t tage_calc_altpcpn_latch_snapshot[FETCH_WIDTH];
+    tage_tag_t tage_pred_calc_tags_latch_snapshot[FETCH_WIDTH][TN_MAX];
+    tage_idx_t tage_pred_calc_idxs_latch_snapshot[FETCH_WIDTH][TN_MAX];
+    bool tage_result_valid_latch_snapshot[FETCH_WIDTH];
+    uint32_t btb_pred_target_latch_snapshot[FETCH_WIDTH];
+    bool btb_result_valid_latch_snapshot[FETCH_WIDTH];
+    bool tage_done_snapshot[BPU_BANK_NUM];
+    bool btb_done_snapshot[BPU_BANK_NUM];
+
+    uint32_t q_wr_ptr_snapshot[BPU_BANK_NUM];
+    uint32_t q_rd_ptr_snapshot[BPU_BANK_NUM];
+    uint32_t q_count_snapshot[BPU_BANK_NUM];
+
+    uint32_t saved_2ahead_prediction_snapshot;
+    bool saved_2ahead_pred_valid_snapshot;
+    bool saved_mini_flush_req_snapshot;
+    bool saved_mini_flush_correct_snapshot;
+    uint32_t saved_mini_flush_target_snapshot;
+    bool ahead_gate_enable_snapshot;
+    uint32_t ahead_gate_sample_count_snapshot;
+    uint32_t ahead_gate_success_count_snapshot;
+    uint32_t ahead_gate_disable_count_snapshot;
+    uint32_t ahead_gate_enable_count_snapshot;
+    bool ras_has_entry_snapshot;
+    uint32_t ras_top_snapshot;
+    uint32_t ras_count_snapshot;
+    bool Arch_GHR_snapshot[GHR_LENGTH];
+    bool Spec_GHR_snapshot[GHR_LENGTH];
+    uint32_t Arch_FH_snapshot[FH_N_MAX][TN_MAX];
+    uint32_t Spec_FH_snapshot[FH_N_MAX][TN_MAX];
+    uint32_t Arch_ras_stack_snapshot[RAS_DEPTH];
+    uint32_t Arch_ras_count_snapshot;
+    uint32_t Spec_ras_stack_snapshot[RAS_DEPTH];
+    uint32_t Spec_ras_count_snapshot;
+
+    uint32_t pred_base_pc;
+    uint32_t boundary_addr;
+    bool do_pred_on_this_pc[FETCH_WIDTH];
+    int this_pc_bank_sel[FETCH_WIDTH];
+    uint32_t do_pred_for_this_pc[FETCH_WIDTH];
+    br_type_t pred_inst_type_snapshot[FETCH_WIDTH];
+    bool ahead_entry_valid_snapshot[FETCH_WIDTH];
+    bool ahead_entry_taken_snapshot[FETCH_WIDTH];
+    uint32_t ahead_entry_target_snapshot[FETCH_WIDTH];
+    uint8_t ahead_entry_conf_snapshot[FETCH_WIDTH];
+    bool last_block_valid_snapshot[BPU_BANK_NUM];
+    uint32_t last_block_pc_snapshot[BPU_BANK_NUM];
+    bool last_block_entry_valid_snapshot[BPU_BANK_NUM];
+    bool last_block_entry_taken_snapshot[BPU_BANK_NUM];
+    uint32_t last_block_entry_target_snapshot[BPU_BANK_NUM];
+    uint8_t last_block_entry_conf_snapshot[BPU_BANK_NUM];
+
+    bool q_full[BPU_BANK_NUM];
+    bool q_empty[BPU_BANK_NUM];
+    QueueEntrySnapshot q_data[BPU_BANK_NUM];
+
+    bool going_to_do_pred;
+    bool going_to_do_upd[BPU_BANK_NUM];
+    bool going_to_do_upd_any;
+    bool trans_ready_to_fire;
+    bool set_submodule_input;
+
+    TAGE_TOP::InputPayload tage_in[BPU_BANK_NUM];
+    BTB_TOP::InputPayload btb_in[BPU_BANK_NUM];
+    TAGE_TOP::ReadData tage_rd[BPU_BANK_NUM];
+    BTB_TOP::ReadData btb_rd[BPU_BANK_NUM];
+    NlpEntrySnapshot nlp_pred_base_entry_snapshot;
+    NlpEntrySnapshot nlp_s1_entry_snapshot;
+    NlpEntrySnapshot nlp_train_entry_snapshot;
+  };
+
+  struct UpdateRequest {
+    OutputPayload out_regs;
+    int next_state;
+    uint32_t pc_reg_next;
+    bool pc_can_send_to_icache_next;
+    bool do_pred_latch_next;
+    bool do_upd_latch_next[BPU_BANK_NUM];
+    uint32_t pred_base_pc_fired_next;
+    uint32_t saved_2ahead_prediction_next;
+    bool saved_2ahead_pred_valid_next;
+    bool saved_mini_flush_req_next;
+    bool saved_mini_flush_correct_next;
+    uint32_t saved_mini_flush_target_next;
+    bool ahead_gate_enable_next;
+    uint32_t ahead_gate_sample_count_next;
+    uint32_t ahead_gate_success_count_next;
+    uint32_t ahead_gate_disable_count_next;
+    uint32_t ahead_gate_enable_count_next;
+    bool nlp_s1_valid_next;
+    uint32_t nlp_s1_req_pc_next;
+    uint32_t nlp_s1_pred_next_pc_next;
+    bool nlp_s1_hit_next;
+    uint8_t nlp_s1_conf_next;
+    bool nlp_s2_valid_next;
+    uint32_t nlp_s2_req_pc_next;
+    uint32_t nlp_s2_pred_2ahead_pc_next;
+    bool nlp_s2_hit_next;
+    uint8_t nlp_s2_conf_next;
+    bool nlp_entry_we;
+    uint32_t nlp_entry_idx;
+    bool nlp_entry_valid_next;
+    uint32_t nlp_entry_tag_next;
+    uint32_t nlp_entry_target_next;
+    uint8_t nlp_entry_conf_next;
+    bool Spec_GHR_next[GHR_LENGTH];
+    bool Arch_GHR_next[GHR_LENGTH];
+    uint32_t Spec_FH_next[FH_N_MAX][TN_MAX];
+    uint32_t Arch_FH_next[FH_N_MAX][TN_MAX];
+    uint32_t Arch_ras_stack_next[RAS_DEPTH];
+    uint32_t Arch_ras_count_next;
+    uint32_t Spec_ras_stack_next[RAS_DEPTH];
+    uint32_t Spec_ras_count_next;
+    uint32_t q_wr_ptr_next[BPU_BANK_NUM];
+    uint32_t q_rd_ptr_next[BPU_BANK_NUM];
+    uint32_t q_count_next[BPU_BANK_NUM];
+    bool q_entry_we[COMMIT_WIDTH];
+    int q_entry_bank[COMMIT_WIDTH];
+    uint32_t q_entry_slot[COMMIT_WIDTH];
+    ReadData::QueueEntrySnapshot q_entry_data[COMMIT_WIDTH];
+    bool inst_type_we[COMMIT_WIDTH];
+    int inst_type_bank[COMMIT_WIDTH];
+    uint32_t inst_type_idx[COMMIT_WIDTH];
+    br_type_t inst_type_data[COMMIT_WIDTH];
+    bool ahead_entry_we[BPU_BANK_NUM];
+    uint32_t ahead_entry_idx[BPU_BANK_NUM];
+    bool ahead_entry_valid_next[BPU_BANK_NUM];
+    bool ahead_entry_taken_next[BPU_BANK_NUM];
+    uint32_t ahead_entry_target_next[BPU_BANK_NUM];
+    uint8_t ahead_entry_conf_next[BPU_BANK_NUM];
+    bool last_block_valid_next[BPU_BANK_NUM];
+    uint32_t last_block_pc_next[BPU_BANK_NUM];
+
+    uint32_t pred_base_pc;
+    bool do_pred_on_this_pc[FETCH_WIDTH];
+    int this_pc_bank_sel[FETCH_WIDTH];
+    uint32_t do_pred_for_this_pc[FETCH_WIDTH];
+
+    bool going_to_do_pred;
+    bool going_to_do_upd[BPU_BANK_NUM];
+
+    bool q_push_en[BPU_BANK_NUM];
+    bool q_pop_en[BPU_BANK_NUM];
+
+    bool final_pred_dir[FETCH_WIDTH];
+    uint32_t next_fetch_addr_calc;
+    uint32_t final_2_ahead_address;
+    bool should_update_spec_hist;
+
+    TAGE_TOP::InputPayload tage_in[BPU_BANK_NUM];
+    BTB_TOP::InputPayload btb_in[BPU_BANK_NUM];
+    TAGE_TOP::CombResult tage_req[BPU_BANK_NUM];
+    BTB_TOP::CombResult btb_req[BPU_BANK_NUM];
+
+    bool tage_done_next[BPU_BANK_NUM];
+    bool btb_done_next[BPU_BANK_NUM];
+    bool tage_calc_pred_dir_latch_next[FETCH_WIDTH];
+    bool tage_calc_altpred_latch_next[FETCH_WIDTH];
+    pcpn_t tage_calc_pcpn_latch_next[FETCH_WIDTH];
+    pcpn_t tage_calc_altpcpn_latch_next[FETCH_WIDTH];
+    tage_tag_t tage_pred_calc_tags_latch_next[FETCH_WIDTH][TN_MAX];
+    tage_idx_t tage_pred_calc_idxs_latch_next[FETCH_WIDTH][TN_MAX];
+    bool tage_result_valid_latch_next[FETCH_WIDTH];
+    uint32_t btb_pred_target_latch_next[FETCH_WIDTH];
+    bool btb_result_valid_latch_next[FETCH_WIDTH];
+  };
+
+  struct BpuCombIn {
+    InputPayload inp;
+    ReadData rd;
+  };
+
+  struct BpuCombOut {
+    OutputPayload out_regs;
+    UpdateRequest update_req;
   };
 
 private:
@@ -109,26 +492,34 @@ private:
     uint32_t base_pc;
     bool valid_mask;
     bool actual_dir;
-    uint8_t br_type;
+    br_type_t br_type;
     uint32_t targets;
     bool pred_dir;
     bool alt_pred;
-    uint8_t pcpn;
-    uint8_t altpcpn;
-    uint8_t tage_tags[TN_MAX];
-    uint32_t tage_idxs[TN_MAX];
+    pcpn_t pcpn;
+    pcpn_t altpcpn;
+    tage_tag_t tage_tags[TN_MAX];
+    tage_idx_t tage_idxs[TN_MAX];
   };
 
   // 2-Ahead Predictor Structures
-  struct SimpleAheadEntry {
+  struct AheadSlot1Entry {
     bool valid;
     bool taken;
     uint32_t target;
+    uint8_t conf;
   };
 
   struct LastBlockEntry {
     bool valid;
     uint32_t last_pc;
+  };
+
+  struct NLPEntry {
+    bool valid;
+    uint32_t tag;
+    uint32_t target;
+    uint8_t conf;
   };
 
   enum State {
@@ -147,6 +538,10 @@ private:
   bool Spec_GHR[GHR_LENGTH];
   uint32_t Arch_FH[FH_N_MAX][TN_MAX];
   uint32_t Spec_FH[FH_N_MAX][TN_MAX];
+  uint32_t Arch_ras_stack[RAS_DEPTH];
+  uint32_t Arch_ras_count;
+  uint32_t Spec_ras_stack[RAS_DEPTH];
+  uint32_t Spec_ras_count;
 
   // FH constants (从TAGE复制，用于调用FH_update函数)
   const uint32_t ghr_length[TN_MAX] = {8, 13, 32, 119};
@@ -155,7 +550,7 @@ private:
 
   // PC & Memory
   uint32_t pc_reg;
-  uint8_t inst_type_mem[BPU_TYPE_ENTRY_NUM]
+  br_type_t inst_type_mem[BPU_TYPE_ENTRY_NUM]
                        [BPU_BANK_NUM]; // 3-bit stored in uint8
 
   State state;
@@ -169,10 +564,10 @@ private:
   // 存储TAGE和BTB的预测结果（缓存先到的结果）对于FETCH_WIDTH建立！
   bool tage_calc_pred_dir_latch[FETCH_WIDTH];
   bool tage_calc_altpred_latch[FETCH_WIDTH];
-  uint8_t tage_calc_pcpn_latch[FETCH_WIDTH];
-  uint8_t tage_calc_altpcpn_latch[FETCH_WIDTH];
-  uint8_t tage_pred_calc_tags_latch[FETCH_WIDTH][TN_MAX];
-  uint32_t tage_pred_calc_idxs_latch[FETCH_WIDTH][TN_MAX];
+  pcpn_t tage_calc_pcpn_latch[FETCH_WIDTH];
+  pcpn_t tage_calc_altpcpn_latch[FETCH_WIDTH];
+  tage_tag_t tage_pred_calc_tags_latch[FETCH_WIDTH][TN_MAX];
+  tage_idx_t tage_pred_calc_idxs_latch[FETCH_WIDTH][TN_MAX];
   bool tage_result_valid_latch[FETCH_WIDTH]; // 标记TAGE预测结果是否已缓存
   uint32_t btb_pred_target_latch[FETCH_WIDTH];
   bool btb_result_valid_latch[FETCH_WIDTH]; // 标记BTB预测结果是否已缓存
@@ -198,9 +593,10 @@ private:
   TAGE_TOP *tage_inst[BPU_BANK_NUM];
   BTB_TOP *btb_inst[BPU_BANK_NUM];
 
-  // 2-Ahead Predictor Tables
-  SimpleAheadEntry simple_ahead_table[BPU_BANK_NUM][TWO_AHEAD_TABLE_SIZE];
+  // 2-Ahead slot1 predictor table
+  AheadSlot1Entry ahead_slot1_table[BPU_BANK_NUM][AHEAD_SLOT1_TABLE_SIZE];
   LastBlockEntry last_block_table[BPU_BANK_NUM];
+  NLPEntry nlp_table[NLP_TABLE_SIZE];
   
   // 2-Ahead Predictor Registers
   // 类似pc_reg的2-ahead reg,跟pc_reg保持同步
@@ -212,6 +608,38 @@ private:
   // goes to fetch_address_FIFO, 需要跟fetch_address_FIFO相关信号同步
   bool saved_mini_flush_correct;
   uint32_t saved_mini_flush_target; // may not used
+  bool ahead_gate_enable;
+  uint32_t ahead_gate_sample_count;
+  uint32_t ahead_gate_success_count;
+  uint32_t ahead_gate_disable_count;
+  uint32_t ahead_gate_enable_count;
+  bool nlp_s1_valid;
+  uint32_t nlp_s1_req_pc;
+  uint32_t nlp_s1_pred_next_pc;
+  bool nlp_s1_hit;
+  uint8_t nlp_s1_conf;
+  bool nlp_s2_valid;
+  uint32_t nlp_s2_req_pc;
+  uint32_t nlp_s2_pred_2ahead_pc;
+  bool nlp_s2_hit;
+  uint8_t nlp_s2_conf;
+
+  void ras_push(uint32_t *stack, uint32_t &count, uint32_t value) {
+    if (count < RAS_DEPTH) {
+      stack[count++] = value;
+      return;
+    }
+    for (int i = 1; i < RAS_DEPTH; ++i) {
+      stack[i - 1] = stack[i];
+    }
+    stack[RAS_DEPTH - 1] = value;
+  }
+
+  void ras_pop(uint32_t &count) {
+    if (count > 0) {
+      count--;
+    }
+  }
 
 
 public:
@@ -230,6 +658,1005 @@ public:
     // Initialize Memory
     std::memset(inst_type_mem, 0, sizeof(inst_type_mem));
     reset_internal_all();
+  }
+
+  void bpu_seq_read(const InputPayload &inp, ReadData &rd) const {
+    std::memset(&rd, 0, sizeof(ReadData));
+
+    rd.state_snapshot = state;
+    rd.pc_reg_snapshot = pc_reg;
+    rd.pc_can_send_to_icache_snapshot = pc_can_send_to_icache;
+    rd.pred_base_pc_fired_snapshot = pred_base_pc_fired;
+    rd.do_pred_latch_snapshot = do_pred_latch;
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      rd.do_upd_latch_snapshot[i] = do_upd_latch[i];
+      rd.tage_done_snapshot[i] = tage_done[i];
+      rd.btb_done_snapshot[i] = btb_done[i];
+      rd.q_wr_ptr_snapshot[i] = q_wr_ptr[i];
+      rd.q_rd_ptr_snapshot[i] = q_rd_ptr[i];
+      rd.q_count_snapshot[i] = q_count[i];
+    }
+
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      rd.tage_calc_pred_dir_latch_snapshot[i] = tage_calc_pred_dir_latch[i];
+      rd.tage_calc_altpred_latch_snapshot[i] = tage_calc_altpred_latch[i];
+      rd.tage_calc_pcpn_latch_snapshot[i] = tage_calc_pcpn_latch[i];
+      rd.tage_calc_altpcpn_latch_snapshot[i] = tage_calc_altpcpn_latch[i];
+      rd.tage_result_valid_latch_snapshot[i] = tage_result_valid_latch[i];
+      rd.btb_pred_target_latch_snapshot[i] = btb_pred_target_latch[i];
+      rd.btb_result_valid_latch_snapshot[i] = btb_result_valid_latch[i];
+      for (int k = 0; k < TN_MAX; k++) {
+        rd.tage_pred_calc_tags_latch_snapshot[i][k] = tage_pred_calc_tags_latch[i][k];
+        rd.tage_pred_calc_idxs_latch_snapshot[i][k] = tage_pred_calc_idxs_latch[i][k];
+      }
+    }
+
+    rd.saved_2ahead_prediction_snapshot = saved_2ahead_prediction;
+    rd.saved_2ahead_pred_valid_snapshot = saved_2ahead_pred_valid;
+    rd.saved_mini_flush_req_snapshot = saved_mini_flush_req;
+    rd.saved_mini_flush_correct_snapshot = saved_mini_flush_correct;
+    rd.saved_mini_flush_target_snapshot = saved_mini_flush_target;
+    rd.ahead_gate_enable_snapshot = ahead_gate_enable;
+    rd.ahead_gate_sample_count_snapshot = ahead_gate_sample_count;
+    rd.ahead_gate_success_count_snapshot = ahead_gate_success_count;
+    rd.ahead_gate_disable_count_snapshot = ahead_gate_disable_count;
+    rd.ahead_gate_enable_count_snapshot = ahead_gate_enable_count;
+    std::memcpy(rd.Arch_GHR_snapshot, Arch_GHR, sizeof(rd.Arch_GHR_snapshot));
+    std::memcpy(rd.Spec_GHR_snapshot, Spec_GHR, sizeof(rd.Spec_GHR_snapshot));
+    std::memcpy(rd.Arch_FH_snapshot, Arch_FH, sizeof(rd.Arch_FH_snapshot));
+    std::memcpy(rd.Spec_FH_snapshot, Spec_FH, sizeof(rd.Spec_FH_snapshot));
+    std::memcpy(rd.Arch_ras_stack_snapshot, Arch_ras_stack, sizeof(rd.Arch_ras_stack_snapshot));
+    rd.Arch_ras_count_snapshot = Arch_ras_count;
+    std::memcpy(rd.Spec_ras_stack_snapshot, Spec_ras_stack, sizeof(rd.Spec_ras_stack_snapshot));
+    rd.Spec_ras_count_snapshot = Spec_ras_count;
+#ifdef ENABLE_BPU_RAS
+    rd.ras_count_snapshot = 0;
+    rd.ras_has_entry_snapshot = false;
+    rd.ras_top_snapshot = 0;
+#else
+    rd.ras_count_snapshot = 0;
+    rd.ras_has_entry_snapshot = false;
+    rd.ras_top_snapshot = 0;
+#endif
+    bpu_prepare_comb_read(inp, rd);
+  }
+
+  void bpu_prepare_comb_read(const InputPayload &inp, ReadData &rd) const {
+#ifdef ENABLE_BPU_RAS
+    const bool use_arch_ras_snapshot = inp.refetch;
+    const uint32_t ras_count_snapshot =
+        use_arch_ras_snapshot ? rd.Arch_ras_count_snapshot : rd.Spec_ras_count_snapshot;
+    rd.ras_count_snapshot = ras_count_snapshot;
+    rd.ras_has_entry_snapshot = (ras_count_snapshot > 0);
+    if (rd.ras_has_entry_snapshot) {
+      rd.ras_top_snapshot = use_arch_ras_snapshot
+                                ? rd.Arch_ras_stack_snapshot[ras_count_snapshot - 1]
+                                : rd.Spec_ras_stack_snapshot[ras_count_snapshot - 1];
+    } else {
+      rd.ras_top_snapshot = 0;
+    }
+#endif
+
+    if (rd.state_snapshot == S_IDLE) {
+      rd.pred_base_pc = inp.refetch ? inp.refetch_address : rd.pc_reg_snapshot;
+    } else {
+      rd.pred_base_pc = rd.pred_base_pc_fired_snapshot;
+    }
+
+    const uint32_t CACHE_MASK = ~(ICACHE_LINE_SIZE - 1);
+    uint32_t pc_plus_width = rd.pred_base_pc + (FETCH_WIDTH * 4);
+    rd.boundary_addr =
+        ((rd.pred_base_pc & CACHE_MASK) != (pc_plus_width & CACHE_MASK))
+            ? (pc_plus_width & CACHE_MASK)
+            : pc_plus_width;
+
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      rd.do_pred_for_this_pc[i] = rd.pred_base_pc + (i * 4);
+      if (rd.do_pred_for_this_pc[i] < rd.boundary_addr) {
+        rd.this_pc_bank_sel[i] = bank_sel_from_pc(rd.do_pred_for_this_pc[i]);
+        rd.do_pred_on_this_pc[i] = true;
+        int type_idx = bank_pc_from_pc(rd.do_pred_for_this_pc[i]) & BPU_TYPE_IDX_MASK;
+        int bank_sel = rd.this_pc_bank_sel[i];
+        rd.pred_inst_type_snapshot[i] = inst_type_mem[type_idx][bank_sel];
+        uint32_t ahead_idx =
+            bank_pc_from_pc(rd.do_pred_for_this_pc[i]) % AHEAD_SLOT1_TABLE_SIZE;
+        const AheadSlot1Entry &ahead_entry = ahead_slot1_table[bank_sel][ahead_idx];
+        rd.ahead_entry_valid_snapshot[i] = ahead_entry.valid;
+        rd.ahead_entry_taken_snapshot[i] = ahead_entry.taken;
+        rd.ahead_entry_target_snapshot[i] = ahead_entry.target;
+        rd.ahead_entry_conf_snapshot[i] = ahead_entry.conf;
+      } else {
+        rd.this_pc_bank_sel[i] = -1;
+        rd.do_pred_on_this_pc[i] = false;
+        rd.pred_inst_type_snapshot[i] = BR_NONCTL;
+        rd.ahead_entry_valid_snapshot[i] = false;
+        rd.ahead_entry_taken_snapshot[i] = false;
+        rd.ahead_entry_target_snapshot[i] = 0;
+        rd.ahead_entry_conf_snapshot[i] = 0;
+      }
+    }
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      rd.q_full[i] = (rd.q_count_snapshot[i] == Q_DEPTH);
+      rd.q_empty[i] = (rd.q_count_snapshot[i] == 0);
+      rd.last_block_valid_snapshot[i] = last_block_table[i].valid;
+      rd.last_block_pc_snapshot[i] = last_block_table[i].last_pc;
+      if (rd.last_block_valid_snapshot[i]) {
+        uint32_t slot1_idx =
+            bank_pc_from_pc(rd.last_block_pc_snapshot[i]) % AHEAD_SLOT1_TABLE_SIZE;
+        const AheadSlot1Entry &slot1_entry = ahead_slot1_table[i][slot1_idx];
+        rd.last_block_entry_valid_snapshot[i] = slot1_entry.valid;
+        rd.last_block_entry_taken_snapshot[i] = slot1_entry.taken;
+        rd.last_block_entry_target_snapshot[i] = slot1_entry.target;
+        rd.last_block_entry_conf_snapshot[i] = slot1_entry.conf;
+      } else {
+        rd.last_block_entry_valid_snapshot[i] = false;
+        rd.last_block_entry_taken_snapshot[i] = false;
+        rd.last_block_entry_target_snapshot[i] = 0;
+        rd.last_block_entry_conf_snapshot[i] = 0;
+      }
+      const QueueEntry &entry = update_queue[rd.q_rd_ptr_snapshot[i]][i];
+      rd.q_data[i].base_pc = entry.base_pc;
+      rd.q_data[i].valid_mask = entry.valid_mask;
+      rd.q_data[i].actual_dir = entry.actual_dir;
+      rd.q_data[i].br_type = entry.br_type;
+      rd.q_data[i].targets = entry.targets;
+      rd.q_data[i].pred_dir = entry.pred_dir;
+      rd.q_data[i].alt_pred = entry.alt_pred;
+      rd.q_data[i].pcpn = entry.pcpn;
+      rd.q_data[i].altpcpn = entry.altpcpn;
+      for (int k = 0; k < TN_MAX; k++) {
+        rd.q_data[i].tage_tags[k] = entry.tage_tags[k];
+        rd.q_data[i].tage_idxs[k] = entry.tage_idxs[k];
+      }
+    }
+
+    rd.going_to_do_pred = inp.icache_read_ready || inp.refetch;
+    rd.going_to_do_upd_any = false;
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      rd.going_to_do_upd[i] = !rd.q_empty[i];
+      rd.going_to_do_upd_any |= rd.going_to_do_upd[i];
+    }
+    rd.trans_ready_to_fire = rd.going_to_do_pred || rd.going_to_do_upd_any;
+    rd.set_submodule_input = (rd.state_snapshot == S_IDLE) && rd.trans_ready_to_fire;
+
+    auto read_nlp_entry = [&](uint32_t pc, ReadData::NlpEntrySnapshot &snapshot) {
+      const uint32_t idx = nlp_index_from_pc(pc);
+      const NLPEntry &entry = nlp_table[idx];
+      snapshot.entry_valid = entry.valid;
+      snapshot.entry_tag = entry.tag;
+      snapshot.entry_target = entry.target;
+      snapshot.entry_conf = entry.conf;
+    };
+    read_nlp_entry(rd.pred_base_pc, rd.nlp_pred_base_entry_snapshot);
+    read_nlp_entry(nlp_s1_pred_next_pc, rd.nlp_s1_entry_snapshot);
+    read_nlp_entry(rd.pred_base_pc_fired_snapshot, rd.nlp_train_entry_snapshot);
+
+    std::memset(rd.tage_in, 0, sizeof(rd.tage_in));
+    std::memset(rd.btb_in, 0, sizeof(rd.btb_in));
+#ifdef SPECULATIVE_ON
+    const bool *ghr_src = Spec_GHR;
+    const uint32_t (*fh_src)[TN_MAX] = Spec_FH;
+#else
+    const bool *ghr_src = Arch_GHR;
+    const uint32_t (*fh_src)[TN_MAX] = Arch_FH;
+#endif
+    for (int b = 0; b < BPU_BANK_NUM; b++) {
+      for (int k = 0; k < FH_N_MAX; k++) {
+        for (int i = 0; i < TN_MAX; i++) {
+          rd.tage_in[b].fh_in[k][i] = fh_src[k][i];
+        }
+      }
+      for (int i = 0; i < GHR_LENGTH; i++) {
+        rd.tage_in[b].ghr_in[i] = ghr_src[i];
+      }
+    }
+
+    if (rd.set_submodule_input) {
+      if (rd.going_to_do_pred) {
+        for (int i = 0; i < FETCH_WIDTH; i++) {
+          if (!rd.do_pred_on_this_pc[i]) {
+            continue;
+          }
+          int bank_sel = rd.this_pc_bank_sel[i];
+          if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
+            rd.tage_in[bank_sel].pred_req = true;
+            rd.tage_in[bank_sel].pc_pred_in = bank_pc_from_pc(rd.do_pred_for_this_pc[i]);
+            rd.btb_in[bank_sel].pred_req = true;
+            rd.btb_in[bank_sel].pred_pc = bank_pc_from_pc(rd.do_pred_for_this_pc[i]);
+          }
+        }
+      }
+
+      for (int i = 0; i < BPU_BANK_NUM; i++) {
+        if (rd.going_to_do_upd[i]) {
+          uint32_t u_pc = rd.q_data[i].base_pc;
+          bool is_cond_upd = (rd.q_data[i].br_type == BR_DIRECT);
+          if (is_cond_upd) {
+            rd.tage_in[i].update_en = rd.q_data[i].valid_mask;
+            rd.tage_in[i].pc_update_in = bank_pc_from_pc(u_pc);
+            rd.tage_in[i].real_dir = rd.q_data[i].actual_dir;
+            rd.tage_in[i].pred_in = rd.q_data[i].pred_dir;
+            rd.tage_in[i].alt_pred_in = rd.q_data[i].alt_pred;
+            rd.tage_in[i].pcpn_in = rd.q_data[i].pcpn;
+            rd.tage_in[i].altpcpn_in = rd.q_data[i].altpcpn;
+            for (int k = 0; k < TN_MAX; k++) {
+              rd.tage_in[i].tage_tag_flat_in[k] = rd.q_data[i].tage_tags[k];
+              rd.tage_in[i].tage_idx_flat_in[k] = rd.q_data[i].tage_idxs[k];
+            }
+          }
+
+          rd.btb_in[i].upd_valid = rd.q_data[i].valid_mask;
+          rd.btb_in[i].upd_pc = bank_pc_from_pc(rd.q_data[i].base_pc);
+          rd.btb_in[i].upd_actual_addr = rd.q_data[i].targets;
+          rd.btb_in[i].upd_actual_dir = rd.q_data[i].actual_dir;
+          rd.btb_in[i].upd_br_type_in = rd.q_data[i].br_type;
+        }
+      }
+    }
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      tage_inst[i]->tage_seq_read(rd.tage_in[i], rd.tage_rd[i]);
+      btb_inst[i]->btb_seq_read(rd.btb_in[i], rd.btb_rd[i]);
+    }
+  }
+
+  void bpu_comb(const BpuCombIn &comb_in, BpuCombOut &comb_out) {
+    const InputPayload &inp = comb_in.inp;
+    const ReadData &rd = comb_in.rd;
+    OutputPayload &out = comb_out.out_regs;
+    UpdateRequest &req = comb_out.update_req;
+    std::memset(&out, 0, sizeof(OutputPayload));
+    std::memset(&req, 0, sizeof(UpdateRequest));
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      req.going_to_do_upd[i] = rd.going_to_do_upd[i];
+      req.q_push_en[i] = false;
+      req.q_pop_en[i] = false;
+      req.tage_done_next[i] = rd.tage_done_snapshot[i];
+      req.btb_done_next[i] = rd.btb_done_snapshot[i];
+      req.tage_in[i] = rd.tage_in[i];
+      req.btb_in[i] = rd.btb_in[i];
+    }
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      req.do_pred_on_this_pc[i] = rd.do_pred_on_this_pc[i];
+      req.this_pc_bank_sel[i] = rd.this_pc_bank_sel[i];
+      req.do_pred_for_this_pc[i] = rd.do_pred_for_this_pc[i];
+      req.tage_calc_pred_dir_latch_next[i] = rd.tage_calc_pred_dir_latch_snapshot[i];
+      req.tage_calc_altpred_latch_next[i] = rd.tage_calc_altpred_latch_snapshot[i];
+      req.tage_calc_pcpn_latch_next[i] = rd.tage_calc_pcpn_latch_snapshot[i];
+      req.tage_calc_altpcpn_latch_next[i] = rd.tage_calc_altpcpn_latch_snapshot[i];
+      req.tage_result_valid_latch_next[i] = rd.tage_result_valid_latch_snapshot[i];
+      req.btb_pred_target_latch_next[i] = rd.btb_pred_target_latch_snapshot[i];
+      req.btb_result_valid_latch_next[i] = rd.btb_result_valid_latch_snapshot[i];
+      for (int k = 0; k < TN_MAX; k++) {
+        req.tage_pred_calc_tags_latch_next[i][k] = rd.tage_pred_calc_tags_latch_snapshot[i][k];
+        req.tage_pred_calc_idxs_latch_next[i][k] = rd.tage_pred_calc_idxs_latch_snapshot[i][k];
+      }
+      req.final_pred_dir[i] = false;
+    }
+
+    req.pred_base_pc = rd.pred_base_pc;
+    req.going_to_do_pred = rd.going_to_do_pred;
+
+    TAGE_TOP::OutputPayload tage_out[BPU_BANK_NUM];
+    BTB_TOP::OutputPayload btb_out[BPU_BANK_NUM];
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      TAGE_TOP::TageCombOut tage_comb_out{};
+      tage_inst[i]->tage_comb(TAGE_TOP::TageCombIn{rd.tage_in[i], rd.tage_rd[i]},
+                              tage_comb_out);
+      tage_out[i] = tage_comb_out.out_regs;
+      req.tage_req[i] = tage_comb_out.req;
+
+      BTB_TOP::BtbCombOut btb_comb_out{};
+      btb_inst[i]->btb_comb(BTB_TOP::BtbCombIn{rd.btb_in[i], rd.btb_rd[i]},
+                            btb_comb_out);
+      btb_out[i] = btb_comb_out.out_regs;
+      req.btb_req[i] = btb_comb_out.req;
+    }
+
+    if (rd.state_snapshot == S_WORKING || rd.state_snapshot == S_REFEATCH) {
+      for (int i = 0; i < BPU_BANK_NUM; i++) {
+        if (!req.tage_done_next[i] && !tage_out[i].busy) {
+          req.tage_done_next[i] = true;
+          for (int j = 0; j < FETCH_WIDTH; j++) {
+            if (rd.do_pred_on_this_pc[j] && rd.this_pc_bank_sel[j] == i &&
+                !req.tage_result_valid_latch_next[j]) {
+              req.tage_calc_pred_dir_latch_next[j] = tage_out[i].pred_out;
+              req.tage_calc_altpred_latch_next[j] = tage_out[i].alt_pred_out;
+              req.tage_calc_pcpn_latch_next[j] = tage_out[i].pcpn_out;
+              req.tage_calc_altpcpn_latch_next[j] = tage_out[i].altpcpn_out;
+              for (int k = 0; k < TN_MAX; k++) {
+                req.tage_pred_calc_tags_latch_next[j][k] = tage_out[i].tage_tag_flat_out[k];
+                req.tage_pred_calc_idxs_latch_next[j][k] = tage_out[i].tage_idx_flat_out[k];
+              }
+              req.tage_result_valid_latch_next[j] = true;
+              break;
+            }
+          }
+        }
+
+        if (!req.btb_done_next[i] && !btb_out[i].busy) {
+          req.btb_done_next[i] = true;
+          for (int j = 0; j < FETCH_WIDTH; j++) {
+            if (rd.do_pred_on_this_pc[j] && rd.this_pc_bank_sel[j] == i &&
+                !req.btb_result_valid_latch_next[j]) {
+              req.btb_pred_target_latch_next[j] = btb_out[i].pred_target;
+              req.btb_result_valid_latch_next[j] = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    bool all_tage_ready = true;
+    bool all_btb_ready = true;
+    if (rd.do_pred_latch_snapshot) {
+      for (int i = 0; i < FETCH_WIDTH; i++) {
+        if (!rd.do_pred_on_this_pc[i]) {
+          continue;
+        }
+        int bank_sel = rd.this_pc_bank_sel[i];
+        if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
+          if (!req.tage_result_valid_latch_next[i] || !req.tage_done_next[bank_sel]) {
+            all_tage_ready = false;
+          }
+          if (!req.btb_result_valid_latch_next[i] || !req.btb_done_next[bank_sel]) {
+            all_btb_ready = false;
+          }
+        }
+      }
+    }
+
+    bool all_upd_ready = true;
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      if (rd.do_upd_latch_snapshot[i]) {
+        if (!req.tage_done_next[i] || !req.btb_done_next[i]) {
+          all_upd_ready = false;
+        }
+      }
+    }
+
+    bool all_ops_done =
+        (rd.do_pred_latch_snapshot ? (all_tage_ready && all_btb_ready) : true) &&
+        all_upd_ready;
+    req.next_state = rd.state_snapshot;
+    switch (rd.state_snapshot) {
+      case S_IDLE:
+        req.next_state = rd.trans_ready_to_fire ? S_WORKING : S_IDLE;
+        break;
+      case S_WORKING:
+        if (inp.refetch) {
+          req.next_state = all_ops_done ? S_IDLE : S_REFEATCH;
+        } else if (all_ops_done) {
+          req.next_state = S_IDLE;
+        } else {
+          req.next_state = S_WORKING;
+        }
+        break;
+      case S_REFEATCH:
+        req.next_state = all_ops_done ? S_IDLE : S_REFEATCH;
+        break;
+      default:
+        req.next_state = rd.state_snapshot;
+        break;
+    }
+
+    req.next_fetch_addr_calc = rd.boundary_addr;
+    req.final_2_ahead_address = req.next_fetch_addr_calc + (FETCH_WIDTH * 4);
+    req.should_update_spec_hist = false;
+    bool saw_low_conf_fallback = false;
+    (void)saw_low_conf_fallback;
+    bool found_taken_branch = false;
+
+    if ((rd.state_snapshot == S_WORKING) && (req.next_state == S_IDLE) && !inp.refetch) {
+      req.should_update_spec_hist = true;
+      for (int i = 0; i < FETCH_WIDTH; i++) {
+        if (!rd.do_pred_on_this_pc[i]) {
+          continue;
+        }
+        int bank_sel = rd.this_pc_bank_sel[i];
+        if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
+          br_type_t p_type = rd.pred_inst_type_snapshot[i];
+          if (p_type == BR_NONCTL) {
+            req.final_pred_dir[i] = false;
+          } else if (p_type == BR_RET || p_type == BR_CALL || p_type == BR_IDIRECT ||
+                     p_type == BR_JAL) {
+            req.final_pred_dir[i] = true;
+          } else {
+            req.final_pred_dir[i] = req.tage_calc_pred_dir_latch_next[i];
+          }
+
+          if (req.final_pred_dir[i] && !found_taken_branch &&
+              req.btb_result_valid_latch_next[i]) {
+            found_taken_branch = true;
+            uint32_t chosen_target = req.btb_pred_target_latch_next[i];
+            if (p_type == BR_RET && rd.ras_has_entry_snapshot) {
+              chosen_target = rd.ras_top_snapshot;
+            }
+            req.next_fetch_addr_calc = chosen_target;
+          }
+        }
+      }
+      req.final_2_ahead_address = req.next_fetch_addr_calc + (FETCH_WIDTH * 4);
+    }
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      req.q_pop_en[i] = ((rd.state_snapshot == S_WORKING || rd.state_snapshot == S_REFEATCH) &&
+                         (req.next_state == S_IDLE) && rd.do_upd_latch_snapshot[i]);
+    }
+    for (int i = 0; i < COMMIT_WIDTH; i++) {
+      if (!inp.in_upd_valid[i]) {
+        continue;
+      }
+      int bank_sel = bank_sel_from_pc(inp.in_update_base_pc[i]);
+      req.q_push_en[bank_sel] = !rd.q_full[bank_sel];
+    }
+
+    if ((rd.state_snapshot == S_WORKING) && req.next_state == S_IDLE) {
+      out.PTAB_write_enable = rd.do_pred_latch_snapshot && !inp.refetch;
+    }
+    out.icache_read_valid = rd.pc_can_send_to_icache_snapshot && (rd.state_snapshot == S_IDLE);
+    out.fetch_address = inp.refetch ? inp.refetch_address : rd.pc_reg_snapshot;
+    out.predict_next_fetch_address = req.next_fetch_addr_calc;
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      out.out_pred_dir[i] = req.final_pred_dir[i];
+      out.out_alt_pred[i] = req.tage_calc_altpred_latch_next[i];
+      out.out_pcpn[i] = req.tage_calc_pcpn_latch_next[i];
+      out.out_altpcpn[i] = req.tage_calc_altpcpn_latch_next[i];
+      for (int k = 0; k < TN_MAX; k++) {
+        out.out_tage_tags[i][k] = req.tage_pred_calc_tags_latch_next[i][k];
+        out.out_tage_idxs[i][k] = req.tage_pred_calc_idxs_latch_next[i][k];
+      }
+    }
+    out.out_pred_base_pc = rd.pred_base_pc_fired_snapshot;
+
+    uint32_t refetch_2ahead_target = inp.refetch_address + (FETCH_WIDTH * 4);
+    uint32_t fallback_twoahead_target = out.fetch_address + (FETCH_WIDTH * 4);
+    out.two_ahead_valid = inp.refetch ? false : rd.saved_2ahead_pred_valid_snapshot;
+    out.two_ahead_target =
+        inp.refetch ? refetch_2ahead_target
+                    : (out.two_ahead_valid ? rd.saved_2ahead_prediction_snapshot
+                                           : fallback_twoahead_target);
+    bool need_mini_flush = rd.saved_2ahead_prediction_snapshot != req.next_fetch_addr_calc;
+    out.mini_flush_req = need_mini_flush && out.PTAB_write_enable;
+    out.mini_flush_correct = rd.saved_mini_flush_correct_snapshot && !inp.refetch;
+    out.mini_flush_target = rd.saved_mini_flush_target_snapshot;
+#ifndef ENABLE_2AHEAD
+    out.two_ahead_valid = false;
+    out.mini_flush_req = false;
+    out.mini_flush_correct = false;
+#endif
+
+    bool q_full_any = false;
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      int next_q_count = static_cast<int>(rd.q_count_snapshot[i]);
+      if (req.q_push_en[i] && !req.q_pop_en[i]) {
+        next_q_count++;
+      } else if (!req.q_push_en[i] && req.q_pop_en[i]) {
+        next_q_count--;
+      }
+      q_full_any |= (next_q_count == Q_DEPTH);
+    }
+    out.update_queue_full = q_full_any;
+
+    req.pc_reg_next = rd.pc_reg_snapshot;
+    req.pc_can_send_to_icache_next = rd.pc_can_send_to_icache_snapshot;
+    req.do_pred_latch_next = rd.do_pred_latch_snapshot;
+    req.pred_base_pc_fired_next = rd.pred_base_pc_fired_snapshot;
+    req.saved_2ahead_prediction_next = rd.saved_2ahead_prediction_snapshot;
+    req.saved_2ahead_pred_valid_next = rd.saved_2ahead_pred_valid_snapshot;
+    req.saved_mini_flush_req_next = rd.saved_mini_flush_req_snapshot;
+    req.saved_mini_flush_correct_next = rd.saved_mini_flush_correct_snapshot;
+    req.saved_mini_flush_target_next = rd.saved_mini_flush_target_snapshot;
+    req.ahead_gate_enable_next = rd.ahead_gate_enable_snapshot;
+    req.ahead_gate_sample_count_next = rd.ahead_gate_sample_count_snapshot;
+    req.ahead_gate_success_count_next = rd.ahead_gate_success_count_snapshot;
+    req.ahead_gate_disable_count_next = rd.ahead_gate_disable_count_snapshot;
+    req.ahead_gate_enable_count_next = rd.ahead_gate_enable_count_snapshot;
+    req.nlp_s1_valid_next = nlp_s1_valid;
+    req.nlp_s1_req_pc_next = nlp_s1_req_pc;
+    req.nlp_s1_pred_next_pc_next = nlp_s1_pred_next_pc;
+    req.nlp_s1_hit_next = nlp_s1_hit;
+    req.nlp_s1_conf_next = nlp_s1_conf;
+    req.nlp_s2_valid_next = nlp_s2_valid;
+    req.nlp_s2_req_pc_next = nlp_s2_req_pc;
+    req.nlp_s2_pred_2ahead_pc_next = nlp_s2_pred_2ahead_pc;
+    req.nlp_s2_hit_next = nlp_s2_hit;
+    req.nlp_s2_conf_next = nlp_s2_conf;
+    req.nlp_entry_we = false;
+    req.nlp_entry_idx = 0;
+    req.nlp_entry_valid_next = false;
+    req.nlp_entry_tag_next = 0;
+    req.nlp_entry_target_next = 0;
+    req.nlp_entry_conf_next = 0;
+    std::memcpy(req.Spec_GHR_next, rd.Spec_GHR_snapshot, sizeof(req.Spec_GHR_next));
+    std::memcpy(req.Arch_GHR_next, rd.Arch_GHR_snapshot, sizeof(req.Arch_GHR_next));
+    std::memcpy(req.Spec_FH_next, rd.Spec_FH_snapshot, sizeof(req.Spec_FH_next));
+    std::memcpy(req.Arch_FH_next, rd.Arch_FH_snapshot, sizeof(req.Arch_FH_next));
+    std::memcpy(req.Arch_ras_stack_next, rd.Arch_ras_stack_snapshot,
+                sizeof(req.Arch_ras_stack_next));
+    req.Arch_ras_count_next = rd.Arch_ras_count_snapshot;
+    std::memcpy(req.Spec_ras_stack_next, rd.Spec_ras_stack_snapshot,
+                sizeof(req.Spec_ras_stack_next));
+    req.Spec_ras_count_next = rd.Spec_ras_count_snapshot;
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      req.do_upd_latch_next[i] = rd.do_upd_latch_snapshot[i];
+      req.q_wr_ptr_next[i] = rd.q_wr_ptr_snapshot[i];
+      req.q_rd_ptr_next[i] = rd.q_rd_ptr_snapshot[i];
+      req.q_count_next[i] = rd.q_count_snapshot[i];
+      req.ahead_entry_we[i] = false;
+      req.ahead_entry_idx[i] = 0;
+      req.ahead_entry_valid_next[i] = false;
+      req.ahead_entry_taken_next[i] = false;
+      req.ahead_entry_target_next[i] = 0;
+      req.ahead_entry_conf_next[i] = 0;
+      req.last_block_valid_next[i] = rd.last_block_valid_snapshot[i];
+      req.last_block_pc_next[i] = rd.last_block_pc_snapshot[i];
+    }
+    for (int i = 0; i < COMMIT_WIDTH; i++) {
+      req.q_entry_we[i] = false;
+      req.q_entry_bank[i] = 0;
+      req.q_entry_slot[i] = 0;
+      std::memset(&req.q_entry_data[i], 0, sizeof(req.q_entry_data[i]));
+      req.inst_type_we[i] = false;
+      req.inst_type_bank[i] = 0;
+      req.inst_type_idx[i] = 0;
+      req.inst_type_data[i] = BR_NONCTL;
+    }
+
+    if (req.out_regs.icache_read_valid && inp.icache_read_ready) {
+      req.pc_can_send_to_icache_next = false;
+    }
+
+    const bool idle_to_working =
+        (rd.state_snapshot == S_IDLE && req.next_state == S_WORKING);
+    if (idle_to_working) {
+      req.do_pred_latch_next = req.going_to_do_pred;
+      for (int i = 0; i < BPU_BANK_NUM; i++) {
+        req.do_upd_latch_next[i] = req.going_to_do_upd[i];
+        req.tage_done_next[i] = false;
+        req.btb_done_next[i] = false;
+      }
+      req.pred_base_pc_fired_next = req.pred_base_pc;
+      for (int i = 0; i < FETCH_WIDTH; i++) {
+        req.tage_result_valid_latch_next[i] = false;
+        req.btb_result_valid_latch_next[i] = false;
+      }
+      if (req.going_to_do_pred && !inp.refetch) {
+        const uint32_t stage1_tag = nlp_tag_from_pc(rd.pred_base_pc);
+        const bool stage1_hit = rd.nlp_pred_base_entry_snapshot.entry_valid &&
+                                (rd.nlp_pred_base_entry_snapshot.entry_tag == stage1_tag);
+        const uint32_t stage1_target =
+            stage1_hit ? rd.nlp_pred_base_entry_snapshot.entry_target
+                       : nlp_fallback_next_pc(rd.pred_base_pc);
+        const uint8_t stage1_conf =
+            stage1_hit ? rd.nlp_pred_base_entry_snapshot.entry_conf : 0;
+        req.nlp_s1_valid_next = true;
+        req.nlp_s1_req_pc_next = rd.pred_base_pc;
+        req.nlp_s1_pred_next_pc_next =
+            (stage1_hit && stage1_conf >= NLP_CONF_THRESHOLD)
+                ? stage1_target
+                : nlp_fallback_next_pc(rd.pred_base_pc);
+        req.nlp_s1_hit_next = stage1_hit;
+        req.nlp_s1_conf_next = stage1_conf;
+        req.nlp_s2_valid_next = false;
+        req.nlp_s2_req_pc_next = 0;
+        req.nlp_s2_pred_2ahead_pc_next = 0;
+        req.nlp_s2_hit_next = false;
+        req.nlp_s2_conf_next = 0;
+      } else {
+        req.nlp_s1_valid_next = false;
+        req.nlp_s2_valid_next = false;
+      }
+    }
+
+    bool nlp_s2_valid_eval = req.nlp_s2_valid_next;
+    uint32_t nlp_s2_pred_eval = req.nlp_s2_pred_2ahead_pc_next;
+    bool nlp_s2_hit_eval = req.nlp_s2_hit_next;
+    uint8_t nlp_s2_conf_eval = req.nlp_s2_conf_next;
+    if ((rd.state_snapshot == S_WORKING) && !inp.refetch && nlp_s1_valid) {
+      const uint32_t stage2_tag = nlp_tag_from_pc(nlp_s1_pred_next_pc);
+      const bool stage2_hit = rd.nlp_s1_entry_snapshot.entry_valid &&
+                              (rd.nlp_s1_entry_snapshot.entry_tag == stage2_tag);
+      const uint32_t stage2_target =
+          stage2_hit ? rd.nlp_s1_entry_snapshot.entry_target
+                     : nlp_fallback_next_pc(nlp_s1_pred_next_pc);
+      const uint8_t stage2_conf = stage2_hit ? rd.nlp_s1_entry_snapshot.entry_conf : 0;
+      req.nlp_s2_valid_next = true;
+      req.nlp_s2_req_pc_next = nlp_s1_pred_next_pc;
+      req.nlp_s2_pred_2ahead_pc_next =
+          (stage2_hit && stage2_conf >= NLP_CONF_THRESHOLD)
+              ? stage2_target
+              : nlp_fallback_next_pc(nlp_s1_pred_next_pc);
+      req.nlp_s2_hit_next = stage2_hit;
+      req.nlp_s2_conf_next = stage2_conf;
+      nlp_s2_valid_eval = true;
+      nlp_s2_pred_eval = req.nlp_s2_pred_2ahead_pc_next;
+      nlp_s2_hit_eval = stage2_hit;
+      nlp_s2_conf_eval = stage2_conf;
+    }
+
+    const bool working_to_idle =
+        (rd.state_snapshot == S_WORKING && req.next_state == S_IDLE);
+    if (working_to_idle) {
+      if (rd.do_pred_latch_snapshot) {
+        const bool s1_match = nlp_s1_valid &&
+                              (nlp_s1_pred_next_pc == req.next_fetch_addr_calc);
+        const bool s2_usable =
+            nlp_s2_valid_eval && nlp_s2_hit_eval && (nlp_s2_conf_eval >= NLP_CONF_THRESHOLD);
+        const bool emit_two_ahead = s1_match && s2_usable;
+        req.final_2_ahead_address = emit_two_ahead
+                                        ? nlp_s2_pred_eval
+                                        : (req.next_fetch_addr_calc + (FETCH_WIDTH * 4));
+        req.saved_mini_flush_req_next =
+            rd.saved_2ahead_prediction_snapshot != req.next_fetch_addr_calc;
+        req.saved_mini_flush_correct_next =
+            rd.saved_2ahead_prediction_snapshot == req.next_fetch_addr_calc;
+        req.saved_mini_flush_target_next = rd.saved_2ahead_prediction_snapshot;
+        req.pc_reg_next = req.next_fetch_addr_calc;
+        req.pc_can_send_to_icache_next = true;
+        req.saved_2ahead_prediction_next = req.final_2_ahead_address;
+        req.saved_2ahead_pred_valid_next = emit_two_ahead;
+
+        const uint32_t train_pc = rd.pred_base_pc_fired_snapshot;
+        const uint32_t train_target = req.next_fetch_addr_calc;
+        const uint32_t train_idx = nlp_index_from_pc(train_pc);
+        const uint32_t train_tag = nlp_tag_from_pc(train_pc);
+        const ReadData::NlpEntrySnapshot &old_entry = rd.nlp_train_entry_snapshot;
+        const bool train_hit = old_entry.entry_valid && (old_entry.entry_tag == train_tag);
+        uint8_t next_conf = NLP_CONF_INIT;
+        if (train_hit) {
+          if (old_entry.entry_target == train_target) {
+            next_conf = (old_entry.entry_conf >= NLP_CONF_MAX)
+                            ? static_cast<uint8_t>(NLP_CONF_MAX)
+                            : static_cast<uint8_t>(old_entry.entry_conf + 1);
+          } else {
+            next_conf = 0;
+          }
+        }
+        req.nlp_entry_we = true;
+        req.nlp_entry_idx = train_idx;
+        req.nlp_entry_valid_next = true;
+        req.nlp_entry_tag_next = train_tag;
+        req.nlp_entry_target_next = train_target;
+        req.nlp_entry_conf_next = next_conf;
+      }
+      req.nlp_s1_valid_next = false;
+      req.nlp_s2_valid_next = false;
+      for (int i = 0; i < FETCH_WIDTH; i++) {
+        req.tage_result_valid_latch_next[i] = false;
+        req.btb_result_valid_latch_next[i] = false;
+      }
+      for (int i = 0; i < BPU_BANK_NUM; i++) {
+        req.tage_done_next[i] = false;
+        req.btb_done_next[i] = false;
+      }
+    }
+
+#if defined(ENABLE_2AHEAD) && ENABLE_2AHEAD_SLOT1_PRED && \
+    ENABLE_2AHEAD_SLOT1_ADAPTIVE_GATING
+    const bool has_gate_sample = working_to_idle && rd.do_pred_latch_snapshot && !inp.refetch;
+    bool gate_sample_success = false;
+    if (has_gate_sample) {
+      gate_sample_success =
+          (rd.saved_2ahead_prediction_snapshot == req.next_fetch_addr_calc) &&
+          !saw_low_conf_fallback;
+    }
+    AheadGateUpdateCombOut gate_update_out{};
+    ahead_gate_update_comb(
+        AheadGateUpdateCombIn{rd.ahead_gate_enable_snapshot,
+                              rd.ahead_gate_sample_count_snapshot,
+                              rd.ahead_gate_success_count_snapshot,
+                              has_gate_sample,
+                              gate_sample_success},
+        gate_update_out);
+    req.ahead_gate_enable_next = gate_update_out.gate_enable_next;
+    req.ahead_gate_sample_count_next = gate_update_out.sample_count_next;
+    req.ahead_gate_success_count_next = gate_update_out.success_count_next;
+    req.ahead_gate_disable_count_next =
+        rd.ahead_gate_disable_count_snapshot + (gate_update_out.toggled_disable ? 1U : 0U);
+    req.ahead_gate_enable_count_next =
+        rd.ahead_gate_enable_count_snapshot + (gate_update_out.toggled_enable ? 1U : 0U);
+#endif
+
+    if (req.should_update_spec_hist) {
+      bool spec_ghr_tmp[GHR_LENGTH];
+      uint32_t spec_fh_tmp[FH_N_MAX][TN_MAX];
+      std::memcpy(spec_ghr_tmp, req.Spec_GHR_next, sizeof(spec_ghr_tmp));
+      std::memcpy(spec_fh_tmp, req.Spec_FH_next, sizeof(spec_fh_tmp));
+      for (int i = 0; i < FETCH_WIDTH; ++i) {
+        if (!rd.do_pred_on_this_pc[i]) {
+          continue;
+        }
+        int bank_sel = rd.this_pc_bank_sel[i];
+        if (bank_sel < 0 || bank_sel >= BPU_BANK_NUM) {
+          continue;
+        }
+        br_type_t p_type = rd.pred_inst_type_snapshot[i];
+        if (p_type != BR_DIRECT) {
+          continue;
+        }
+        bool next_ghr[GHR_LENGTH];
+        uint32_t next_fh[FH_N_MAX][TN_MAX];
+        tage_ghr_update_apply(spec_ghr_tmp, req.final_pred_dir[i], next_ghr);
+        tage_fh_update_apply(spec_fh_tmp, spec_ghr_tmp, req.final_pred_dir[i], next_fh,
+                             fh_length, ghr_length);
+        std::memcpy(spec_ghr_tmp, next_ghr, sizeof(next_ghr));
+        std::memcpy(spec_fh_tmp, next_fh, sizeof(next_fh));
+      }
+      std::memcpy(req.Spec_GHR_next, spec_ghr_tmp, sizeof(req.Spec_GHR_next));
+      std::memcpy(req.Spec_FH_next, spec_fh_tmp, sizeof(req.Spec_FH_next));
+
+#ifdef ENABLE_BPU_RAS
+      uint32_t spec_ras_stack_tmp[RAS_DEPTH];
+      uint32_t spec_ras_count_tmp = req.Spec_ras_count_next;
+      std::memcpy(spec_ras_stack_tmp, req.Spec_ras_stack_next, sizeof(spec_ras_stack_tmp));
+      for (int i = 0; i < FETCH_WIDTH; ++i) {
+        if (!rd.do_pred_on_this_pc[i]) {
+          continue;
+        }
+        int bank_sel = rd.this_pc_bank_sel[i];
+        if (bank_sel < 0 || bank_sel >= BPU_BANK_NUM) {
+          continue;
+        }
+        uint32_t pc = rd.do_pred_for_this_pc[i];
+        br_type_t p_type = rd.pred_inst_type_snapshot[i];
+        bool pred_taken = req.final_pred_dir[i];
+        if (!pred_taken) {
+          continue;
+        }
+        if (p_type == BR_CALL) {
+          ras_push(spec_ras_stack_tmp, spec_ras_count_tmp, pc + 4);
+        } else if (p_type == BR_RET) {
+          ras_pop(spec_ras_count_tmp);
+        }
+        break;
+      }
+      std::memcpy(req.Spec_ras_stack_next, spec_ras_stack_tmp, sizeof(req.Spec_ras_stack_next));
+      req.Spec_ras_count_next = spec_ras_count_tmp;
+#endif
+    }
+
+    {
+      bool arch_ghr_tmp[GHR_LENGTH];
+      uint32_t arch_fh_tmp[FH_N_MAX][TN_MAX];
+      std::memcpy(arch_ghr_tmp, req.Arch_GHR_next, sizeof(arch_ghr_tmp));
+      std::memcpy(arch_fh_tmp, req.Arch_FH_next, sizeof(arch_fh_tmp));
+      bool arch_need_write = false;
+      for (int i = 0; i < COMMIT_WIDTH; ++i) {
+        if (!inp.in_upd_valid[i]) {
+          continue;
+        }
+        bool is_cond_upd = (inp.in_actual_br_type[i] == BR_DIRECT);
+        if (!is_cond_upd) {
+          continue;
+        }
+        bool real_dir = inp.in_actual_dir[i];
+        bool next_ghr[GHR_LENGTH];
+        uint32_t next_fh[FH_N_MAX][TN_MAX];
+        tage_ghr_update_apply(arch_ghr_tmp, real_dir, next_ghr);
+        tage_fh_update_apply(arch_fh_tmp, arch_ghr_tmp, real_dir, next_fh, fh_length,
+                             ghr_length);
+        if (inp.in_pred_dir[i] != real_dir) {
+          std::memcpy(req.Spec_GHR_next, next_ghr, sizeof(req.Spec_GHR_next));
+          std::memcpy(req.Spec_FH_next, next_fh, sizeof(req.Spec_FH_next));
+        }
+        std::memcpy(arch_ghr_tmp, next_ghr, sizeof(arch_ghr_tmp));
+        std::memcpy(arch_fh_tmp, next_fh, sizeof(arch_fh_tmp));
+        arch_need_write = true;
+      }
+      if (arch_need_write) {
+        std::memcpy(req.Arch_GHR_next, arch_ghr_tmp, sizeof(req.Arch_GHR_next));
+        std::memcpy(req.Arch_FH_next, arch_fh_tmp, sizeof(req.Arch_FH_next));
+      }
+    }
+
+#ifdef ENABLE_BPU_RAS
+    {
+      uint32_t arch_ras_stack_tmp[RAS_DEPTH];
+      uint32_t arch_ras_count_tmp = req.Arch_ras_count_next;
+      std::memcpy(arch_ras_stack_tmp, req.Arch_ras_stack_next, sizeof(arch_ras_stack_tmp));
+      for (int i = 0; i < COMMIT_WIDTH; ++i) {
+        if (!inp.in_upd_valid[i]) {
+          continue;
+        }
+        br_type_t br_type = inp.in_actual_br_type[i];
+        if (br_type == BR_CALL) {
+          ras_push(arch_ras_stack_tmp, arch_ras_count_tmp, inp.in_update_base_pc[i] + 4);
+        } else if (br_type == BR_RET) {
+          ras_pop(arch_ras_count_tmp);
+        }
+      }
+      std::memcpy(req.Arch_ras_stack_next, arch_ras_stack_tmp, sizeof(req.Arch_ras_stack_next));
+      req.Arch_ras_count_next = arch_ras_count_tmp;
+      if (inp.refetch) {
+        std::memcpy(req.Spec_ras_stack_next, req.Arch_ras_stack_next,
+                    sizeof(req.Spec_ras_stack_next));
+        req.Spec_ras_count_next = req.Arch_ras_count_next;
+      }
+    }
+#endif
+
+    for (int i = 0; i < COMMIT_WIDTH; i++) {
+      int bank_sel = bank_sel_from_pc(inp.in_update_base_pc[i]);
+      if (req.q_push_en[bank_sel] && inp.in_upd_valid[i]) {
+        req.q_entry_we[i] = true;
+        req.q_entry_bank[i] = bank_sel;
+        req.q_entry_slot[i] = req.q_wr_ptr_next[bank_sel];
+        req.q_entry_data[i].base_pc = inp.in_update_base_pc[i];
+        req.q_entry_data[i].valid_mask = inp.in_upd_valid[i];
+        req.q_entry_data[i].actual_dir = inp.in_actual_dir[i];
+        req.q_entry_data[i].pred_dir = inp.in_pred_dir[i];
+        req.q_entry_data[i].alt_pred = inp.in_alt_pred[i];
+        req.q_entry_data[i].br_type = inp.in_actual_br_type[i];
+        req.q_entry_data[i].targets = inp.in_actual_targets[i];
+        req.q_entry_data[i].pcpn = inp.in_pcpn[i];
+        req.q_entry_data[i].altpcpn = inp.in_altpcpn[i];
+        for (int k = 0; k < TN_MAX; k++) {
+          req.q_entry_data[i].tage_tags[k] = inp.in_tage_tags[i][k];
+          req.q_entry_data[i].tage_idxs[k] = inp.in_tage_idxs[i][k];
+        }
+        req.q_wr_ptr_next[bank_sel] = (req.q_wr_ptr_next[bank_sel] + 1) % Q_DEPTH;
+      }
+
+      if (inp.in_upd_valid[i]) {
+        uint32_t addr = inp.in_update_base_pc[i];
+        req.inst_type_we[i] = true;
+        req.inst_type_bank[i] = bank_sel_from_pc(addr);
+        req.inst_type_idx[i] = bank_pc_from_pc(addr) & BPU_TYPE_IDX_MASK;
+        req.inst_type_data[i] = inp.in_actual_br_type[i];
+      }
+    }
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      if (req.q_pop_en[i]) {
+        req.q_rd_ptr_next[i] = (req.q_rd_ptr_next[i] + 1) % Q_DEPTH;
+      }
+
+      int next_q_count = static_cast<int>(rd.q_count_snapshot[i]);
+      if (req.q_push_en[i] && !req.q_pop_en[i]) {
+        next_q_count++;
+      } else if (!req.q_push_en[i] && req.q_pop_en[i]) {
+        next_q_count--;
+      }
+      req.q_count_next[i] = static_cast<uint32_t>(next_q_count);
+    }
+
+    if (inp.refetch) {
+      req.pc_reg_next = inp.refetch_address;
+      req.pc_can_send_to_icache_next = true;
+      req.saved_2ahead_prediction_next = inp.refetch_address + (FETCH_WIDTH * 4);
+      req.saved_2ahead_pred_valid_next = false;
+      req.saved_mini_flush_req_next = false;
+      req.saved_mini_flush_correct_next = false;
+      req.nlp_s1_valid_next = false;
+      req.nlp_s2_valid_next = false;
+    }
+
+    req.out_regs = out;
+  }
+
+  void bpu_seq_write(const InputPayload &inp, const UpdateRequest &req,
+                     bool reset) {
+    if (reset) {
+      reset_internal_all();
+      return;
+    }
+    (void)inp;
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      tage_inst[i]->tage_seq_write(req.tage_in[i], req.tage_req[i], false);
+      btb_inst[i]->btb_seq_write(req.btb_in[i], req.btb_req[i], false);
+      tage_done[i] = req.tage_done_next[i];
+      btb_done[i] = req.btb_done_next[i];
+    }
+    for (int i = 0; i < FETCH_WIDTH; i++) {
+      tage_calc_pred_dir_latch[i] = req.tage_calc_pred_dir_latch_next[i];
+      tage_calc_altpred_latch[i] = req.tage_calc_altpred_latch_next[i];
+      tage_calc_pcpn_latch[i] = req.tage_calc_pcpn_latch_next[i];
+      tage_calc_altpcpn_latch[i] = req.tage_calc_altpcpn_latch_next[i];
+      tage_result_valid_latch[i] = req.tage_result_valid_latch_next[i];
+      btb_pred_target_latch[i] = req.btb_pred_target_latch_next[i];
+      btb_result_valid_latch[i] = req.btb_result_valid_latch_next[i];
+      for (int k = 0; k < TN_MAX; k++) {
+        tage_pred_calc_tags_latch[i][k] = req.tage_pred_calc_tags_latch_next[i][k];
+        tage_pred_calc_idxs_latch[i][k] = req.tage_pred_calc_idxs_latch_next[i][k];
+      }
+    }
+
+    do_pred_latch = req.do_pred_latch_next;
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      do_upd_latch[i] = req.do_upd_latch_next[i];
+    }
+    pred_base_pc_fired = req.pred_base_pc_fired_next;
+    pc_reg = req.pc_reg_next;
+    pc_can_send_to_icache = req.pc_can_send_to_icache_next;
+    saved_2ahead_prediction = req.saved_2ahead_prediction_next;
+    saved_2ahead_pred_valid = req.saved_2ahead_pred_valid_next;
+    saved_mini_flush_req = req.saved_mini_flush_req_next;
+    saved_mini_flush_correct = req.saved_mini_flush_correct_next;
+    saved_mini_flush_target = req.saved_mini_flush_target_next;
+    ahead_gate_enable = req.ahead_gate_enable_next;
+    ahead_gate_sample_count = req.ahead_gate_sample_count_next;
+    ahead_gate_success_count = req.ahead_gate_success_count_next;
+    ahead_gate_disable_count = req.ahead_gate_disable_count_next;
+    ahead_gate_enable_count = req.ahead_gate_enable_count_next;
+    nlp_s1_valid = req.nlp_s1_valid_next;
+    nlp_s1_req_pc = req.nlp_s1_req_pc_next;
+    nlp_s1_pred_next_pc = req.nlp_s1_pred_next_pc_next;
+    nlp_s1_hit = req.nlp_s1_hit_next;
+    nlp_s1_conf = req.nlp_s1_conf_next;
+    nlp_s2_valid = req.nlp_s2_valid_next;
+    nlp_s2_req_pc = req.nlp_s2_req_pc_next;
+    nlp_s2_pred_2ahead_pc = req.nlp_s2_pred_2ahead_pc_next;
+    nlp_s2_hit = req.nlp_s2_hit_next;
+    nlp_s2_conf = req.nlp_s2_conf_next;
+
+    std::memcpy(Spec_GHR, req.Spec_GHR_next, sizeof(Spec_GHR));
+    std::memcpy(Arch_GHR, req.Arch_GHR_next, sizeof(Arch_GHR));
+    std::memcpy(Spec_FH, req.Spec_FH_next, sizeof(Spec_FH));
+    std::memcpy(Arch_FH, req.Arch_FH_next, sizeof(Arch_FH));
+    std::memcpy(Arch_ras_stack, req.Arch_ras_stack_next, sizeof(Arch_ras_stack));
+    Arch_ras_count = req.Arch_ras_count_next;
+    std::memcpy(Spec_ras_stack, req.Spec_ras_stack_next, sizeof(Spec_ras_stack));
+    Spec_ras_count = req.Spec_ras_count_next;
+
+    for (int i = 0; i < COMMIT_WIDTH; i++) {
+      if (!req.q_entry_we[i]) {
+        continue;
+      }
+      int bank_sel = req.q_entry_bank[i];
+      uint32_t slot = req.q_entry_slot[i];
+      QueueEntry &entry = update_queue[slot][bank_sel];
+      entry.base_pc = req.q_entry_data[i].base_pc;
+      entry.valid_mask = req.q_entry_data[i].valid_mask;
+      entry.actual_dir = req.q_entry_data[i].actual_dir;
+      entry.br_type = req.q_entry_data[i].br_type;
+      entry.targets = req.q_entry_data[i].targets;
+      entry.pred_dir = req.q_entry_data[i].pred_dir;
+      entry.alt_pred = req.q_entry_data[i].alt_pred;
+      entry.pcpn = req.q_entry_data[i].pcpn;
+      entry.altpcpn = req.q_entry_data[i].altpcpn;
+      for (int k = 0; k < TN_MAX; k++) {
+        entry.tage_tags[k] = req.q_entry_data[i].tage_tags[k];
+        entry.tage_idxs[k] = req.q_entry_data[i].tage_idxs[k];
+      }
+    }
+
+    for (int i = 0; i < BPU_BANK_NUM; i++) {
+      if (req.ahead_entry_we[i]) {
+        AheadSlot1Entry &entry = ahead_slot1_table[i][req.ahead_entry_idx[i]];
+        entry.valid = req.ahead_entry_valid_next[i];
+        entry.taken = req.ahead_entry_taken_next[i];
+        entry.target = req.ahead_entry_target_next[i];
+        entry.conf = req.ahead_entry_conf_next[i];
+      }
+      last_block_table[i].valid = req.last_block_valid_next[i];
+      last_block_table[i].last_pc = req.last_block_pc_next[i];
+      q_wr_ptr[i] = req.q_wr_ptr_next[i];
+      q_rd_ptr[i] = req.q_rd_ptr_next[i];
+      q_count[i] = req.q_count_next[i];
+    }
+
+    if (req.nlp_entry_we) {
+      NLPEntry &entry = nlp_table[req.nlp_entry_idx];
+      entry.valid = req.nlp_entry_valid_next;
+      entry.tag = req.nlp_entry_tag_next;
+      entry.target = req.nlp_entry_target_next;
+      entry.conf = req.nlp_entry_conf_next;
+    }
+
+    for (int i = 0; i < COMMIT_WIDTH; i++) {
+      if (req.inst_type_we[i]) {
+        inst_type_mem[req.inst_type_idx[i]][req.inst_type_bank[i]] =
+            req.inst_type_data[i];
+      }
+    }
+
+    state = static_cast<State>(req.next_state);
   }
 
   ~BPU_TOP() {
@@ -255,6 +1682,10 @@ public:
     std::memset(Spec_GHR, 0, sizeof(Spec_GHR));
     std::memset(Arch_FH, 0, sizeof(Arch_FH));
     std::memset(Spec_FH, 0, sizeof(Spec_FH));
+    std::memset(Arch_ras_stack, 0, sizeof(Arch_ras_stack));
+    std::memset(Spec_ras_stack, 0, sizeof(Spec_ras_stack));
+    Arch_ras_count = 0;
+    Spec_ras_count = 0;
 
     for (int i = 0; i < BPU_BANK_NUM; i++) {
       q_wr_ptr[i] = 0;
@@ -287,738 +1718,88 @@ public:
 
     // 初始化2-Ahead预测器
     for (int i = 0; i < BPU_BANK_NUM; i++) {
-      for (int j = 0; j < TWO_AHEAD_TABLE_SIZE; j++) {
-        simple_ahead_table[i][j].valid = false;
-        simple_ahead_table[i][j].taken = false;
-        simple_ahead_table[i][j].target = 0;
+      for (int j = 0; j < AHEAD_SLOT1_TABLE_SIZE; j++) {
+        ahead_slot1_table[i][j].valid = false;
+        ahead_slot1_table[i][j].taken = false;
+        ahead_slot1_table[i][j].target = 0;
+        ahead_slot1_table[i][j].conf = 0;
       }
       last_block_table[i].valid = false;
       last_block_table[i].last_pc = 0;
+    }
+    for (int i = 0; i < NLP_TABLE_SIZE; i++) {
+      nlp_table[i].valid = false;
+      nlp_table[i].tag = 0;
+      nlp_table[i].target = 0;
+      nlp_table[i].conf = 0;
     }
     // 初始化2-ahead预测器为下一个cache line的地址
     DEBUG_LOG_SMALL_4("reset_internal_all,pc_reg: %x\n", pc_reg);
     saved_2ahead_prediction = pc_reg + (FETCH_WIDTH * 4);
     DEBUG_LOG_SMALL_4("reset_internal_all,saved_2ahead_prediction: %x\n", saved_2ahead_prediction);
-    // 初始化2-ahead预测器为有效
-    saved_2ahead_pred_valid = true;
+    saved_2ahead_pred_valid = false;
     saved_mini_flush_req = false;
     saved_mini_flush_correct = false;
     saved_mini_flush_target = 0;
+    ahead_gate_enable = true;
+    ahead_gate_sample_count = 0;
+    ahead_gate_success_count = 0;
+    ahead_gate_disable_count = 0;
+    ahead_gate_enable_count = 0;
+    nlp_s1_valid = false;
+    nlp_s1_req_pc = 0;
+    nlp_s1_pred_next_pc = 0;
+    nlp_s1_hit = false;
+    nlp_s1_conf = 0;
+    nlp_s2_valid = false;
+    nlp_s2_req_pc = 0;
+    nlp_s2_pred_2ahead_pc = 0;
+    nlp_s2_hit = false;
+    nlp_s2_conf = 0;
+  }
+
+  void bpu_comb_calc(const InputPayload &inp, const ReadData &rd,
+                     OutputPayload &out, UpdateRequest &req) {
+    BpuCombOut comb_out{};
+    bpu_comb(BpuCombIn{inp, rd}, comb_out);
+    out = comb_out.out_regs;
+    req = comb_out.update_req;
+  }
+
+  void bpu_seq(const InputPayload &inp, const UpdateRequest &req, bool reset) {
+    bpu_seq_write(inp, req, reset);
   }
 
   // ========================================================================
   // 主 Step 函数
   // ========================================================================
   OutputPayload step(bool clk, bool rst_n, const InputPayload &inp) {
-    DEBUG_LOG_SMALL_4("BPU_TOP step,saved_2ahead_prediction: %x\n", saved_2ahead_prediction);
-    OutputPayload out_reg;
-    std::memset(&out_reg, 0, sizeof(OutputPayload));
+    (void)clk;
+    DEBUG_LOG_SMALL_4("BPU_TOP step,saved_2ahead_prediction: %x\n",
+                      saved_2ahead_prediction);
 
     bpu_sim_time++;
+
+    OutputPayload out_reg;
+    std::memset(&out_reg, 0, sizeof(OutputPayload));
     if (rst_n) {
-      reset_internal_all();
+      bpu_seq_write(inp, UpdateRequest{}, true);
       DEBUG_LOG("[BPU_TOP] reset\n");
-      // out_reg.fetch_address = RESET_PC;
       extern SimCpu cpu;
       out_reg.fetch_address = cpu.back.number_PC;
-      // 初始化2-ahead预测器为下一个cache line的地址
+      out_reg.two_ahead_valid = false;
       out_reg.two_ahead_target = out_reg.fetch_address + (FETCH_WIDTH * 4);
-      // printf("reset to pc: %lx\n", out_reg.fetch_address);
       return out_reg;
-      // return out_reg;
     }
 
-    uint32_t pred_base_pc;
-    if (state == S_IDLE) {
-      pred_base_pc = inp.refetch ? inp.refetch_address : pc_reg;
-    } else {
-      pred_base_pc = pred_base_pc_fired;
-    }
+    ReadData rd;
+    UpdateRequest req;
+    bpu_seq_read(inp, rd);
+    bpu_comb_calc(inp, rd, out_reg, req);
+    bpu_seq(inp, req, false);
 
-    const uint32_t CACHE_MASK = ~(ICACHE_LINE_SIZE - 1);
-    uint32_t pc_plus_width = pred_base_pc + (FETCH_WIDTH * 4); // 32-bit PC
-    uint32_t boundary_addr =
-        ((pred_base_pc & CACHE_MASK) != (pc_plus_width & CACHE_MASK))
-            ? (pc_plus_width & CACHE_MASK)
-            : pc_plus_width;
-
-    bool do_pred_on_this_pc[FETCH_WIDTH];
-    int this_pc_bank_sel[FETCH_WIDTH];  // Changed from uint32_t to int to properly handle -1
-    uint32_t do_pred_for_this_pc[FETCH_WIDTH];
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      do_pred_for_this_pc[i] = pred_base_pc + (i * 4);
-      if (do_pred_for_this_pc[i] < boundary_addr) {
-        this_pc_bank_sel[i] = get_bank_sel(do_pred_for_this_pc[i]);
-        do_pred_on_this_pc[i] = true;
-      } else {
-        do_pred_on_this_pc[i] = false; // not in this cache line
-        this_pc_bank_sel[i] = -1; // invalid bank sel
-      }
-    }
-
-    // Queue status signals
-    bool q_full[BPU_BANK_NUM];
-    bool q_empty[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      q_full[i] = (q_count[i] == Q_DEPTH);
-      q_empty[i] = (q_count[i] == 0);
-      DEBUG_LOG_SMALL("[BPU_TOP] q_count[%d] = %d, q_full[%d] = %d, q_empty[%d] = %d\n", i, q_count[i], i, q_full[i], i, q_empty[i]);
-    }
-
-    QueueEntry q_data[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      q_data[i] = update_queue[q_rd_ptr[i]][i];
-    }
-    // Condition Check
-    bool going_to_do_pred =
-        inp.icache_read_ready || inp.refetch;  // refetch 也允许预测，只是要基于refetch_pc
-    bool going_to_do_upd[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      going_to_do_upd[i] = !q_empty[i];
-      // printf("%d ", q_count[i]);
-    }
-    // printf("\n");
-    // bool going_to_do_upd_any = going_to_do_upd[0] || going_to_do_upd[1] ||
-                              //  going_to_do_upd[2] || going_to_do_upd[3];
-    bool going_to_do_upd_any = false;
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      going_to_do_upd_any |= going_to_do_upd[i];
-    }
-    
-    bool trans_ready_to_fire = going_to_do_pred || going_to_do_upd_any; // 允许refetch直接fire
-
-    TAGE_TOP::InputPayload tage_in[BPU_BANK_NUM];
-    std::memset(tage_in, 0, sizeof(tage_in)); // Default 0
-
-    // TAGE和BTB并行执行：在S_IDLE或S_WORKING状态同时设置输入
-    // bool set_TAGE_input = (state == S_IDLE && trans_ready_to_fire) || 
-    //                       (state == S_WORKING) || 
-    //                       (state == S_REFEATCH);
-    bool set_TAGE_input = state == S_IDLE && trans_ready_to_fire; // only set input in IDLE state
-    if (set_TAGE_input) {
-      // Prediction Request - 同时对4条PC进行预测
-      // 在S_IDLE状态直接设置输入，不检查busy（这是新的请求）
-      if (going_to_do_pred) {
-        for (int i = 0; i < FETCH_WIDTH; i++) {
-          if (do_pred_on_this_pc[i]) {
-            int bank_sel = this_pc_bank_sel[i];
-            // 添加边界检查，确保bank_sel在有效范围内
-            if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
-              tage_in[bank_sel].pred_req = true;
-              tage_in[bank_sel].pc_pred_in = get_bank_pc(do_pred_for_this_pc[i]);
-            }
-          }
-        }
-      }
-      // Update Request
-      for (int i = 0; i < BPU_BANK_NUM; i++) {
-        if (going_to_do_upd[i]) {
-          uint32_t u_pc = q_data[i].base_pc;
-
-          bool is_cond_upd = (q_data[i].br_type == BR_DIRECT);
-
-          if (is_cond_upd) {
-            tage_in[i].update_en = q_data[i].valid_mask;
-            tage_in[i].pc_update_in = get_bank_pc(u_pc);
-            tage_in[i].real_dir = q_data[i].actual_dir;
-            tage_in[i].pred_in = q_data[i].pred_dir;
-            tage_in[i].alt_pred_in = q_data[i].alt_pred;
-            tage_in[i].pcpn_in = q_data[i].pcpn;
-            tage_in[i].altpcpn_in = q_data[i].altpcpn;
-
-            for (int k = 0; k < 4; k++) { // TN_MAX=4
-              tage_in[i].tage_tag_flat_in[k] = q_data[i].tage_tags[k];
-              tage_in[i].tage_idx_flat_in[k] = q_data[i].tage_idxs[k];
-            }
-          }
-        }
-      }
-    }
-
-    // --- Prepare BTB Inputs - 并行执行，不再等待TAGE完成 ---
-    BTB_TOP::InputPayload btb_in[BPU_BANK_NUM];
-    std::memset(btb_in, 0, sizeof(btb_in));
-
-    // BTB同时对4条PC进行预测
-    // bool set_BTB_input = (state == S_IDLE && trans_ready_to_fire) || 
-    //                     (state == S_WORKING) || 
-    //                     (state == S_REFEATCH);
-    bool set_BTB_input = set_TAGE_input;
-    if (set_BTB_input) {
-      // Prediction Request - 同时对4条PC进行预测
-      // 在S_IDLE状态直接设置输入，不检查busy（这是新的请求）
-      if (going_to_do_pred) {
-        for (int i = 0; i < FETCH_WIDTH; i++) {
-          if (do_pred_on_this_pc[i]) {
-            int bank_sel = this_pc_bank_sel[i];
-            // 添加边界检查，确保bank_sel在有效范围内
-            if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
-              btb_in[bank_sel].pred_req = true;
-              btb_in[bank_sel].pred_pc = get_bank_pc(do_pred_for_this_pc[i]);
-            }
-          }
-        }
-      }
-
-      // Update Logic Setup
-      for (int i = 0; i < BPU_BANK_NUM; i++) {
-        if (going_to_do_upd[i]) {
-          btb_in[i].upd_valid = q_data[i].valid_mask;
-          btb_in[i].upd_pc = get_bank_pc(q_data[i].base_pc);
-          btb_in[i].upd_actual_addr = q_data[i].targets;
-          btb_in[i].upd_actual_dir = q_data[i].actual_dir;
-          btb_in[i].upd_br_type_in = q_data[i].br_type;
-        }
-      }
-    }
-
-    // i对应第i个bank_sel上的子模块
-    // --- Run Submodules (Cycle Step) ---
-    TAGE_TOP::OutputPayload tage_out[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      tage_out[i] = tage_inst[i]->step(rst_n, tage_in[i]);
-    }
-    // --- Run BTB Submodule ---
-    BTB_TOP::OutputPayload btb_out[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      btb_out[i] = btb_inst[i]->step(rst_n, btb_in[i]);
-    }
-
-    // 在S_WORKING或S_REFEATCH状态，检测busy为低且done为低时，拉高done并缓存预测结果
-    if (state == S_WORKING || state == S_REFEATCH) {
-      for (int i = 0; i < BPU_BANK_NUM; i++) {
-        // TAGE: 如果done为低且busy为低，拉高done并缓存预测结果
-        if (!tage_done[i] && !tage_out[i].busy) {
-          tage_done[i] = true;
-          
-          // 缓存TAGE预测结果,检查哪个PC对应到当前banksel
-          for (int j = 0; j < FETCH_WIDTH; j++) {
-            if (do_pred_on_this_pc[j] && this_pc_bank_sel[j] == i && !tage_result_valid_latch[j]) {
-              tage_calc_pred_dir_latch[j] = tage_out[i].pred_out;
-              tage_calc_altpred_latch[j] = tage_out[i].alt_pred_out;
-              tage_calc_pcpn_latch[j] = tage_out[i].pcpn_out;
-              tage_calc_altpcpn_latch[j] = tage_out[i].altpcpn_out;
-              for (int k = 0; k < TN_MAX; k++) {
-                tage_pred_calc_tags_latch[j][k] = tage_out[i].tage_tag_flat_out[k];
-                tage_pred_calc_idxs_latch[j][k] = tage_out[i].tage_idx_flat_out[k];
-              }
-              tage_result_valid_latch[j] = true;
-              break;
-            }
-          }
-        }
-        
-        // BTB: 如果done为低且busy为低，拉高done并缓存预测结果
-        if (!btb_done[i] && !btb_out[i].busy) {
-          btb_done[i] = true;
-          
-          // 缓存BTB预测结果
-          for (int j = 0; j < FETCH_WIDTH; j++) {
-            if (do_pred_on_this_pc[j] && this_pc_bank_sel[j] == i && !btb_result_valid_latch[j]) {
-              btb_pred_target_latch[j] = btb_out[i].pred_target;
-              btb_result_valid_latch[j] = true;
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    // 检查所有需要的预测结果是否都已缓存（基于done信号）
-    bool all_tage_ready = true;
-    bool all_btb_ready = true;
-    if (do_pred_latch) {
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        if (do_pred_on_this_pc[i]) {
-          int bank_sel = this_pc_bank_sel[i];
-          // 添加边界检查，确保bank_sel在有效范围内
-          if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
-            // TAGE完成：结果已缓存且done为高
-            if (!tage_result_valid_latch[i] || !tage_done[bank_sel]) {
-              all_tage_ready = false;
-            }
-            // BTB完成：结果已缓存且done为高
-            if (!btb_result_valid_latch[i] || !btb_done[bank_sel]) {
-              all_btb_ready = false;
-            }
-          }
-        }
-      }
-    }
-    
-    // 检查所有更新操作是否完成
-    bool all_upd_ready = true;
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      if (do_upd_latch[i]) {
-        if (!tage_done[i] || !btb_done[i]) {
-          all_upd_ready = false;
-        }
-      }
-    }
-
-    // 状态转换逻辑：基于完成寄存器判断是否所有操作都完成
-    State next_state = state;
-    bool all_ops_done = (do_pred_latch ? (all_tage_ready && all_btb_ready) : true) && 
-                        all_upd_ready;
-    
-    switch (state) {
-      case S_IDLE: // IDLE
-        if (trans_ready_to_fire) {
-          next_state = S_WORKING;
-        } else {
-          next_state = S_IDLE;
-        }
-        break;
-      case S_WORKING: // TAGE和BTB并行执行
-        if (inp.refetch) {
-          // 遇到refetch，转到refetch预测状态
-          if (all_ops_done)
-            next_state = S_IDLE;
-          else
-            next_state = S_REFEATCH; // 等待完成
-        } else if (all_ops_done) {
-          // 所有操作都完成，回到IDLE
-          next_state = S_IDLE;
-        } else {
-          next_state = S_WORKING; // 等待完成
-        }
-        break;
-      case S_REFEATCH: // refetch时的并行预测
-        if (all_ops_done) {
-          next_state = S_IDLE;
-        } else {
-          next_state = S_REFEATCH; // 等待完成
-        }
-        break;
-    }
-    
-    // 预测合并逻辑：根据TAGE预测、BTB预测和指令类型决定最终预测
-    // 只有在所有预测结果都已缓存且完成寄存器都标记为完成时才进行合并
-    bool final_pred_dir[FETCH_WIDTH];
-    uint32_t next_fetch_addr_calc = boundary_addr;
-    bool found_taken_branch = false;
-    // 最终提供预测的first taken pc以及其bank
-    // for 2-Ahead
-    int final_bank = -1;
-    uint32_t final_pc = 0;
-    uint32_t final_2_ahead_address = next_fetch_addr_calc + (FETCH_WIDTH * 4);
-
-    if ((state == S_WORKING) && (next_state == S_IDLE) && !inp.refetch) { // 防止refetch污染推测更新
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        if (do_pred_on_this_pc[i]) {
-          int bank_sel = this_pc_bank_sel[i];
-          // 添加边界检查，确保bank_sel在有效范围内
-          if (bank_sel >= 0 && bank_sel < BPU_BANK_NUM) {
-            int type_idx = get_bank_pc(do_pred_for_this_pc[i]) & BPU_TYPE_IDX_MASK;
-            uint8_t p_type = inst_type_mem[type_idx][bank_sel];
-
-            // 根据指令类型决定最终预测方向
-            if (p_type == BR_NONCTL) {
-              final_pred_dir[i] = false;
-            } else if (p_type == BR_RET || p_type == BR_CALL || 
-                       p_type == BR_IDIRECT || p_type == BR_JAL) {
-              // 无条件分支，总是taken
-              final_pred_dir[i] = true;
-            } else {
-              // 条件分支，使用TAGE的方向预测
-              final_pred_dir[i] = tage_calc_pred_dir_latch[i];
-            }
-
-            // 找到第一个taken的分支，使用BTB的target
-            if (final_pred_dir[i] && !found_taken_branch && btb_result_valid_latch[i]) {
-              found_taken_branch = true;
-              next_fetch_addr_calc = btb_pred_target_latch[i];
-              final_bank = bank_sel;
-              final_pc = get_bank_pc(do_pred_for_this_pc[i]);
-              // 此时不能break，继续修正所有final_pred_dir的值
-            }
-          } else {
-            // bank_sel无效，使用默认值
-            final_pred_dir[i] = false;
-          }
-        }
-      }
-
-      // ========================================================================
-      // 4.1 取指阶段：对FETCH_WIDTH条指令进行Spec GHR/FH更新
-      // ========================================================================
-      // 本周期开始时的Spec状态（快照）
-      bool spec_ghr_tmp[GHR_LENGTH];
-      uint32_t spec_fh_tmp[FH_N_MAX][TN_MAX];
-      std::memcpy(spec_ghr_tmp, Spec_GHR, sizeof(Spec_GHR));
-      std::memcpy(spec_fh_tmp, Spec_FH, sizeof(Spec_FH));
-
-      // 顺序遍历本次fetch的每个slot，相当于执行FETCH_WIDTH次单步更新
-      for (int i = 0; i < FETCH_WIDTH; ++i) {
-        if (!do_pred_on_this_pc[i]) continue;
-
-        // 只对条件分支更新历史（逻辑参考update阶段的is_cond_upd == BR_DIRECT）
-        int bank_sel = this_pc_bank_sel[i];
-        if (bank_sel < 0 || bank_sel >= BPU_BANK_NUM) continue;
-        
-        uint32_t pc = do_pred_for_this_pc[i];
-        int type_idx = get_bank_pc(pc) & BPU_TYPE_IDX_MASK;
-        uint8_t p_type = inst_type_mem[type_idx][bank_sel];
-        bool is_cond = (p_type == BR_DIRECT);
-
-        if (!is_cond) continue; // 只对条件分支更新历史
-
-        bool new_bit = final_pred_dir[i]; // 用预测方向做推测更新
-        bool next_ghr[GHR_LENGTH];
-        uint32_t next_fh[FH_N_MAX][TN_MAX];
-        
-        TAGE_GHR_update_comb_1(spec_ghr_tmp, new_bit, next_ghr);
-        TAGE_FH_update_comb_1(spec_fh_tmp, spec_ghr_tmp, new_bit,
-                              next_fh, fh_length, ghr_length);
-        
-        std::memcpy(spec_ghr_tmp, next_ghr, sizeof(next_ghr));
-        std::memcpy(spec_fh_tmp, next_fh, sizeof(next_fh));
-      }
-
-      // 更新全局Spec状态
-      std::memcpy(Spec_GHR, spec_ghr_tmp, sizeof(Spec_GHR));
-      std::memcpy(Spec_FH, spec_fh_tmp, sizeof(Spec_FH));
-
-      // ========================================================================
-      // 2-Ahead预测逻辑
-      // ========================================================================
-    
-      if(found_taken_branch == false) {
-        final_2_ahead_address = next_fetch_addr_calc + (4 * FETCH_WIDTH);
-      } else {
-        uint32_t index = final_pc % TWO_AHEAD_TABLE_SIZE;
-        SimpleAheadEntry &entry = simple_ahead_table[final_bank][index];
-        if (entry.taken && entry.valid) {
-          final_2_ahead_address = entry.target;
-        } else {
-          final_2_ahead_address = next_fetch_addr_calc + (FETCH_WIDTH * 4);
-        }
-      }
-    } else {
-      // 其他情况，使用默认值
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        final_pred_dir[i] = false;
-      }
-    }
-
-    // Queue control signals
-    bool q_push_en[BPU_BANK_NUM];
-    bool q_pop_en[BPU_BANK_NUM];
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      q_pop_en[i] =
-          ((state == S_WORKING || state == S_REFEATCH) && 
-           (next_state == S_IDLE) && do_upd_latch[i]); // upd done, able to move ptr
-      q_push_en[i] = false; // 给个初始值
-    }
-    for(int i = 0; i < COMMIT_WIDTH; i++) {
-      if(!inp.in_upd_valid[i])
-        continue;
-      int bank_sel = get_bank_sel(inp.in_update_base_pc[i]);
-      q_push_en[bank_sel] = !q_full[bank_sel];
-    }
-
-    // output logic
-    if ((state == S_WORKING) && next_state == S_IDLE) {
-      out_reg.PTAB_write_enable = do_pred_latch && !inp.refetch; // 在预测完成的这周期刚好遇到refetch，无效掉此前预测
-    }
-    out_reg.icache_read_valid = pc_can_send_to_icache && (state == S_IDLE);
-    out_reg.fetch_address =
-        inp.refetch ? inp.refetch_address : pc_reg; // 刚好当前拍有refetch,此时pc_reg还没更新，直接从输入拿
-
-    out_reg.predict_next_fetch_address = next_fetch_addr_calc; // 使用合并后的预测结果
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      out_reg.out_pred_dir[i] = final_pred_dir[i]; // 使用合并后的预测方向
-      out_reg.out_alt_pred[i] = tage_calc_altpred_latch[i];
-      out_reg.out_pcpn[i] = tage_calc_pcpn_latch[i];
-      out_reg.out_altpcpn[i] = tage_calc_altpcpn_latch[i];
-      for (int k = 0; k < TN_MAX; k++) {
-        out_reg.out_tage_tags[i][k] = tage_pred_calc_tags_latch[i][k];
-        out_reg.out_tage_idxs[i][k] = tage_pred_calc_idxs_latch[i][k];
-      }
-    }
-    out_reg.out_pred_base_pc = pred_base_pc_fired;
-
-    // 2-Ahead Predictor outputs
-    uint32_t refetch_2ahead_target = inp.refetch_address + (FETCH_WIDTH * 4);
-    out_reg.two_ahead_target = inp.refetch ? refetch_2ahead_target : saved_2ahead_prediction;
-
-    // 对应事件要发生在对应的处理行为上
-    bool need_mini_flush = saved_2ahead_prediction != next_fetch_addr_calc;
-    out_reg.mini_flush_req = need_mini_flush && out_reg.PTAB_write_enable;
-
-    out_reg.mini_flush_correct = saved_mini_flush_correct && !inp.refetch;
-    out_reg.mini_flush_target = saved_mini_flush_target; 
-
-#ifndef ENABLE_2AHEAD
-    out_reg.mini_flush_req = false;
-    out_reg.mini_flush_correct = false;
-#endif
-
-    // DEBUG LOG SMALL 输出所有inp和output，以及sim_time，state和next state
-    DEBUG_LOG_SMALL("[BPU_TOP] sim_time: %u, state: %d, next_state: %d\n",
-                    bpu_sim_time, state, next_state);
-    DEBUG_LOG_SMALL(
-        "  inp: refetch=%d, refetch_addr=0x%x, icache_read_ready=%d\n",
-        inp.refetch, inp.refetch_address, inp.icache_read_ready);
-    for (int i = 0; i < COMMIT_WIDTH; i++) {
-      if (inp.in_upd_valid[i]) {
-        DEBUG_LOG_SMALL(
-            "  inp[%d]: base_pc=0x%x, actual_dir=%d, br_type=%d, "
-            "target=0x%x, pred_dir=%d, alt_pred=%d, pcpn=%d, altpcpn=%d\n",
-            i, inp.in_update_base_pc[i], inp.in_actual_dir[i],
-            inp.in_actual_br_type[i], inp.in_actual_targets[i],
-            inp.in_pred_dir[i], inp.in_alt_pred[i], inp.in_pcpn[i],
-            inp.in_altpcpn[i]);
-      }
-    }
-    DEBUG_LOG_SMALL("  out: fetch_addr=0x%x, icache_read_valid=%d, "
-                    "predict_next_fetch_addr=0x%x, PTAB_write_enable=%d, "
-                    "update_queue_full=%d, pred_base_pc=%x\n",
-                    out_reg.fetch_address, out_reg.icache_read_valid,
-                    out_reg.predict_next_fetch_address,
-                    out_reg.PTAB_write_enable, out_reg.update_queue_full,
-                    out_reg.out_pred_base_pc);
-    for (int i = 0; i < FETCH_WIDTH; i++) {
-      if(!out_reg.PTAB_write_enable) 
-        continue;
-      DEBUG_LOG_SMALL_5(
-          "  out[%d]: pred_dir=%d, alt_pred=%d, pcpn=%d, altpcpn=%d\n", i,
-          out_reg.out_pred_dir[i], out_reg.out_alt_pred[i], out_reg.out_pcpn[i],
-          out_reg.out_altpcpn[i]);
-    }
-    // --------------------------------------------------------------------
-    // 2. 时序逻辑更新 (Sequential Logic Update)
-    // --------------------------------------------------------------------
-
-    // TODO：实际这里也是组合，决定latch的next值
-    if (out_reg.icache_read_valid && inp.icache_read_ready) { // 握手成功, icache拿走当前pc_reg
-      pc_can_send_to_icache = false; // this pc is already sent to icache
-    }
-
-    // latch logic
-    if (state == S_IDLE && next_state == S_WORKING) {
-      do_pred_latch = going_to_do_pred;
-      for (int i = 0; i < BPU_BANK_NUM; i++)
-        do_upd_latch[i] = going_to_do_upd[i];
-      pred_base_pc_fired = pred_base_pc; // 记录当前预测流程中正在处理的pc基地址
-      
-      // 重置所有缓存标志和done信号
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        tage_result_valid_latch[i] = false;
-        btb_result_valid_latch[i] = false;
-      }
-      for (int i = 0; i < BPU_BANK_NUM; i++) {
-        tage_done[i] = false;
-        btb_done[i] = false;
-      }
-    }
-    
-    // 在预测完成时，更新输出latch（使用合并后的预测结果）
-    if ((state == S_WORKING) && 
-        next_state == S_IDLE) {
-      // for (int i = 0; i < FETCH_WIDTH; i++) {
-      //   if (do_pred_on_this_pc[i]) {
-      //     // 使用合并后的预测方向
-      //     out_pred_dir_latch[i] = final_pred_dir[i];
-      //     // TAGE的其他输出
-      //     out_alt_pred_latch[i] = tage_calc_altpred_latch[i];
-      //     out_pcpn_latch[i] = tage_calc_pcpn_latch[i];
-      //     out_altpcpn_latch[i] = tage_calc_altpcpn_latch[i];
-      //     for (int k = 0; k < TN_MAX; k++) {
-      //       out_tage_tags_latch_latch[i][k] = tage_pred_calc_tags_latch[i][k];
-      //       out_tage_idxs_latch_latch[i][k] = tage_pred_calc_idxs_latch[i][k];
-      //     }
-      //   }
-      // }
-      
-      if (do_pred_latch) { // 确保产生了预测
-        saved_mini_flush_req = saved_2ahead_prediction != next_fetch_addr_calc;
-        saved_mini_flush_correct = saved_2ahead_prediction == next_fetch_addr_calc;
-        DEBUG_LOG_SMALL_4("saved_mini_flush_correct: %d from saved_2ahead_prediction: %x and next_fetch_addr_calc: %x\n", saved_mini_flush_correct, saved_2ahead_prediction, next_fetch_addr_calc);
-        saved_mini_flush_target = saved_2ahead_prediction; // now not used
-
-        pc_reg = next_fetch_addr_calc; // 使用合并后的预测地址
-        pc_can_send_to_icache = true; // 已经填装了一条新的pc_reg
-        
-        // ========================================================================
-        // 2-Ahead时序更新：保存当前预测的C到saved_2ahead_prediction
-        // ========================================================================
-        saved_2ahead_prediction = final_2_ahead_address;
-        saved_2ahead_pred_valid = true;
-
-      }
-      
-      // 重置缓存标志和done信号
-      for (int i = 0; i < FETCH_WIDTH; i++) {
-        tage_result_valid_latch[i] = false;
-        btb_result_valid_latch[i] = false;
-      }
-      for (int i = 0; i < BPU_BANK_NUM; i++) {
-        tage_done[i] = false;
-        btb_done[i] = false;
-      }
-    }
-    
-    if (inp.refetch) { // 这会覆盖掉此前的更新，非常合理
-      pc_reg = inp.refetch_address; // update pc_reg for refetch
-      pc_can_send_to_icache = true; // 已经填装了一条新的pc_reg
-      saved_2ahead_prediction = inp.refetch_address + (FETCH_WIDTH * 4); // 初始化2-ahead预测器为下一个cache line的地址
-      saved_2ahead_pred_valid = false; // 无效掉2-Ahead缓存
-      saved_mini_flush_req = false;
-      saved_mini_flush_correct = false;
-    }
-
-    state = next_state;
-
-    // COMMIT LOGIC
-    // ========================================================================
-    // 4.2 提交阶段：更新Arch GHR/FH + 纠正Spec（mispredict恢复）
-    // 使用 inp.*（按程序顺序），一组 COMMIT_WIDTH 只写一次 Arch 寄存器
-    // ========================================================================
-    {
-      // 从当前 Arch 状态做一个快照，在上面滚动多条分支
-      bool arch_ghr_tmp[GHR_LENGTH];
-      uint32_t arch_fh_tmp[FH_N_MAX][TN_MAX];
-      std::memcpy(arch_ghr_tmp, Arch_GHR, sizeof(Arch_GHR));
-      std::memcpy(arch_fh_tmp,  Arch_FH,  sizeof(Arch_FH));
-
-      bool arch_need_write = false;
-
-      // 按 COMMIT_WIDTH 顺序（即程序顺序）遍历本周期提交的分支
-      for (int i = 0; i < COMMIT_WIDTH; ++i) {
-        if (!inp.in_upd_valid[i])
-          continue;
-
-        // 只对条件分支更新历史
-        bool is_cond_upd = (inp.in_actual_br_type[i] == BR_DIRECT);
-        if (!is_cond_upd)
-          continue;
-
-        bool real_dir = inp.in_actual_dir[i];
-
-        bool next_ghr[GHR_LENGTH];
-        uint32_t next_fh[FH_N_MAX][TN_MAX];
-
-        // 在临时 Arch 状态上做单步更新
-        TAGE_GHR_update_comb_1(arch_ghr_tmp, real_dir, next_ghr);
-        TAGE_FH_update_comb_1(arch_fh_tmp, arch_ghr_tmp, real_dir,
-                              next_fh, fh_length, ghr_length);
-
-        // 用提交时带回的预测方向做 mispredict 检测
-        bool mispred = (inp.in_pred_dir[i] != real_dir);
-        if (mispred) {
-          // 发生误预测，将 Spec 历史对齐到“包含 real_dir 的最新 Arch 状态”
-          std::memcpy(Spec_GHR, next_ghr, sizeof(Spec_GHR));
-          std::memcpy(Spec_FH,  next_fh,  sizeof(Spec_FH));
-        }
-
-        // 将本次结果累积到临时 Arch 状态，供后续分支继续更新
-        std::memcpy(arch_ghr_tmp, next_ghr, sizeof(arch_ghr_tmp));
-        std::memcpy(arch_fh_tmp,  next_fh,  sizeof(arch_fh_tmp));
-        arch_need_write = true;
-      }
-
-      // 一拍内所有提交的 cond branch 处理完后，只写回一次 Arch GHR/FH
-      if (arch_need_write) {
-        std::memcpy(Arch_GHR, arch_ghr_tmp, sizeof(Arch_GHR));
-        std::memcpy(Arch_FH,  arch_fh_tmp,  sizeof(Arch_FH));
-      }
-    }
-    // Queue Update Logic
-    for (int i = 0; i < COMMIT_WIDTH; i++) {
-      int bank_sel = get_bank_sel(inp.in_update_base_pc[i]);
-      if (q_push_en[bank_sel] && inp.in_upd_valid[i]) { // this can happen every cycle!
-        QueueEntry &entry = update_queue[q_wr_ptr[bank_sel]][bank_sel];
-        entry.base_pc = inp.in_update_base_pc[i];
-        entry.valid_mask = inp.in_upd_valid[i];
-        entry.actual_dir = inp.in_actual_dir[i];
-        entry.pred_dir = inp.in_pred_dir[i];
-        entry.alt_pred = inp.in_alt_pred[i];
-        entry.br_type = inp.in_actual_br_type[i];
-        entry.targets = inp.in_actual_targets[i];
-        entry.pcpn = inp.in_pcpn[i];
-        entry.altpcpn = inp.in_altpcpn[i];
-        for (int k = 0; k < 4; k++) {
-          entry.tage_tags[k] = inp.in_tage_tags[i][k];
-          entry.tage_idxs[k] = inp.in_tage_idxs[i][k];
-        }
-        q_wr_ptr[bank_sel] = (q_wr_ptr[bank_sel] + 1) % Q_DEPTH;
-      }
-    }
-
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      int bank_sel = i;
-      if (q_pop_en[bank_sel]) {
-        QueueEntry &upd_entry = q_data[bank_sel];
-        
-        // 访问LBE，获取前驱PC_A
-        LastBlockEntry &lbe = last_block_table[bank_sel];
-        
-        if (lbe.valid) {
-          // LBE有效，说明存在前驱PC_A
-          uint32_t pc_a = lbe.last_pc;
-          
-          // 计算PC_A在简易预测表中的Index
-          uint32_t index = get_bank_pc(pc_a) % TWO_AHEAD_TABLE_SIZE;
-          
-          // 更新简易预测表
-          SimpleAheadEntry &entry = simple_ahead_table[bank_sel][index];
-          entry.valid = true;
-          
-          // PC_B是upd_entry.base_pc，PC_C是upd_entry.targets
-          // 判断B到C是否跳转：如果actual_dir为真，说明跳转
-          entry.taken = upd_entry.actual_dir;
-          entry.target = upd_entry.targets; // PC_C
-        }
-        
-        // 更新LBE：将当前的PC_B写入last_block_table，作为下一个块的前驱
-        lbe.valid = true;
-        lbe.last_pc = upd_entry.base_pc; // PC_B
-        
-        q_rd_ptr[bank_sel] = (q_rd_ptr[bank_sel] + 1) % Q_DEPTH;
-      }
-
-      if (q_push_en[bank_sel] && !q_pop_en[bank_sel]){
-        if(q_count[bank_sel] >= Q_DEPTH) {
-          printf("ERROR!!: q_count[%d] >= Q_DEPTH, q_count[%d] = %d\n", bank_sel, bank_sel, q_count[bank_sel]);
-          exit(1);
-        }
-        q_count[bank_sel]++;
-      }
-      else if (!q_push_en[bank_sel] && q_pop_en[bank_sel]){
-        if(q_count[bank_sel] <= 0) {
-          printf("ERROR!!: q_count[%d] <= 0, q_count[%d] = %d\n", bank_sel, bank_sel, q_count[bank_sel]);
-          exit(1);
-        }
-        q_count[bank_sel]--;
-      }
-    }
-      
-    
-    // bool q_full_any = (q_count[0] == Q_DEPTH) || (q_count[1] == Q_DEPTH) ||
-                      // (q_count[2] == Q_DEPTH) || (q_count[3] == Q_DEPTH);
-    bool q_full_any = false;
-    for (int i = 0; i < BPU_BANK_NUM; i++) {
-      q_full_any |= (q_count[i] == Q_DEPTH);
-    }
-    out_reg.update_queue_full = q_full_any;
-
-    // Inst Type Memory Update
-    for (int i = 0; i < COMMIT_WIDTH;
-         i++) { // this can happen as early as possible
-      if (inp.in_upd_valid[i]) {
-        uint32_t addr = inp.in_update_base_pc[i];
-        int bank_sel = get_bank_sel(addr);
-        int type_idx = get_bank_pc(addr) & BPU_TYPE_IDX_MASK;
-        inst_type_mem[type_idx][bank_sel] =
-            inp.in_actual_br_type[i];
-      }
-    }
-
-    // DEBUG LOG SMALL 输出pc_reg
-    DEBUG_LOG_SMALL("[BPU_TOP] sim_time: %u, refetch: %d, refetch_addr: 0x%x, pc_reg: 0x%x\n", 
-      bpu_sim_time, inp.refetch, inp.refetch_address, pc_reg);
-
+    DEBUG_LOG_SMALL("[BPU_TOP] sim_time: %u, refetch: %d, refetch_addr: 0x%x, pc_reg: 0x%x\n",
+                    bpu_sim_time, inp.refetch, inp.refetch_address, pc_reg);
     return out_reg;
   }
 };

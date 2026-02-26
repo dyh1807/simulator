@@ -16,8 +16,6 @@ void FrontTop::init() {
   CsrStatusIO *bound_csr = in.csr_status;
   sync_icache_ptw_ports(*this);
   icache_set_context(ctx);
-  front_top_set_context(ctx);
-  front2back_fifo_set_context(ctx);
   std::memset(&in, 0, sizeof(in));
   std::memset(&out, 0, sizeof(out));
   in.csr_status = bound_csr;

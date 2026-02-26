@@ -16,6 +16,13 @@ struct BtbSetData {
   uint8_t useful[BTB_WAY_NUM]; // 3-bit
 };
 
+struct TcSetData {
+  uint32_t target[TC_WAY_NUM];
+  uint32_t tag[TC_WAY_NUM];
+  bool valid[TC_WAY_NUM];
+  uint8_t useful[TC_WAY_NUM];
+};
+
 struct HitCheckOut {
   int hit_way; // 0123
   bool hit;
@@ -67,6 +74,12 @@ public:
     uint32_t pred_calc_type_idx_latch;
     uint32_t pred_calc_bht_idx_latch;
     // uint32_t pred_calc_tc_idx_latch;
+    uint32_t upd_calc_next_bht_val_latch;
+    HitCheckOut upd_calc_hit_info_latch;
+    int upd_calc_victim_way_latch;
+    int upd_calc_w_target_way_latch;
+    uint8_t upd_calc_next_useful_val_latch;
+    bool upd_calc_writes_btb_latch;
   };
 
   // Index生成结果
@@ -82,10 +95,26 @@ public:
   // 内存读取结果
   struct MemReadResult {
     BtbSetData r_btb_set;
+    TcSetData r_tc_set;
     uint8_t r_type;
     uint32_t r_bht;
-    uint32_t r_tc;
     bool read_data_valid;
+  };
+
+  // 三阶段 Read 阶段输出
+  struct ReadData {
+    StateInput state_in;
+    IndexResult idx_1;
+    MemReadResult mem_1;
+    IndexResult idx_2;
+    MemReadResult mem_2;
+
+    bool sram_delay_active;
+    int sram_delay_counter;
+    MemReadResult sram_delayed_data;
+    bool new_read_valid;
+    MemReadResult new_read_data;
+    uint32_t sram_prng_state;
   };
 
   // 组合逻辑计算结果结构体
@@ -99,7 +128,6 @@ public:
     BtbSetData r_btb_set;
     uint8_t r_type;
     uint32_t r_bht;
-    uint32_t r_tc;
     HitCheckOut hit_info;
     uint32_t pred_target;
 
@@ -119,6 +147,224 @@ public:
     uint32_t s1_pred_tc_idx;
 
     OutputPayload out_regs;
+
+    bool sram_delay_active_next;
+    int sram_delay_counter_next;
+    MemReadResult sram_delayed_data_next;
+    uint32_t sram_prng_state_next;
+
+    bool do_pred_latch_next;
+    bool do_upd_latch_next;
+    uint32_t upd_pc_latch_next;
+    uint32_t upd_actual_addr_latch_next;
+    uint8_t upd_br_type_latch_next;
+    bool upd_actual_dir_latch_next;
+    uint32_t pred_calc_pc_latch_next;
+    uint32_t pred_calc_btb_tag_latch_next;
+    uint32_t pred_calc_btb_idx_latch_next;
+    uint32_t pred_calc_type_idx_latch_next;
+    uint32_t pred_calc_bht_idx_latch_next;
+    uint32_t upd_calc_next_bht_val_latch_next;
+    HitCheckOut upd_calc_hit_info_latch_next;
+    int upd_calc_victim_way_latch_next;
+    int upd_calc_w_target_way_latch_next;
+    uint8_t upd_calc_next_useful_val_latch_next;
+    bool upd_calc_writes_btb_latch_next;
+    bool type_we_commit;
+    uint32_t type_wr_idx;
+    uint8_t type_wdata_commit;
+    bool bht_we_commit;
+    uint32_t bht_wr_idx;
+    uint32_t bht_wdata_commit;
+    bool tc_we_commit;
+    int tc_wr_way;
+    uint32_t tc_wr_idx;
+    uint32_t tc_wdata_commit;
+    uint32_t tc_wtag_commit;
+    bool tc_wvalid_commit;
+    uint8_t tc_wuseful_commit;
+    bool btb_we_commit;
+    int btb_wr_way;
+    uint32_t btb_wr_idx;
+    uint32_t btb_wr_tag;
+    uint32_t btb_wr_bta;
+    bool btb_wr_valid;
+    uint8_t btb_wr_useful;
+  };
+
+  struct BtbGenIndexPreCombIn {
+    InputPayload inp;
+    StateInput state_in;
+  };
+
+  struct BtbGenIndexPreCombOut {
+    IndexResult idx;
+  };
+
+  struct BtbMemReadPreCombIn {
+    IndexResult idx_1;
+    StateInput state_in;
+    uint8_t pre_type_data;
+    uint32_t pre_bht_data;
+  };
+
+  struct BtbMemReadPreCombOut {
+    MemReadResult mem;
+  };
+
+  struct BtbGenIndexPostCombIn {
+    InputPayload inp;
+    StateInput state_in;
+    IndexResult idx_1;
+    MemReadResult mem_1;
+  };
+
+  struct BtbGenIndexPostCombOut {
+    IndexResult idx_2;
+  };
+
+  struct BtbCoreCombIn {
+    InputPayload inp;
+    StateInput state_in;
+    IndexResult idx_2;
+    MemReadResult mem_2;
+  };
+
+  struct BtbCoreCombOut {
+    CombResult result;
+  };
+
+  struct BtbCombIn {
+    InputPayload inp;
+    ReadData rd;
+  };
+
+  struct BtbCombOut {
+    OutputPayload out_regs;
+    CombResult req;
+  };
+
+  struct BtbXorshift32CombIn {
+    uint32_t state;
+  };
+
+  struct BtbXorshift32CombOut {
+    uint32_t next_state;
+  };
+
+  struct BtbGetTagCombIn {
+    uint32_t pc;
+  };
+
+  struct BtbGetTagCombOut {
+    uint32_t tag;
+  };
+
+  struct BtbGetIdxCombIn {
+    uint32_t pc;
+  };
+
+  struct BtbGetIdxCombOut {
+    uint32_t idx;
+  };
+
+  struct BtbGetTypeIdxCombIn {
+    uint32_t pc;
+  };
+
+  struct BtbGetTypeIdxCombOut {
+    uint32_t idx;
+  };
+
+  struct BhtGetIdxCombIn {
+    uint32_t pc;
+  };
+
+  struct BhtGetIdxCombOut {
+    uint32_t idx;
+  };
+
+  struct TcGetIdxCombIn {
+    uint32_t pc;
+    uint32_t bht_value;
+  };
+
+  struct TcGetIdxCombOut {
+    uint32_t idx;
+  };
+
+  struct TcGetTagCombIn {
+    uint32_t pc;
+  };
+
+  struct TcGetTagCombOut {
+    uint32_t tag;
+  };
+
+  struct BhtNextStateCombIn {
+    uint32_t current_bht;
+    uint8_t br_type;
+    bool pc_dir;
+    uint32_t actual_target;
+  };
+
+  struct BhtNextStateCombOut {
+    uint32_t next_bht;
+  };
+
+  struct UsefulNextStateCombIn {
+    uint8_t current_val;
+    bool correct;
+  };
+
+  struct UsefulNextStateCombOut {
+    uint8_t next_val;
+  };
+
+  struct BtbHitCheckCombIn {
+    BtbSetData set_data;
+    uint32_t tag;
+  };
+
+  struct BtbHitCheckCombOut {
+    HitCheckOut hit_info;
+  };
+
+  struct TcHitCheckCombIn {
+    TcSetData set_data;
+    uint32_t tag;
+  };
+
+  struct TcHitCheckCombOut {
+    HitCheckOut hit_info;
+  };
+
+  struct BtbPredOutputCombIn {
+    uint32_t pc;
+    uint8_t br_type;
+    HitCheckOut hit_info;
+    BtbSetData set_data;
+    TcSetData tc_set;
+  };
+
+  struct BtbPredOutputCombOut {
+    uint32_t pred_target;
+  };
+
+  struct BtbVictimSelectCombIn {
+    BtbSetData set_data;
+  };
+
+  struct BtbVictimSelectCombOut {
+    int victim_way;
+  };
+
+  struct TcVictimSelectCombIn {
+    TcSetData set_data;
+  };
+
+  struct TcVictimSelectCombOut {
+    int victim_way;
   };
 
 private:
@@ -130,7 +376,10 @@ private:
 
   uint8_t mem_type[BTB_TYPE_ENTRY_NUM];
   uint32_t mem_bht[BHT_ENTRY_NUM];
-  uint32_t mem_tc[TC_ENTRY_NUM];
+  uint32_t mem_tc_target[TC_WAY_NUM][TC_ENTRY_NUM];
+  uint32_t mem_tc_tag[TC_WAY_NUM][TC_ENTRY_NUM];
+  bool mem_tc_valid[TC_WAY_NUM][TC_ENTRY_NUM];
+  uint8_t mem_tc_useful[TC_WAY_NUM][TC_ENTRY_NUM];
 
   // Pipeline Registers
   State state;
@@ -164,12 +413,11 @@ private:
   bool sram_delay_active;           // 是否正在进行延迟
   int sram_delay_counter;            // 剩余延迟周期数
   MemReadResult sram_delayed_data;  // 延迟期间保存的数据（包含BTB和TC）
-  bool sram_new_req_this_cycle;      // 本周期是否有新的读请求（在step_comb中设置，step_seq中使用）
-  std::mt19937 rng;                  // 随机数生成器
-  std::uniform_int_distribution<int> delay_dist; // 延迟分布（1-5周期）
+  bool sram_new_req_this_cycle;      // 本周期是否有新的读请求（在step_pipeline中设置，step_seq中使用）
+  uint32_t sram_prng_state;          // 固定种子伪随机状态
 
 public:
-  BTB_TOP() : rng(std::random_device{}()), delay_dist(SRAM_DELAY_MIN, SRAM_DELAY_MAX) { reset(); }
+  BTB_TOP() { reset(); }
 
   void reset() {
     std::memset(mem_btb_tag, 0, sizeof(mem_btb_tag));
@@ -178,7 +426,10 @@ public:
     std::memset(mem_btb_useful, 0, sizeof(mem_btb_useful));
     std::memset(mem_type, 0, sizeof(mem_type));
     std::memset(mem_bht, 0, sizeof(mem_bht));
-    std::memset(mem_tc, 0, sizeof(mem_tc));
+    std::memset(mem_tc_target, 0, sizeof(mem_tc_target));
+    std::memset(mem_tc_tag, 0, sizeof(mem_tc_tag));
+    std::memset(mem_tc_valid, 0, sizeof(mem_tc_valid));
+    std::memset(mem_tc_useful, 0, sizeof(mem_tc_useful));
 
     state = S_IDLE;
     do_pred_latch = false;
@@ -209,14 +460,17 @@ public:
     sram_delay_counter = 0;
     sram_new_req_this_cycle = false;
     memset(&sram_delayed_data, 0, sizeof(MemReadResult));
+    sram_prng_state = 0x2468ace1u;
   }
 
   // ------------------------------------------------------------------------
   // 组合逻辑函数 - 第一次生成Index（不包含 tc_idx）
   // ------------------------------------------------------------------------
-  IndexResult step_comb_gen_index_1(const InputPayload &inp,
-                                    const StateInput &state_in) {
-    IndexResult idx;
+  void btb_gen_index_pre_comb(const BtbGenIndexPreCombIn &in,
+                              BtbGenIndexPreCombOut &out) const {
+    const InputPayload &inp = in.inp;
+    const StateInput &state_in = in.state_in;
+    IndexResult &idx = out.idx;
     memset(&idx, 0, sizeof(IndexResult));
 
     bool read_upd_in = (state_in.state == S_IDLE && inp.upd_valid);
@@ -236,48 +490,48 @@ public:
     } else if (read_upd_in || read_upd_wait) {
       // Update path: 使用 update PC
       uint32_t upd_pc = read_upd_in ? inp.upd_pc : state_in.upd_pc_latch;
-      idx.btb_idx = btb_get_idx_comb(upd_pc);
-      idx.type_idx = btb_get_type_idx_comb(upd_pc);
-      idx.bht_idx = bht_get_idx_comb(upd_pc);
-      idx.tag = btb_get_tag_comb(upd_pc);
+      idx.btb_idx = btb_get_idx_value(upd_pc);
+      idx.type_idx = btb_get_type_idx_value(upd_pc);
+      idx.bht_idx = bht_get_idx_value(upd_pc);
+      idx.tag = btb_get_tag_value(upd_pc);
       // gen_index_1 not set tc index
       idx.read_address_valid = true;
     } else {
       idx.read_address_valid = false;
     }
 
-    return idx;
   }
 
   // ------------------------------------------------------------------------
   // 第一次内存读取 (TABLE READ) - 读取 BHT、Type
   // ------------------------------------------------------------------------
-  MemReadResult step_comb_mem_read_1(const IndexResult &idx_1,
-                                     const StateInput &state_in) {
-    MemReadResult mem;
+  void btb_mem_read_pre_comb(const BtbMemReadPreCombIn &in,
+                             BtbMemReadPreCombOut &out) const {
+    const IndexResult &idx_1 = in.idx_1;
+    MemReadResult &mem = out.mem;
     memset(&mem, 0, sizeof(MemReadResult));
 
-    // Memory Read (第一次，读取 BHT、Type)
+    // Memory Read data comes from seq_read snapshot.
     if (idx_1.read_address_valid) {
-      // Type, BHT Read
-      mem.r_type = mem_type[idx_1.type_idx];
-      mem.r_bht = mem_bht[idx_1.bht_idx];
+      mem.r_type = in.pre_type_data;
+      mem.r_bht = in.pre_bht_data;
       // BTB 和 TC 不在这里读取，需要在第二次 mem_read 中读取
       mem.read_data_valid = true; // reg file read, always valid
     } else {
       mem.read_data_valid = false;
     }
-    return mem;
   }
 
   // ------------------------------------------------------------------------
   // 组合逻辑函数 - 第二次生成Index（使用第一次读取的 BHT 值计算 tc_idx）
   // ------------------------------------------------------------------------
-  IndexResult step_comb_gen_index_2(const InputPayload &inp,
-                                    const StateInput &state_in,
-                                    const IndexResult &idx_1,
-                                    const MemReadResult &mem_1) {
-    IndexResult idx_2;
+  void btb_gen_index_post_comb(const BtbGenIndexPostCombIn &in,
+                               BtbGenIndexPostCombOut &out) const {
+    const InputPayload &inp = in.inp;
+    const StateInput &state_in = in.state_in;
+    const IndexResult &idx_1 = in.idx_1;
+    const MemReadResult &mem_1 = in.mem_1;
+    IndexResult &idx_2 = out.idx_2;
     memset(&idx_2, 0, sizeof(IndexResult));
 
     // 复制第一次的索引结果
@@ -290,89 +544,45 @@ public:
     if (state_in.state == S_STAGE2 && state_in.do_pred_latch) {
       // Stage 2: 使用本周期刚刚从 mem_1 读出的有效 BHT，和 latch 下来的 PC 进行计算
       // mem_1.r_bht 在 Stage 2 是有效的，因为 gen_index_1 在 Stage 2 开启了读取
-      idx_2.tc_idx = tc_get_idx_comb(state_in.pred_calc_pc_latch, mem_1.r_bht);
+      idx_2.tc_idx = tc_get_idx_value(state_in.pred_calc_pc_latch, mem_1.r_bht);
       idx_2.read_address_valid = true;
     } else if (state_in.state == S_IDLE && inp.upd_valid) {
       // Update path: 使用第一次读取的 BHT 值计算 tc_idx
-      idx_2.tc_idx = tc_get_idx_comb(inp.upd_pc, mem_1.r_bht);
+      idx_2.tc_idx = tc_get_idx_value(inp.upd_pc, mem_1.r_bht);
       idx_2.read_address_valid = true;
     } else {
       idx_2.read_address_valid = false;
     }
 
-    return idx_2;
-  }
-
-  // ------------------------------------------------------------------------
-  // 第二次内存读取 (TABLE READ) - 读取 TC、BTB，带SRAM随机延迟模拟
-  // ------------------------------------------------------------------------
-  MemReadResult step_comb_mem_read_2(const IndexResult &idx_2,
-                                     const StateInput &state_in,
-                                     const MemReadResult &mem_1) {
-    MemReadResult mem_2;
-    memset(&mem_2, 0, sizeof(MemReadResult));
-
-    mem_2.r_type = mem_1.r_type;
-    mem_2.r_bht = mem_1.r_bht;
-
-    // 如果正在进行延迟，返回保存的数据
-#ifdef SRAM_DELAY_ENABLE
-    if (sram_delay_active) {
-      if(idx_2.read_address_valid) {
-        printf("[BTB_TOP] SRAM delay active, read address valid\n");
-        exit(1);
-      }
-      mem_2.r_btb_set = sram_delayed_data.r_btb_set;
-      mem_2.r_tc = sram_delayed_data.r_tc; // from SRAM
-      // 延迟计数器在时序逻辑中更新，这里只返回数据
-      // read_data_valid将在延迟计数器为0时由时序逻辑设置
-      if(sram_delay_counter == 0) {
-        mem_2.read_data_valid = true;
-        sram_delay_active = false;
-      }
-      else {
-        mem_2.read_data_valid = false;
-      }
-      sram_new_req_this_cycle = false; // 延迟期间不接受新请求
-      return mem_2;
-    }
-#endif
-    // Memory Read (第二次，读取 TC、BTB) - 新的读请求
-    if (idx_2.read_address_valid) {
-      // BTB Set Read
-      for (int w = 0; w < BTB_WAY_NUM; w++) {
-        mem_2.r_btb_set.tag[w] = mem_btb_tag[w][idx_2.btb_idx];
-        mem_2.r_btb_set.bta[w] = mem_btb_bta[w][idx_2.btb_idx];
-        mem_2.r_btb_set.valid[w] = mem_btb_valid[w][idx_2.btb_idx];
-        mem_2.r_btb_set.useful[w] = mem_btb_useful[w][idx_2.btb_idx];
-      }
-
-      // 读取 TC
-      mem_2.r_tc = mem_tc[idx_2.tc_idx];
-      // 保存数据，标记本周期有新请求
-      sram_delayed_data = mem_2;
-      sram_new_req_this_cycle = true;
-      // 初始时数据无效，等待延迟完成
-#ifdef SRAM_DELAY_ENABLE
-      mem_2.read_data_valid = false;
-#else
-      mem_2.read_data_valid = true;
-#endif
-    } else {
-      mem_2.read_data_valid = false;
-      sram_new_req_this_cycle = false;
-    }
-    return mem_2;
   }
 
   // ------------------------------------------------------------------------
   // 组合逻辑函数 - 计算部分
   // ------------------------------------------------------------------------
-  CombResult step_comb_calc(const InputPayload &inp, const StateInput &state_in,
-                            const IndexResult &idx_2,
-                            const MemReadResult &mem_2) {
-    CombResult comb;
+  void btb_core_comb(const BtbCoreCombIn &in, BtbCoreCombOut &out) const {
+    const InputPayload &inp = in.inp;
+    const StateInput &state_in = in.state_in;
+    const IndexResult &idx_2 = in.idx_2;
+    const MemReadResult &mem_2 = in.mem_2;
+    CombResult &comb = out.result;
     memset(&comb, 0, sizeof(CombResult));
+    comb.do_pred_latch_next = state_in.do_pred_latch;
+    comb.do_upd_latch_next = state_in.do_upd_latch;
+    comb.upd_pc_latch_next = state_in.upd_pc_latch;
+    comb.upd_actual_addr_latch_next = state_in.upd_actual_addr_latch;
+    comb.upd_br_type_latch_next = state_in.upd_br_type_latch;
+    comb.upd_actual_dir_latch_next = state_in.upd_actual_dir_latch;
+    comb.pred_calc_pc_latch_next = state_in.pred_calc_pc_latch;
+    comb.pred_calc_btb_tag_latch_next = state_in.pred_calc_btb_tag_latch;
+    comb.pred_calc_btb_idx_latch_next = state_in.pred_calc_btb_idx_latch;
+    comb.pred_calc_type_idx_latch_next = state_in.pred_calc_type_idx_latch;
+    comb.pred_calc_bht_idx_latch_next = state_in.pred_calc_bht_idx_latch;
+    comb.upd_calc_next_bht_val_latch_next = state_in.upd_calc_next_bht_val_latch;
+    comb.upd_calc_hit_info_latch_next = state_in.upd_calc_hit_info_latch;
+    comb.upd_calc_victim_way_latch_next = state_in.upd_calc_victim_way_latch;
+    comb.upd_calc_w_target_way_latch_next = state_in.upd_calc_w_target_way_latch;
+    comb.upd_calc_next_useful_val_latch_next = state_in.upd_calc_next_useful_val_latch;
+    comb.upd_calc_writes_btb_latch_next = state_in.upd_calc_writes_btb_latch;
 
     // 复制index结果
     // comb.btb_idx = idx_2.btb_idx;
@@ -426,21 +636,26 @@ public:
 
     // 1.2 Stage 1 Calculation (预测路径的 index 计算)
     if (state_in.state == S_IDLE && inp.pred_req) {
-      comb.s1_pred_tag = btb_get_tag_comb(inp.pred_pc);
-      comb.s1_pred_btb_idx = btb_get_idx_comb(inp.pred_pc);
-      comb.s1_pred_type_idx = btb_get_type_idx_comb(inp.pred_pc);
-      comb.s1_pred_bht_idx = bht_get_idx_comb(inp.pred_pc);
+      comb.s1_pred_tag = btb_get_tag_value(inp.pred_pc);
+      comb.s1_pred_btb_idx = btb_get_idx_value(inp.pred_pc);
+      comb.s1_pred_type_idx = btb_get_type_idx_value(inp.pred_pc);
+      comb.s1_pred_bht_idx = bht_get_idx_value(inp.pred_pc);
       // comb.s1_pred_tc_idx = tc_get_idx_comb(
           // inp.pred_pc, mem_2.r_bht); // this not depends on mem_valid
     }
 
     // 1.3 Stage 2 Calculation (预测输出逻辑)
     if ((state_in.state == S_STAGE2 || state_in.state == S_STAGE2_WAIT_DATA) && state_in.do_pred_latch && mem_2.read_data_valid) {
-      comb.hit_info =
-          btb_hit_check_comb(&mem_2.r_btb_set, state_in.pred_calc_btb_tag_latch);
-      comb.pred_target =
-          btb_pred_output_comb(state_in.pred_calc_pc_latch, mem_2.r_type,
-                               comb.hit_info, &mem_2.r_btb_set, mem_2.r_tc);
+      BtbHitCheckCombOut hit_out{};
+      btb_hit_check_comb(
+          BtbHitCheckCombIn{mem_2.r_btb_set, state_in.pred_calc_btb_tag_latch},
+          hit_out);
+      comb.hit_info = hit_out.hit_info;
+      BtbPredOutputCombOut pred_out{};
+      btb_pred_output_comb(BtbPredOutputCombIn{state_in.pred_calc_pc_latch, mem_2.r_type,
+                                               comb.hit_info, mem_2.r_btb_set, mem_2.r_tc_set},
+                           pred_out);
+      comb.pred_target = pred_out.pred_target;
     }
 
     // 1.4 Update Path Calculation
@@ -452,10 +667,15 @@ public:
       upd_actual_addr = state_in.state == S_IDLE ? inp.upd_actual_addr : state_in.upd_actual_addr_latch;
       upd_br_type_in = state_in.state == S_IDLE ? inp.upd_br_type_in : state_in.upd_br_type_latch;
 
-      comb.next_bht_val = bht_next_state_comb(mem_2.r_bht, upd_actual_dir);
+      comb.next_bht_val =
+          bht_next_state_value(mem_2.r_bht, upd_br_type_in, upd_actual_dir, upd_actual_addr);
 
-      comb.upd_hit_info = btb_hit_check_comb(&mem_2.r_btb_set, idx_2.tag);
-      comb.victim_way = btb_victim_select_comb(&mem_2.r_btb_set);
+      BtbHitCheckCombOut upd_hit_out{};
+      btb_hit_check_comb(BtbHitCheckCombIn{mem_2.r_btb_set, idx_2.tag}, upd_hit_out);
+      comb.upd_hit_info = upd_hit_out.hit_info;
+      BtbVictimSelectCombOut victim_out{};
+      btb_victim_select_comb(BtbVictimSelectCombIn{mem_2.r_btb_set}, victim_out);
+      comb.victim_way = victim_out.victim_way;
       comb.w_target_way =
           comb.upd_hit_info.hit ? comb.upd_hit_info.hit_way : comb.victim_way;
 
@@ -463,16 +683,100 @@ public:
       uint8_t current_useful = mem_2.r_btb_set.useful[comb.w_target_way];
       bool correct_pred = (current_target_bta == upd_actual_addr); 
 
-      uint8_t calc_useful_val =
-          useful_next_state_comb(current_useful, correct_pred);
+      uint8_t calc_useful_val = useful_next_state_value(current_useful, correct_pred);
       comb.next_useful_val = comb.upd_hit_info.hit ? calc_useful_val : 1;
 
       comb.upd_writes_btb =
           (upd_br_type_in == BR_DIRECT || upd_br_type_in == BR_CALL ||
-           upd_br_type_in == BR_RET || upd_br_type_in == BR_JAL);
+           upd_br_type_in == BR_RET || upd_br_type_in == BR_JAL
+#if ENABLE_INDIRECT_BTB_TRAIN
+           || upd_br_type_in == BR_IDIRECT
+#endif
+          );
     }
 
-    // 1.5 Output Logic
+    // 1.5 Next Latch and Commit Request Calculation
+    const bool enter_pipeline = (state_in.state == S_IDLE && comb.next_state != S_IDLE);
+    if (enter_pipeline) {
+      comb.do_pred_latch_next = inp.pred_req;
+      comb.do_upd_latch_next = inp.upd_valid;
+      comb.upd_pc_latch_next = inp.upd_pc;
+      comb.upd_actual_addr_latch_next = inp.upd_actual_addr;
+      comb.upd_br_type_latch_next = inp.upd_br_type_in;
+      comb.upd_actual_dir_latch_next = inp.upd_actual_dir;
+      comb.pred_calc_pc_latch_next = inp.pred_pc;
+      comb.pred_calc_btb_tag_latch_next = comb.s1_pred_tag;
+      comb.pred_calc_btb_idx_latch_next = comb.s1_pred_btb_idx;
+      comb.pred_calc_type_idx_latch_next = comb.s1_pred_type_idx;
+      comb.pred_calc_bht_idx_latch_next = comb.s1_pred_bht_idx;
+    }
+
+    if (comb.next_state == S_STAGE2) {
+      comb.upd_calc_next_bht_val_latch_next = comb.next_bht_val;
+      comb.upd_calc_hit_info_latch_next = comb.upd_hit_info;
+      comb.upd_calc_victim_way_latch_next = comb.victim_way;
+      comb.upd_calc_w_target_way_latch_next = comb.w_target_way;
+      comb.upd_calc_next_useful_val_latch_next = comb.next_useful_val;
+      comb.upd_calc_writes_btb_latch_next = comb.upd_writes_btb;
+    }
+
+    const bool do_commit_update =
+        (state_in.state != S_IDLE && comb.next_state == S_IDLE &&
+         state_in.do_upd_latch);
+    if (do_commit_update) {
+      comb.type_we_commit = true;
+      comb.type_wr_idx = btb_get_type_idx_value(state_in.upd_pc_latch);
+      comb.type_wdata_commit = state_in.upd_br_type_latch;
+
+      if (state_in.upd_br_type_latch != BR_NONCTL) {
+        comb.bht_we_commit = true;
+        comb.bht_wr_idx = bht_get_idx_value(state_in.upd_pc_latch);
+        comb.bht_wdata_commit = state_in.upd_calc_next_bht_val_latch;
+      }
+
+      if (state_in.upd_actual_dir_latch) {
+        if (state_in.upd_br_type_latch == BR_IDIRECT) {
+          const uint32_t tc_write_idx =
+              tc_get_idx_value(state_in.upd_pc_latch, state_in.upd_calc_next_bht_val_latch);
+          const uint32_t tc_write_tag = tc_get_tag_value(state_in.upd_pc_latch);
+          TcHitCheckCombOut tc_hit_out{};
+          tc_hit_check_comb(TcHitCheckCombIn{mem_2.r_tc_set, tc_write_tag}, tc_hit_out);
+          TcVictimSelectCombOut tc_victim_out{};
+          tc_victim_select_comb(TcVictimSelectCombIn{mem_2.r_tc_set}, tc_victim_out);
+          int tc_write_way =
+              tc_hit_out.hit_info.hit ? tc_hit_out.hit_info.hit_way : tc_victim_out.victim_way;
+          uint8_t current_tc_useful = mem_2.r_tc_set.useful[tc_write_way];
+          uint32_t current_tc_target = mem_2.r_tc_set.target[tc_write_way];
+          bool tc_correct =
+              tc_hit_out.hit_info.hit && (current_tc_target == state_in.upd_actual_addr_latch);
+          uint8_t next_tc_useful =
+              tc_hit_out.hit_info.hit ? useful_next_state_value(current_tc_useful, tc_correct)
+                                      : static_cast<uint8_t>(INDIRECT_TC_INIT_USEFUL);
+          comb.tc_we_commit = true;
+          comb.tc_wr_way = tc_write_way;
+          comb.tc_wr_idx = tc_write_idx;
+          comb.tc_wdata_commit = state_in.upd_actual_addr_latch;
+          comb.tc_wtag_commit = tc_write_tag;
+          comb.tc_wvalid_commit = true;
+          comb.tc_wuseful_commit = next_tc_useful;
+        }
+        if (state_in.upd_calc_writes_btb_latch) {
+          comb.btb_we_commit = true;
+          comb.btb_wr_way = state_in.upd_calc_w_target_way_latch;
+          comb.btb_wr_idx = btb_get_idx_value(state_in.upd_pc_latch);
+          comb.btb_wr_tag = btb_get_tag_value(state_in.upd_pc_latch);
+          comb.btb_wr_bta = state_in.upd_actual_addr_latch;
+          comb.btb_wr_valid = true;
+          if (state_in.upd_br_type_latch == BR_IDIRECT) {
+            comb.btb_wr_useful = static_cast<uint8_t>(INDIRECT_BTB_INIT_USEFUL);
+          } else {
+            comb.btb_wr_useful = state_in.upd_calc_next_useful_val_latch;
+          }
+        }
+      }
+    }
+
+    // 1.6 Output Logic
     // comb.out_regs.busy = (state_in.state != S_IDLE);
 
     if (state_in.state != S_IDLE && comb.next_state == S_IDLE) { // moving to idle
@@ -485,138 +789,221 @@ public:
       }
     }
 
-    return comb;
   }
 
   // ------------------------------------------------------------------------
-  // step_comb
+  // 三阶段接口
   // ------------------------------------------------------------------------
-  CombResult step_comb(const InputPayload &inp) {
-    // 构建StateInput
-    StateInput state_in;
-    state_in.state = state;
-    // input latches
-    state_in.do_pred_latch = do_pred_latch;
-    state_in.do_upd_latch = do_upd_latch;
-    state_in.upd_pc_latch = upd_pc_latch;
-    state_in.upd_actual_addr_latch = upd_actual_addr_latch;
-    state_in.upd_br_type_latch = upd_br_type_latch;
-    state_in.upd_actual_dir_latch = upd_actual_dir_latch;
-    // pipeline latches
-    state_in.pred_calc_pc_latch = pred_calc_pc_latch;
-    state_in.pred_calc_btb_tag_latch = pred_calc_btb_tag_latch;
-    state_in.pred_calc_btb_idx_latch = pred_calc_btb_idx_latch;
-    state_in.pred_calc_type_idx_latch = pred_calc_type_idx_latch;
-    state_in.pred_calc_bht_idx_latch = pred_calc_bht_idx_latch;
-    // state_in.pred_calc_tc_idx_latch = pred_calc_tc_idx_latch;
+  void btb_seq_read(const InputPayload &inp, ReadData &rd) const {
+    std::memset(&rd, 0, sizeof(ReadData));
 
-    // 第一次：生成索引（不包含 tc_idx）
-    IndexResult idx_1 = step_comb_gen_index_1(inp, state_in);
-    // 第一次：读取 BHT、Type
-    MemReadResult mem_1 = step_comb_mem_read_1(idx_1, state_in);
-    // 第二次：生成索引（使用第一次读取的 BHT 值计算 tc_idx）
-    IndexResult idx_2 = step_comb_gen_index_2(inp, state_in, idx_1, mem_1);
-    // 第二次：读取 TC、BTB
-    MemReadResult mem_2 = step_comb_mem_read_2(idx_2, state_in, mem_1);
-    // 计算
-    return step_comb_calc(inp, state_in, idx_2, mem_2);
+    rd.state_in.state = state;
+    rd.state_in.do_pred_latch = do_pred_latch;
+    rd.state_in.do_upd_latch = do_upd_latch;
+    rd.state_in.upd_pc_latch = upd_pc_latch;
+    rd.state_in.upd_actual_addr_latch = upd_actual_addr_latch;
+    rd.state_in.upd_br_type_latch = upd_br_type_latch;
+    rd.state_in.upd_actual_dir_latch = upd_actual_dir_latch;
+    rd.state_in.pred_calc_pc_latch = pred_calc_pc_latch;
+    rd.state_in.pred_calc_btb_tag_latch = pred_calc_btb_tag_latch;
+    rd.state_in.pred_calc_btb_idx_latch = pred_calc_btb_idx_latch;
+    rd.state_in.pred_calc_type_idx_latch = pred_calc_type_idx_latch;
+    rd.state_in.pred_calc_bht_idx_latch = pred_calc_bht_idx_latch;
+    rd.state_in.upd_calc_next_bht_val_latch = upd_calc_next_bht_val_latch;
+    rd.state_in.upd_calc_hit_info_latch = upd_calc_hit_info_latch;
+    rd.state_in.upd_calc_victim_way_latch = upd_calc_victim_way_latch;
+    rd.state_in.upd_calc_w_target_way_latch = upd_calc_w_target_way_latch;
+    rd.state_in.upd_calc_next_useful_val_latch = upd_calc_next_useful_val_latch;
+    rd.state_in.upd_calc_writes_btb_latch = upd_calc_writes_btb_latch;
+
+    rd.sram_delay_active = sram_delay_active;
+    rd.sram_delay_counter = sram_delay_counter;
+    rd.sram_delayed_data = sram_delayed_data;
+    rd.sram_prng_state = sram_prng_state;
+    btb_prepare_comb_read(inp, rd);
   }
 
-  // ------------------------------------------------------------------------
-  // 时序逻辑函数 (Sequential Logic)
-  // ------------------------------------------------------------------------
-  void step_seq(bool rst_n, const InputPayload &inp, const CombResult &comb) {
-#ifdef SRAM_DELAY_ENABLE
-    // SRAM延迟模拟的时序逻辑
-    if (sram_new_req_this_cycle && !sram_delay_active) {
-      // 新的读请求：启动延迟
-      sram_delay_active = true;
-      sram_delay_counter = delay_dist(rng); // 生成1-5周期的随机延迟
+  void btb_prepare_comb_read(const InputPayload &inp, ReadData &rd) const {
+    rd.new_read_valid = false;
+
+    BtbGenIndexPreCombOut idx_pre_out{};
+    btb_gen_index_pre_comb(BtbGenIndexPreCombIn{inp, rd.state_in}, idx_pre_out);
+    rd.idx_1 = idx_pre_out.idx;
+
+    BtbMemReadPreCombOut mem_pre_out{};
+    uint8_t pre_type_data = 0;
+    uint32_t pre_bht_data = 0;
+    if (rd.idx_1.read_address_valid) {
+      pre_type_data = mem_type[rd.idx_1.type_idx];
+      pre_bht_data = mem_bht[rd.idx_1.bht_idx];
     }
-    if (sram_delay_active) {
-      // 延迟进行中：递减计数器
-      if (sram_delay_counter > 0) {
-        sram_delay_counter--;
+    btb_mem_read_pre_comb(BtbMemReadPreCombIn{rd.idx_1, rd.state_in, pre_type_data,
+                                               pre_bht_data},
+                          mem_pre_out);
+    rd.mem_1 = mem_pre_out.mem;
+
+    BtbGenIndexPostCombOut idx_post_out{};
+    btb_gen_index_post_comb(
+        BtbGenIndexPostCombIn{inp, rd.state_in, rd.idx_1, rd.mem_1}, idx_post_out);
+    rd.idx_2 = idx_post_out.idx_2;
+
+    rd.mem_2.r_type = rd.mem_1.r_type;
+    rd.mem_2.r_bht = rd.mem_1.r_bht;
+
+    if (rd.sram_delay_active) {
+      rd.mem_2.r_btb_set = rd.sram_delayed_data.r_btb_set;
+      rd.mem_2.r_tc_set = rd.sram_delayed_data.r_tc_set;
+      rd.mem_2.read_data_valid = (rd.sram_delay_counter == 0);
+      rd.new_read_valid = false;
+      return;
+    }
+
+    if (!rd.idx_2.read_address_valid) {
+      rd.mem_2.read_data_valid = false;
+      rd.new_read_valid = false;
+      return;
+    }
+
+    for (int w = 0; w < BTB_WAY_NUM; w++) {
+      rd.mem_2.r_btb_set.tag[w] = mem_btb_tag[w][rd.idx_2.btb_idx];
+      rd.mem_2.r_btb_set.bta[w] = mem_btb_bta[w][rd.idx_2.btb_idx];
+      rd.mem_2.r_btb_set.valid[w] = mem_btb_valid[w][rd.idx_2.btb_idx];
+      rd.mem_2.r_btb_set.useful[w] = mem_btb_useful[w][rd.idx_2.btb_idx];
+    }
+    for (int w = 0; w < TC_WAY_NUM; w++) {
+      rd.mem_2.r_tc_set.target[w] = mem_tc_target[w][rd.idx_2.tc_idx];
+      rd.mem_2.r_tc_set.tag[w] = mem_tc_tag[w][rd.idx_2.tc_idx];
+      rd.mem_2.r_tc_set.valid[w] = mem_tc_valid[w][rd.idx_2.tc_idx];
+      rd.mem_2.r_tc_set.useful[w] = mem_tc_useful[w][rd.idx_2.tc_idx];
+    }
+    rd.new_read_valid = true;
+    rd.new_read_data = rd.mem_2;
+
+#ifdef SRAM_DELAY_ENABLE
+    rd.mem_2.read_data_valid = false;
+#else
+    rd.mem_2.read_data_valid = true;
+#endif
+  }
+
+  void btb_comb(const BtbCombIn &in, BtbCombOut &out_bundle) const {
+    const InputPayload &inp = in.inp;
+    const ReadData &rd = in.rd;
+    OutputPayload &out = out_bundle.out_regs;
+    CombResult &req = out_bundle.req;
+    BtbCoreCombOut core_out{};
+    btb_core_comb(BtbCoreCombIn{inp, rd.state_in, rd.idx_2, rd.mem_2}, core_out);
+    req = core_out.result;
+    req.sram_delay_active_next = rd.sram_delay_active;
+    req.sram_delay_counter_next = rd.sram_delay_counter;
+    req.sram_delayed_data_next = rd.sram_delayed_data;
+    req.sram_prng_state_next = rd.sram_prng_state;
+
+#ifdef SRAM_DELAY_ENABLE
+    if (rd.sram_delay_active) {
+      if (rd.sram_delay_counter > 0) {
+        req.sram_delay_counter_next = rd.sram_delay_counter - 1;
+        req.sram_delay_active_next = true;
       } else {
-        // 延迟完成：重置标志（数据已在当前周期返回）
-        // sram_delay_active = false;
+        req.sram_delay_counter_next = 0;
+        req.sram_delay_active_next = false;
       }
+    } else if (rd.new_read_valid) {
+      BtbXorshift32CombOut xorshift_out{};
+      btb_xorshift32_comb(BtbXorshift32CombIn{rd.sram_prng_state}, xorshift_out);
+      uint32_t prng_next = xorshift_out.next_state;
+      req.sram_prng_state_next = prng_next;
+      int delay_range = SRAM_DELAY_MAX - SRAM_DELAY_MIN + 1;
+      int delay_val = SRAM_DELAY_MIN;
+      if (delay_range > 0) {
+        delay_val = SRAM_DELAY_MIN + static_cast<int>(prng_next % delay_range);
+      }
+      req.sram_delay_counter_next = delay_val;
+      req.sram_delay_active_next = true;
+      req.sram_delayed_data_next = rd.new_read_data;
+    } else {
+      req.sram_delay_counter_next = 0;
+      req.sram_delay_active_next = false;
+    }
+#else
+    req.sram_delay_counter_next = 0;
+    req.sram_delay_active_next = false;
+    if (rd.new_read_valid) {
+      req.sram_delayed_data_next = rd.new_read_data;
     }
 #endif
-    // Latch Requests
-    if (state == S_IDLE && comb.next_state != S_IDLE) { // moving out from IDLE
-      do_pred_latch =
-          inp.pred_req; // this will only be changed here, latched!
-      do_upd_latch = inp.upd_valid;
-      upd_pc_latch = inp.upd_pc;
-      upd_actual_addr_latch = inp.upd_actual_addr;
-      upd_br_type_latch = inp.upd_br_type_in;
-      upd_actual_dir_latch = inp.upd_actual_dir;
 
-      pred_calc_pc_latch = inp.pred_pc;
-      pred_calc_btb_tag_latch = comb.s1_pred_tag;
-      pred_calc_btb_idx_latch = comb.s1_pred_btb_idx;
-      pred_calc_type_idx_latch = comb.s1_pred_type_idx;
-      pred_calc_bht_idx_latch = comb.s1_pred_bht_idx;
-      // pred_calc_tc_idx_latch = comb.s1_pred_tc_idx; // 已在 step_comb_calc 中计算
+    req.out_regs.busy = (req.next_state != S_IDLE);
+    out = req.out_regs;
+  }
+
+  void btb_seq_write(const InputPayload &inp, const CombResult &req, bool reset) {
+    if (reset) {
+      this->reset();
+      return;
+    }
+    (void)inp;
+    do_pred_latch = req.do_pred_latch_next;
+    do_upd_latch = req.do_upd_latch_next;
+    upd_pc_latch = req.upd_pc_latch_next;
+    upd_actual_addr_latch = req.upd_actual_addr_latch_next;
+    upd_br_type_latch = req.upd_br_type_latch_next;
+    upd_actual_dir_latch = req.upd_actual_dir_latch_next;
+    pred_calc_pc_latch = req.pred_calc_pc_latch_next;
+    pred_calc_btb_tag_latch = req.pred_calc_btb_tag_latch_next;
+    pred_calc_btb_idx_latch = req.pred_calc_btb_idx_latch_next;
+    pred_calc_type_idx_latch = req.pred_calc_type_idx_latch_next;
+    pred_calc_bht_idx_latch = req.pred_calc_bht_idx_latch_next;
+    upd_calc_next_bht_val_latch = req.upd_calc_next_bht_val_latch_next;
+    upd_calc_hit_info_latch = req.upd_calc_hit_info_latch_next;
+    upd_calc_victim_way_latch = req.upd_calc_victim_way_latch_next;
+    upd_calc_w_target_way_latch = req.upd_calc_w_target_way_latch_next;
+    upd_calc_next_useful_val_latch = req.upd_calc_next_useful_val_latch_next;
+    upd_calc_writes_btb_latch = req.upd_calc_writes_btb_latch_next;
+
+    if (req.type_we_commit) {
+      mem_type[req.type_wr_idx] = req.type_wdata_commit;
+    }
+    if (req.bht_we_commit) {
+      mem_bht[req.bht_wr_idx] = req.bht_wdata_commit;
+    }
+    if (req.tc_we_commit) {
+      mem_tc_target[req.tc_wr_way][req.tc_wr_idx] = req.tc_wdata_commit;
+      mem_tc_tag[req.tc_wr_way][req.tc_wr_idx] = req.tc_wtag_commit;
+      mem_tc_valid[req.tc_wr_way][req.tc_wr_idx] = req.tc_wvalid_commit;
+      mem_tc_useful[req.tc_wr_way][req.tc_wr_idx] = req.tc_wuseful_commit;
+    }
+    if (req.btb_we_commit) {
+      mem_btb_tag[req.btb_wr_way][req.btb_wr_idx] = req.btb_wr_tag;
+      mem_btb_bta[req.btb_wr_way][req.btb_wr_idx] = req.btb_wr_bta;
+      mem_btb_valid[req.btb_wr_way][req.btb_wr_idx] = req.btb_wr_valid;
+      mem_btb_useful[req.btb_wr_way][req.btb_wr_idx] = req.btb_wr_useful;
     }
 
-    // Latch Update Calculation Results
-    if (comb.next_state == S_STAGE2) {
-      upd_calc_next_bht_val_latch = comb.next_bht_val;
-      upd_calc_hit_info_latch = comb.upd_hit_info;
-      upd_calc_victim_way_latch = comb.victim_way;
-      upd_calc_w_target_way_latch = comb.w_target_way;
-      upd_calc_next_useful_val_latch = comb.next_useful_val;
-      upd_calc_writes_btb_latch = comb.upd_writes_btb;
-    }
+    sram_delay_active = req.sram_delay_active_next;
+    sram_delay_counter = req.sram_delay_counter_next;
+    sram_delayed_data = req.sram_delayed_data_next;
+    sram_prng_state = req.sram_prng_state_next;
+    sram_new_req_this_cycle = false;
 
-    // Global Registers Update & Memory Write
-    if (state != S_IDLE && comb.next_state == S_IDLE && do_upd_latch) {
-      
-
-      // Conditional Updates
-      if (upd_actual_dir_latch == true) {
-        // 1. Update Type
-        uint32_t upd_type_idx = btb_get_type_idx_comb(upd_pc_latch);
-        mem_type[upd_type_idx] = upd_br_type_latch;
-
-        // Update BHT (Always valid)
-        if(upd_br_type_latch != BR_NONCTL) {
-          uint32_t upd_bht_idx = bht_get_idx_comb(upd_pc_latch);
-          mem_bht[upd_bht_idx] = upd_calc_next_bht_val_latch;
-        }
-
-        // 2. Update TC
-        if (upd_br_type_latch == BR_IDIRECT) {
-          uint32_t upd_tc_idx =
-              tc_get_idx_comb(upd_pc_latch, upd_calc_next_bht_val_latch);
-              // tc_get_idx_comb(upd_pc_latch, mem_bht[bht_get_idx_comb(upd_pc_latch)]);
-          mem_tc[upd_tc_idx] = upd_actual_addr_latch;
-        }
-        // 3. Update BTB
-        else if (upd_calc_writes_btb_latch) {
-          uint32_t upd_btb_idx = btb_get_idx_comb(upd_pc_latch);
-          uint32_t upd_tag = btb_get_tag_comb(upd_pc_latch);
-          mem_btb_tag[upd_calc_w_target_way_latch][upd_btb_idx] = upd_tag;
-          mem_btb_bta[upd_calc_w_target_way_latch][upd_btb_idx] = upd_actual_addr_latch;
-          mem_btb_valid[upd_calc_w_target_way_latch][upd_btb_idx] = true;
-          mem_btb_useful[upd_calc_w_target_way_latch][upd_btb_idx] =
-              upd_calc_next_useful_val_latch;
-        }
-      }
-
-      
-    }
-
-    // State Transition
-    state = comb.next_state;
-    return;
+    state = req.next_state;
   }
 
   // ------------------------------------------------------------------------
-  // 周期步进函数 (Cycle Step) - 保留作为兼容接口
+  // 兼容接口
   // ------------------------------------------------------------------------
+  CombResult step_pipeline(const InputPayload &inp) {
+    ReadData rd;
+    BtbCombOut comb_out{};
+    btb_seq_read(inp, rd);
+    btb_comb(BtbCombIn{inp, rd}, comb_out);
+    return comb_out.req;
+  }
+
+  void step_seq(bool rst_n, const InputPayload &inp, const CombResult &comb) {
+    btb_seq_write(inp, comb, rst_n);
+  }
+
   OutputPayload step(bool rst_n, const InputPayload &inp) {
     if (rst_n) {
       reset();
@@ -625,10 +1012,12 @@ public:
       std::memset(&out_reg_reset, 0, sizeof(OutputPayload));
       return out_reg_reset;
     }
-    CombResult comb = step_comb(inp);
-    step_seq(rst_n, inp, comb);
-    comb.out_regs.busy = (state != S_IDLE); // 补丁
-    return comb.out_regs;
+    ReadData rd;
+    BtbCombOut comb_out{};
+    btb_seq_read(inp, rd);
+    btb_comb(BtbCombIn{inp, rd}, comb_out);
+    btb_seq_write(inp, comb_out.req, false);
+    return comb_out.out_regs;
   }
 
 private:
@@ -636,92 +1025,298 @@ private:
   // 组合逻辑函数实现 (Internal Implementation)
   // ============================================================
 
+  static void btb_xorshift32_comb(const BtbXorshift32CombIn &in,
+                                  BtbXorshift32CombOut &out) {
+    out = BtbXorshift32CombOut{};
+    uint32_t value = (in.state == 0) ? 0x2468ace1u : in.state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    out.next_state = value;
+  }
+
+  static constexpr int calc_index_width(uint32_t mask) {
+    int width = 0;
+    while (mask > 0) {
+      ++width;
+      mask >>= 1;
+    }
+    return width;
+  }
+
+  static uint32_t hash_index_value(uint32_t pc_word, uint32_t mask, int width,
+                                   uint32_t salt) {
+    if (width <= 0) {
+      return pc_word & mask;
+    }
+    uint32_t mixed = pc_word;
+    if (width < 32) {
+      mixed ^= (pc_word >> width);
+    }
+    if ((2 * width) < 32) {
+      mixed ^= (pc_word >> (2 * width));
+    }
+    if ((3 * width) < 32) {
+      mixed ^= (pc_word >> (3 * width));
+    }
+    mixed ^= salt;
+    return mixed & mask;
+  }
+
   // [Comb] Index Calculation
-  static uint32_t btb_get_tag_comb(uint32_t pc) {
-    return ((pc >> 2) >> BTB_IDX_LEN) & BTB_TAG_MASK;
+  static void btb_get_tag_comb(const BtbGetTagCombIn &in, BtbGetTagCombOut &out) {
+    out = BtbGetTagCombOut{};
+    out.tag = ((in.pc >> 2) >> BTB_IDX_LEN) & BTB_TAG_MASK;
   }
-  static uint32_t btb_get_idx_comb(uint32_t pc) {
-    return (pc >> 2) & BTB_IDX_MASK;
+
+  static void btb_get_idx_comb(const BtbGetIdxCombIn &in, BtbGetIdxCombOut &out) {
+    out = BtbGetIdxCombOut{};
+#if ENABLE_BTB_ALIAS_HASH
+    constexpr int kBtbIdxWidth = calc_index_width(BTB_IDX_MASK);
+    const uint32_t pc_word = in.pc >> 2;
+    out.idx = hash_index_value(pc_word, BTB_IDX_MASK, kBtbIdxWidth, 0x9e3779b9u);
+#else
+    out.idx = (in.pc >> 2) & BTB_IDX_MASK;
+#endif
   }
-  static uint32_t btb_get_type_idx_comb(uint32_t pc) {
-    return (pc >> 2) & BTB_TYPE_IDX_MASK;
+
+  static void btb_get_type_idx_comb(const BtbGetTypeIdxCombIn &in,
+                                    BtbGetTypeIdxCombOut &out) {
+    out = BtbGetTypeIdxCombOut{};
+#if ENABLE_BTB_ALIAS_HASH
+    constexpr int kTypeIdxWidth = calc_index_width(BTB_TYPE_IDX_MASK);
+    const uint32_t pc_word = in.pc >> 2;
+    out.idx =
+        hash_index_value(pc_word, BTB_TYPE_IDX_MASK, kTypeIdxWidth, 0x7f4a7c15u);
+#else
+    out.idx = (in.pc >> 2) & BTB_TYPE_IDX_MASK;
+#endif
   }
-  static uint32_t bht_get_idx_comb(uint32_t pc) {
-    return (pc >> 2) & BHT_IDX_MASK;
+
+  static void bht_get_idx_comb(const BhtGetIdxCombIn &in, BhtGetIdxCombOut &out) {
+    out = BhtGetIdxCombOut{};
+#if ENABLE_BTB_ALIAS_HASH
+    constexpr int kBhtIdxWidth = calc_index_width(BHT_IDX_MASK);
+    const uint32_t pc_word = in.pc >> 2;
+    out.idx = hash_index_value(pc_word, BHT_IDX_MASK, kBhtIdxWidth, 0x6a5d39e1u);
+#else
+    out.idx = (in.pc >> 2) & BHT_IDX_MASK;
+#endif
   }
-  static uint32_t tc_get_idx_comb(uint32_t pc, uint32_t bht_value) {
-    return (bht_value ^ pc) & TC_ENTRY_MASK;
+
+  static void tc_get_idx_comb(const TcGetIdxCombIn &in, TcGetIdxCombOut &out) {
+    out = TcGetIdxCombOut{};
+#if ENABLE_BTB_ALIAS_HASH
+    constexpr int kTcIdxWidth = calc_index_width(TC_ENTRY_MASK);
+    const uint32_t pc_word = in.pc >> 2;
+    const uint32_t hist_mix =
+        in.bht_value ^ (in.bht_value >> 7) ^ (in.bht_value >> 13) ^ (in.bht_value << 9);
+    out.idx = hash_index_value(pc_word ^ hist_mix ^ (in.bht_value >> 19), TC_ENTRY_MASK,
+                               kTcIdxWidth,
+                               0x51ed270bu);
+#else
+    out.idx = (in.bht_value ^ in.pc) & TC_ENTRY_MASK;
+#endif
+  }
+
+  static void tc_get_tag_comb(const TcGetTagCombIn &in, TcGetTagCombOut &out) {
+    out = TcGetTagCombOut{};
+#if ENABLE_BTB_ALIAS_HASH
+    constexpr int kTcTagWidth = calc_index_width(TC_TAG_MASK);
+    const uint32_t pc_word = in.pc >> 2;
+    out.tag =
+        hash_index_value(pc_word, TC_TAG_MASK, kTcTagWidth, 0x3c6ef372u);
+#else
+    out.tag = (in.pc >> 2) & TC_TAG_MASK;
+#endif
   }
 
   // [Comb] Logic
-  static uint32_t bht_next_state_comb(uint32_t current_bht, bool pc_dir) {
-    return (current_bht << 1) | (pc_dir ? 1 : 0);
-  }
-
-  static uint8_t useful_next_state_comb(uint8_t current_val, bool correct) {
-    if (correct) {
-      if (current_val < 7)
-        return current_val + 1;
-    } else {
-      if (current_val > 0)
-        return current_val - 1;
+  static void bht_next_state_comb(const BhtNextStateCombIn &in,
+                                  BhtNextStateCombOut &out) {
+    out = BhtNextStateCombOut{};
+#if ENABLE_TC_TARGET_SIGNATURE
+    if (in.br_type == BR_IDIRECT) {
+      uint32_t target_word = in.actual_target >> 2;
+      uint32_t target_folded = target_word ^ (target_word >> 11) ^ (target_word >> 19);
+      uint32_t hist_folded =
+          in.current_bht ^ (in.current_bht << 5) ^ (in.current_bht >> 2);
+      out.next_bht = hist_folded ^ target_folded ^ 0x9e3779b9u;
+      return;
     }
-    return current_val;
+#endif
+    out.next_bht = (in.current_bht << 1) | (in.pc_dir ? 1 : 0);
   }
 
-  static HitCheckOut btb_hit_check_comb(const BtbSetData *set_data,
-                                        uint32_t tag) {
-    HitCheckOut out;
-    memset(&out, 0, sizeof(HitCheckOut));
-
-    out.hit = false;
-    out.hit_way = 0;
-    for (int way = 0; way < BTB_WAY_NUM; way++) {
-      if (set_data->valid[way] && set_data->tag[way] == tag) {
-        out.hit_way = way;
-        out.hit = true;
-        return out;
+  static void useful_next_state_comb(const UsefulNextStateCombIn &in,
+                                     UsefulNextStateCombOut &out) {
+    out = UsefulNextStateCombOut{};
+    out.next_val = in.current_val;
+    if (in.correct) {
+      if (out.next_val < 7) {
+        out.next_val = static_cast<uint8_t>(out.next_val + 1);
+      }
+    } else {
+      if (out.next_val > 0) {
+        out.next_val = static_cast<uint8_t>(out.next_val - 1);
       }
     }
-    return out;
   }
 
-  static uint32_t btb_pred_output_comb(uint32_t pc, uint8_t br_type,
-                                       const HitCheckOut &hit_info,
-                                       const BtbSetData *set_data,
-                                       uint32_t tc_target) {
-    uint8_t type = br_type;
-    // printf("type=%d\n", type);
+  static void btb_hit_check_comb(const BtbHitCheckCombIn &in,
+                                 BtbHitCheckCombOut &out) {
+    std::memset(&out, 0, sizeof(BtbHitCheckCombOut));
+    out.hit_info.hit = false;
+    out.hit_info.hit_way = 0;
+    for (int way = 0; way < BTB_WAY_NUM; way++) {
+      if (in.set_data.valid[way] && in.set_data.tag[way] == in.tag) {
+        out.hit_info.hit_way = way;
+        out.hit_info.hit = true;
+        return;
+      }
+    }
+  }
 
+  static void tc_hit_check_comb(const TcHitCheckCombIn &in, TcHitCheckCombOut &out) {
+    std::memset(&out, 0, sizeof(TcHitCheckCombOut));
+    out.hit_info.hit = false;
+    out.hit_info.hit_way = 0;
+    for (int way = 0; way < TC_WAY_NUM; way++) {
+      if (in.set_data.valid[way] && in.set_data.tag[way] == in.tag) {
+        out.hit_info.hit_way = way;
+        out.hit_info.hit = true;
+        return;
+      }
+    }
+  }
+
+  static void btb_pred_output_comb(const BtbPredOutputCombIn &in,
+                                   BtbPredOutputCombOut &out) {
+    out = BtbPredOutputCombOut{};
+    uint8_t type = in.br_type;
     if (type == BR_IDIRECT) {
-      // printf("TC=%x\n", tc_taget);
-      return tc_target;
+      uint32_t expected_tc_tag = tc_get_tag_value(in.pc);
+      bool tc_hit = false;
+      uint32_t tc_target = in.pc + 4;
+      for (int way = 0; way < TC_WAY_NUM; way++) {
+        if (in.tc_set.valid[way] && in.tc_set.tag[way] == expected_tc_tag) {
+          tc_hit = true;
+          tc_target = in.tc_set.target[way];
+          break;
+        }
+      }
+      if (tc_hit) {
+        out.pred_target = tc_target;
+#if ENABLE_INDIRECT_BTB_FALLBACK
+      } else if (in.hit_info.hit) {
+        out.pred_target = in.set_data.bta[in.hit_info.hit_way];
+#endif
+      } else {
+        out.pred_target = in.pc + 4;
+      }
+      return;
     } else if (type == BR_DIRECT || type == BR_CALL || type == BR_JAL ||
                type == BR_RET) {
-      if (hit_info.hit) {
-        return set_data->bta[hit_info.hit_way];
+      if (in.hit_info.hit) {
+        out.pred_target = in.set_data.bta[in.hit_info.hit_way];
+        return;
       }
-      return pc + 4; // Miss
+      out.pred_target = in.pc + 4;
+      return;
     }
-    return pc + 4; // Other types
+    out.pred_target = in.pc + 4;
   }
 
-  static int btb_victim_select_comb(const BtbSetData *set_data) {
+  static void btb_victim_select_comb(const BtbVictimSelectCombIn &in,
+                                     BtbVictimSelectCombOut &out) {
+    out = BtbVictimSelectCombOut{};
     // 1. Empty Way
     for (int way = 0; way < BTB_WAY_NUM; way++) {
-      if (!set_data->valid[way])
-        return way;
+      if (!in.set_data.valid[way]) {
+        out.victim_way = way;
+        return;
+      }
     }
     // 2. Min Useful
     int min_useful = 255;
     int min_useful_way = 0;
     for (int way = 0; way < BTB_WAY_NUM; way++) {
-      if (set_data->useful[way] < min_useful) {
-        min_useful = set_data->useful[way];
+      if (in.set_data.useful[way] < min_useful) {
+        min_useful = in.set_data.useful[way];
         min_useful_way = way;
       }
     }
-    return min_useful_way;
+    out.victim_way = min_useful_way;
+  }
+
+  static void tc_victim_select_comb(const TcVictimSelectCombIn &in,
+                                    TcVictimSelectCombOut &out) {
+    out = TcVictimSelectCombOut{};
+    for (int way = 0; way < TC_WAY_NUM; way++) {
+      if (!in.set_data.valid[way]) {
+        out.victim_way = way;
+        return;
+      }
+    }
+    int min_useful = 255;
+    int min_useful_way = 0;
+    for (int way = 0; way < TC_WAY_NUM; way++) {
+      if (in.set_data.useful[way] < min_useful) {
+        min_useful = in.set_data.useful[way];
+        min_useful_way = way;
+      }
+    }
+    out.victim_way = min_useful_way;
+  }
+
+  static uint32_t btb_get_tag_value(uint32_t pc) {
+    BtbGetTagCombOut out{};
+    btb_get_tag_comb(BtbGetTagCombIn{pc}, out);
+    return out.tag;
+  }
+
+  static uint32_t btb_get_idx_value(uint32_t pc) {
+    BtbGetIdxCombOut out{};
+    btb_get_idx_comb(BtbGetIdxCombIn{pc}, out);
+    return out.idx;
+  }
+
+  static uint32_t btb_get_type_idx_value(uint32_t pc) {
+    BtbGetTypeIdxCombOut out{};
+    btb_get_type_idx_comb(BtbGetTypeIdxCombIn{pc}, out);
+    return out.idx;
+  }
+
+  static uint32_t bht_get_idx_value(uint32_t pc) {
+    BhtGetIdxCombOut out{};
+    bht_get_idx_comb(BhtGetIdxCombIn{pc}, out);
+    return out.idx;
+  }
+
+  static uint32_t tc_get_idx_value(uint32_t pc, uint32_t bht_value) {
+    TcGetIdxCombOut out{};
+    tc_get_idx_comb(TcGetIdxCombIn{pc, bht_value}, out);
+    return out.idx;
+  }
+
+  static uint32_t tc_get_tag_value(uint32_t pc) {
+    TcGetTagCombOut out{};
+    tc_get_tag_comb(TcGetTagCombIn{pc}, out);
+    return out.tag;
+  }
+
+  static uint32_t bht_next_state_value(uint32_t current_bht, uint8_t br_type,
+                                       bool pc_dir, uint32_t actual_target) {
+    BhtNextStateCombOut out{};
+    bht_next_state_comb(BhtNextStateCombIn{current_bht, br_type, pc_dir, actual_target},
+                        out);
+    return out.next_bht;
+  }
+
+  static uint8_t useful_next_state_value(uint8_t current_val, bool correct) {
+    UsefulNextStateCombOut out{};
+    useful_next_state_comb(UsefulNextStateCombIn{current_val, correct}, out);
+    return out.next_val;
   }
 };
 

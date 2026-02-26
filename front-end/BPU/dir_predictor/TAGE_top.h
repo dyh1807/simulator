@@ -11,15 +11,6 @@
 #include <random>
 
 // ============================================================================
-// 从BPU读取全局GHR/FH的接口函数（在某个 .cpp 中实现）
-// ============================================================================
-const bool* BPU_get_Arch_GHR();
-const bool* BPU_get_Spec_GHR();
-const uint32_t (*BPU_get_Arch_FH())[TN_MAX];
-const uint32_t (*BPU_get_Spec_FH())[TN_MAX];
-
-
-// ============================================================================
 // 1. 基础结构体定义 (Structures)
 // ============================================================================
 
@@ -59,6 +50,8 @@ struct UpdateRequest {
   uint8_t tag_wdata[TN_MAX];
   bool base_we;
   int base_wdata;
+  bool sc_we;
+  uint8_t sc_wdata;
   bool reset_we;
   uint32_t reset_row_idx;
   bool reset_msb_only;
@@ -73,43 +66,144 @@ struct LSFR_Output {
 // 2. 辅助函数 (Pure Combinational Helpers)
 // ============================================================================
 
-static uint8_t sat_inc_3bit(uint8_t val) { return (val >= 7) ? 7 : val + 1; }
-static uint8_t sat_dec_3bit(uint8_t val) { return (val == 0) ? 0 : val - 1; }
-static uint8_t sat_inc_2bit(uint8_t val) { return (val >= 3) ? 3 : val + 1; }
-static uint8_t sat_dec_2bit(uint8_t val) { return (val == 0) ? 0 : val - 1; }
+struct SatCounterCombIn {
+  uint8_t val;
+};
+
+struct SatCounterCombOut {
+  uint8_t val;
+};
+
+static inline void sat_inc_3bit_comb(const SatCounterCombIn &in,
+                                     SatCounterCombOut &out) {
+  out = SatCounterCombOut{};
+  out.val = (in.val >= 7) ? 7 : static_cast<uint8_t>(in.val + 1);
+}
+
+static inline void sat_dec_3bit_comb(const SatCounterCombIn &in,
+                                     SatCounterCombOut &out) {
+  out = SatCounterCombOut{};
+  out.val = (in.val == 0) ? 0 : static_cast<uint8_t>(in.val - 1);
+}
+
+static inline void sat_inc_2bit_comb(const SatCounterCombIn &in,
+                                     SatCounterCombOut &out) {
+  out = SatCounterCombOut{};
+  out.val = (in.val >= 3) ? 3 : static_cast<uint8_t>(in.val + 1);
+}
+
+static inline void sat_dec_2bit_comb(const SatCounterCombIn &in,
+                                     SatCounterCombOut &out) {
+  out = SatCounterCombOut{};
+  out.val = (in.val == 0) ? 0 : static_cast<uint8_t>(in.val - 1);
+}
+
+static inline uint8_t sat_inc_3bit_value(uint8_t val) {
+  SatCounterCombOut out{};
+  sat_inc_3bit_comb(SatCounterCombIn{val}, out);
+  return out.val;
+}
+
+static inline uint8_t sat_dec_3bit_value(uint8_t val) {
+  SatCounterCombOut out{};
+  sat_dec_3bit_comb(SatCounterCombIn{val}, out);
+  return out.val;
+}
+
+static inline uint8_t sat_inc_2bit_value(uint8_t val) {
+  SatCounterCombOut out{};
+  sat_inc_2bit_comb(SatCounterCombIn{val}, out);
+  return out.val;
+}
+
+static inline uint8_t sat_dec_2bit_value(uint8_t val) {
+  SatCounterCombOut out{};
+  sat_dec_2bit_comb(SatCounterCombIn{val}, out);
+  return out.val;
+}
+
+static inline uint32_t tage_sc_idx_from_pc(uint32_t pc) {
+  uint32_t value = pc >> 2;
+  value ^= (value >> 7);
+  value ^= (value >> 13);
+  return value & TAGE_SC_IDX_MASK;
+}
 
 // ============================================================================
 // 2.1 GHR/FH更新组合逻辑函数（提取为公共函数供BPU使用）
 // ============================================================================
 
-// [comb] GHR Update - 提取为公共静态内联函数
-static inline void TAGE_GHR_update_comb_1(const bool current_GHR[GHR_LENGTH], bool real_dir,
-                                          bool next_GHR[GHR_LENGTH]) {
+struct TageGhrUpdateCombIn {
+  bool current_GHR[GHR_LENGTH];
+  bool real_dir;
+};
+
+struct TageGhrUpdateCombOut {
+  bool next_GHR[GHR_LENGTH];
+};
+
+struct TageFhUpdateCombIn {
+  uint32_t current_FH[FH_N_MAX][TN_MAX];
+  bool current_GHR[GHR_LENGTH];
+  bool new_history;
+  uint32_t fh_len[FH_N_MAX][TN_MAX];
+  uint32_t ghr_len[TN_MAX];
+};
+
+struct TageFhUpdateCombOut {
+  uint32_t next_FH[FH_N_MAX][TN_MAX];
+};
+
+static inline void tage_ghr_update_comb(const TageGhrUpdateCombIn &in,
+                                        TageGhrUpdateCombOut &out) {
+  out = TageGhrUpdateCombOut{};
   for (int i = GHR_LENGTH - 1; i > 0; i--) {
-    next_GHR[i] = current_GHR[i - 1];
+    out.next_GHR[i] = in.current_GHR[i - 1];
   }
-  next_GHR[0] = real_dir;
+  out.next_GHR[0] = in.real_dir;
 }
 
-// [comb] FH Update - 提取为公共静态内联函数
-static inline void TAGE_FH_update_comb_1(const uint32_t current_FH[FH_N_MAX][TN_MAX],
-                                         const bool current_GHR[GHR_LENGTH], bool new_history,
-                                         uint32_t next_FH[FH_N_MAX][TN_MAX],
-                                         const uint32_t fh_len[FH_N_MAX][TN_MAX],
-                                         const uint32_t ghr_len[TN_MAX]) {
+static inline void tage_fh_update_comb(const TageFhUpdateCombIn &in,
+                                       TageFhUpdateCombOut &out) {
+  out = TageFhUpdateCombOut{};
   for (int k = 0; k < FH_N_MAX; k++) {
     for (int i = 0; i < TN_MAX; i++) {
-      bool old_highest;
-      uint32_t val = current_FH[k][i];
-      uint32_t len = fh_len[k][i];
-      old_highest = (val >> (len - 1)) & 0x1;
+      uint32_t val = in.current_FH[k][i];
+      uint32_t len = in.fh_len[k][i];
+      bool old_highest = ((val >> (len - 1)) & 0x1) != 0;
       val = (val << 1) & ((0x1 << len) - 1);
-      val |= new_history ^ old_highest;
-      uint32_t ghr_idx = ghr_len[i];
-      val ^= current_GHR[ghr_idx-1] << (ghr_idx % len); 
-      next_FH[k][i] = val;
+      val |= static_cast<uint32_t>(in.new_history ^ old_highest);
+      uint32_t ghr_idx = in.ghr_len[i];
+      val ^= static_cast<uint32_t>(in.current_GHR[ghr_idx - 1]) << (ghr_idx % len);
+      out.next_FH[k][i] = val;
     }
   }
+}
+
+static inline void tage_ghr_update_apply(const bool current_GHR[GHR_LENGTH],
+                                         bool real_dir,
+                                         bool next_GHR[GHR_LENGTH]) {
+  TageGhrUpdateCombOut out{};
+  TageGhrUpdateCombIn in{};
+  std::memcpy(in.current_GHR, current_GHR, sizeof(in.current_GHR));
+  in.real_dir = real_dir;
+  tage_ghr_update_comb(in, out);
+  std::memcpy(next_GHR, out.next_GHR, sizeof(out.next_GHR));
+}
+
+static inline void tage_fh_update_apply(
+    const uint32_t current_FH[FH_N_MAX][TN_MAX], const bool current_GHR[GHR_LENGTH],
+    bool new_history, uint32_t next_FH[FH_N_MAX][TN_MAX],
+    const uint32_t fh_len[FH_N_MAX][TN_MAX], const uint32_t ghr_len[TN_MAX]) {
+  TageFhUpdateCombOut out{};
+  TageFhUpdateCombIn in{};
+  std::memcpy(in.current_FH, current_FH, sizeof(in.current_FH));
+  std::memcpy(in.current_GHR, current_GHR, sizeof(in.current_GHR));
+  in.new_history = new_history;
+  std::memcpy(in.fh_len, fh_len, sizeof(in.fh_len));
+  std::memcpy(in.ghr_len, ghr_len, sizeof(in.ghr_len));
+  tage_fh_update_comb(in, out);
+  std::memcpy(next_FH, out.next_FH, sizeof(out.next_FH));
 }
 
 // ============================================================================
@@ -134,6 +228,8 @@ public:
   struct InputPayload {
     bool pred_req;
     uint32_t pc_pred_in;
+    bool ghr_in[GHR_LENGTH];
+    uint32_t fh_in[FH_N_MAX][TN_MAX];
     bool update_en;
     uint32_t pc_update_in;
     bool real_dir;
@@ -181,6 +277,8 @@ public:
     uint32_t pred_calc_base_idx_latch;
     uint32_t pred_calc_tage_idx_latch[TN_MAX];
     uint8_t pred_calc_tage_tag_latch[TN_MAX];
+    uint32_t pred_pc_latch;
+    UpdateRequest upd_calc_winfo_latch;
   };
 
   // Index生成结果
@@ -194,6 +292,22 @@ public:
   struct MemReadResult {
     TageTableReadData table_r;
     bool table_read_data_valid;
+  };
+
+  // 三阶段 Read 阶段输出
+  struct ReadData {
+    StateInput state_in;
+    IndexResult idx;
+    MemReadResult mem;
+    bool useful_reset_row_data_valid;
+    uint8_t useful_reset_row_data[TN_MAX];
+
+    bool sram_delay_active;
+    int sram_delay_counter;
+    TageTableReadData sram_delayed_data;
+    bool new_read_valid;
+    TageTableReadData new_read_data;
+    uint32_t sram_prng_state;
   };
 
   // 组合逻辑计算结果结构体
@@ -212,6 +326,128 @@ public:
     // bool next_Arch_GHR[GHR_LENGTH];
     // uint32_t next_Arch_FH[FH_N_MAX][TN_MAX];
     OutputPayload out_regs;
+
+    bool sram_delay_active_next;
+    int sram_delay_counter_next;
+    TageTableReadData sram_delayed_data_next;
+    uint32_t sram_prng_state_next;
+
+    bool do_pred_latch_next;
+    bool do_upd_latch_next;
+    bool upd_real_dir_latch_next;
+    uint32_t upd_pc_latch_next;
+    bool upd_pred_in_latch_next;
+    bool upd_alt_pred_in_latch_next;
+    uint8_t upd_pcpn_in_latch_next;
+    uint8_t upd_altpcpn_in_latch_next;
+    uint8_t upd_tage_tag_flat_latch_next[TN_MAX];
+    uint32_t upd_tage_idx_flat_latch_next[TN_MAX];
+    uint32_t pred_calc_base_idx_latch_next;
+    uint32_t pred_calc_tage_idx_latch_next[TN_MAX];
+    uint8_t pred_calc_tage_tag_latch_next[TN_MAX];
+    uint32_t pred_pc_latch_next;
+    UpdateRequest upd_calc_winfo_latch_next;
+    bool reset_cnt_reg_we;
+    uint32_t reset_cnt_reg_next;
+    bool lsfr_we;
+    bool LSFR_next[4];
+    bool base_we_commit;
+    uint32_t base_wr_idx;
+    int base_wdata_commit;
+    bool cnt_we_commit[TN_MAX];
+    uint32_t cnt_wr_idx[TN_MAX];
+    uint8_t cnt_wdata_commit[TN_MAX];
+    bool useful_we_commit[TN_MAX];
+    uint32_t useful_wr_idx[TN_MAX];
+    uint8_t useful_wdata_commit[TN_MAX];
+    bool tag_we_commit[TN_MAX];
+    uint32_t tag_wr_idx[TN_MAX];
+    uint8_t tag_wdata_commit[TN_MAX];
+    bool useful_reset_we_commit[TN_MAX];
+    uint32_t useful_reset_row_commit[TN_MAX];
+    bool useful_reset_msb_only_commit[TN_MAX];
+    uint8_t useful_reset_wdata_commit[TN_MAX];
+    bool sc_we_commit;
+    uint32_t sc_wr_idx;
+    uint8_t sc_wdata_commit;
+  };
+
+  struct TageGenIndexCombIn {
+    InputPayload inp;
+    StateInput state_in;
+  };
+
+  struct TageGenIndexCombOut {
+    IndexResult idx;
+  };
+
+  struct TageCoreCombIn {
+    InputPayload inp;
+    StateInput state_in;
+    IndexResult idx;
+    MemReadResult mem;
+  };
+
+  struct TageCoreCombOut {
+    CombResult result;
+  };
+
+  struct TageCombIn {
+    InputPayload inp;
+    ReadData rd;
+  };
+
+  struct TageCombOut {
+    OutputPayload out_regs;
+    CombResult req;
+  };
+
+  struct TageXorshift32CombIn {
+    uint32_t state;
+  };
+
+  struct TageXorshift32CombOut {
+    uint32_t next_state;
+  };
+
+  struct TagePredIndexCombIn {
+    uint32_t pc;
+    uint32_t fh_in[FH_N_MAX][TN_MAX];
+  };
+
+  struct TagePredIndexCombOut {
+    TageIndexTag index_tag;
+  };
+
+  struct TagePredSelectCombIn {
+    TageTableReadData read_data;
+    TageIndexTag idx_tag;
+    uint8_t sc_ctr;
+  };
+
+  struct TagePredSelectCombOut {
+    PredResult pred_res;
+  };
+
+  struct TageUpdateCombIn {
+    bool real_dir;
+    PredResult pred_res;
+    TageTableReadData read_vals;
+    uint8_t lsfr_rand;
+    uint8_t sc_ctr;
+    uint32_t current_reset_cnt;
+  };
+
+  struct TageUpdateCombOut {
+    UpdateRequest req;
+  };
+
+  struct LsfrUpdateCombIn {
+    bool current_lsfr[4];
+  };
+
+  struct LsfrUpdateCombOut {
+    LSFR_Output lsfr_out;
   };
 
 private:
@@ -229,6 +465,7 @@ private:
   uint8_t tag_table[TN_MAX][TN_ENTRY_NUM];
   uint8_t cnt_table[TN_MAX][TN_ENTRY_NUM];
   uint8_t useful_table[TN_MAX][TN_ENTRY_NUM];
+  uint8_t sc_ctr_table[TAGE_SC_ENTRY_NUM];
 
   // FH constants
   const uint32_t ghr_length[TN_MAX] = {8, 13, 32, 119};
@@ -252,6 +489,7 @@ private:
   uint32_t pred_calc_base_idx_latch;
   uint32_t pred_calc_tage_idx_latch[TN_MAX];
   uint8_t pred_calc_tage_tag_latch[TN_MAX];
+  uint32_t pred_pc_latch;
 
   // For Update Writeback (S1 calc result):
   UpdateRequest upd_calc_winfo_latch; // 包含所有 upd_cnt_we, wdata 等
@@ -263,15 +501,14 @@ private:
   bool sram_delay_active;           // 是否正在进行延迟
   int sram_delay_counter;            // 剩余延迟周期数
   TageTableReadData sram_delayed_data; // 延迟期间保存的数据
-  bool sram_new_req_this_cycle;      // 本周期是否有新的读请求（在step_comb中设置，step_seq中使用）
-  std::mt19937 rng;                  // 随机数生成器
-  std::uniform_int_distribution<int> delay_dist; // 延迟分布（1-5周期）
+  bool sram_new_req_this_cycle;      // 本周期是否有新的读请求（在step_pipeline中设置，step_seq中使用）
+  uint32_t sram_prng_state;          // 固定种子伪随机状态
 
 public:
   // ------------------------------------------------------------------------
   // 构造函数
   // ------------------------------------------------------------------------
-  TAGE_TOP() : rng(std::random_device{}()), delay_dist(SRAM_DELAY_MIN, SRAM_DELAY_MAX) { reset(); }
+  TAGE_TOP() { reset(); }
 
   void reset() {
     // GHR/FH已迁移到BPU_TOP，不再在此初始化
@@ -290,6 +527,7 @@ public:
     memset(tag_table, 0, sizeof(tag_table));
     memset(cnt_table, 0, sizeof(cnt_table));
     memset(useful_table, 0, sizeof(useful_table));
+    std::memset(sc_ctr_table, 1, sizeof(sc_ctr_table));
 
     state = S_IDLE;
     do_pred_latch = false;
@@ -305,6 +543,7 @@ public:
       upd_tage_tag_flat_latch[i] = 0;
     }
     pred_calc_base_idx_latch = 0;
+    pred_pc_latch = 0;
     for (int i = 0; i < TN_MAX; ++i) {
       pred_calc_tage_idx_latch[i] = 0;
       pred_calc_tage_tag_latch[i] = 0;
@@ -317,14 +556,17 @@ public:
     sram_delay_counter = 0;
     sram_new_req_this_cycle = false;
     memset(&sram_delayed_data, 0, sizeof(TageTableReadData));
+    sram_prng_state = 0x13579bdfu;
   }
 
   // ------------------------------------------------------------------------
   // 组合逻辑函数 - 生成Index
   // ------------------------------------------------------------------------
-  IndexResult step_comb_gen_index(const InputPayload &inp,
-                                  const StateInput &state_in) {
-    IndexResult idx;
+  void tage_gen_index_comb(const TageGenIndexCombIn &in,
+                           TageGenIndexCombOut &out) const {
+    const InputPayload &inp = in.inp;
+    const StateInput &state_in = in.state_in;
+    IndexResult &idx = out.idx;
     memset(&idx, 0, sizeof(IndexResult));
 
     bool read_pred = state_in.state == S_STAGE2 && state_in.do_pred_latch;
@@ -350,65 +592,38 @@ public:
       idx.table_read_address_valid = false;
     }
 
-    return idx;
-  }
-
-  // ------------------------------------------------------------------------
-  // 内存读取 (TABLE READ) - 带SRAM随机延迟模拟
-  // ------------------------------------------------------------------------
-  MemReadResult step_comb_mem_read(const IndexResult &idx) {
-    MemReadResult mem;
-    memset(&mem, 0, sizeof(MemReadResult));
-
-    // 如果正在进行延迟，返回保存的数据
-#ifdef SRAM_DELAY_ENABLE
-    if (sram_delay_active) {
-      mem.table_r = sram_delayed_data;
-      if(sram_delay_counter == 0) {
-        mem.table_read_data_valid = true;
-        sram_delay_active = false;
-      }
-      else {
-        mem.table_read_data_valid = false;
-      }
-      sram_new_req_this_cycle = false;
-      return mem;
-    }
-#endif
-
-    // Memory Read - 新的读请求
-    if (idx.table_read_address_valid) {
-      // 立即读取数据并保存
-      mem.table_r.base_cnt = base_counter[idx.table_base_idx];
-      for (int i = 0; i < TN_MAX; i++) {
-        uint32_t mem_idx = idx.table_tage_idx[i];
-        mem.table_r.tag[i] = tag_table[i][mem_idx];
-        mem.table_r.cnt[i] = cnt_table[i][mem_idx];
-        mem.table_r.useful[i] = useful_table[i][mem_idx];
-      }
-      // 保存数据，标记本周期有新请求
-      sram_delayed_data = mem.table_r;
-      sram_new_req_this_cycle = true;
-      // 初始时数据无效，等待延迟完成
-#ifdef SRAM_DELAY_ENABLE
-      mem.table_read_data_valid = false;
-#else
-      mem.table_read_data_valid = true;
-#endif
-    } else {
-      mem.table_read_data_valid = false;
-      sram_new_req_this_cycle = false;
-    }
-    return mem;
   }
 
   // ------------------------------------------------------------------------
   // 组合逻辑函数 - 计算部分
   // ------------------------------------------------------------------------
-  CombResult step_comb_calc(const InputPayload &inp, const StateInput &state_in,
-                            const IndexResult &idx, const MemReadResult &mem) {
-    CombResult comb;
+  void tage_core_comb(const TageCoreCombIn &in, TageCoreCombOut &out) const {
+    const InputPayload &inp = in.inp;
+    const StateInput &state_in = in.state_in;
+    const IndexResult &idx = in.idx;
+    const MemReadResult &mem = in.mem;
+    CombResult &comb = out.result;
     memset(&comb, 0, sizeof(CombResult));
+    comb.do_pred_latch_next = state_in.do_pred_latch;
+    comb.do_upd_latch_next = state_in.do_upd_latch;
+    comb.upd_real_dir_latch_next = state_in.upd_real_dir_latch;
+    comb.upd_pc_latch_next = state_in.upd_pc_latch;
+    comb.upd_pred_in_latch_next = state_in.upd_pred_in_latch;
+    comb.upd_alt_pred_in_latch_next = state_in.upd_alt_pred_in_latch;
+    comb.upd_pcpn_in_latch_next = state_in.upd_pcpn_in_latch;
+    comb.upd_altpcpn_in_latch_next = state_in.upd_altpcpn_in_latch;
+    for (int i = 0; i < TN_MAX; ++i) {
+      comb.upd_tage_tag_flat_latch_next[i] = state_in.upd_tage_tag_flat_latch[i];
+      comb.upd_tage_idx_flat_latch_next[i] = state_in.upd_tage_idx_flat_latch[i];
+      comb.pred_calc_tage_idx_latch_next[i] = state_in.pred_calc_tage_idx_latch[i];
+      comb.pred_calc_tage_tag_latch_next[i] = state_in.pred_calc_tage_tag_latch[i];
+    }
+    for (int i = 0; i < 4; ++i) {
+      comb.LSFR_next[i] = state_in.LSFR[i];
+    }
+    comb.pred_calc_base_idx_latch_next = state_in.pred_calc_base_idx_latch;
+    comb.pred_pc_latch_next = state_in.pred_pc_latch;
+    comb.upd_calc_winfo_latch_next = state_in.upd_calc_winfo_latch;
 
     // 复制index结果到输出
     // comb.table_base_idx = idx.table_base_idx;
@@ -463,11 +678,22 @@ public:
 
     // 1.4 Stage 1 Calculation
     if (state_in.state == S_IDLE && inp.pred_req) {
-      comb.s1_calc = TAGE_pred_comb_1(inp.pc_pred_in, state_in.FH);
+      TagePredIndexCombOut pred_index_out{};
+      TagePredIndexCombIn pred_index_in{};
+      pred_index_in.pc = inp.pc_pred_in;
+      std::memcpy(pred_index_in.fh_in, state_in.FH, sizeof(pred_index_in.fh_in));
+      tage_pred_index_comb(pred_index_in, pred_index_out);
+      comb.s1_calc = pred_index_out.index_tag;
     }
 
     // 1.5 Stage 1 Calculation (计算更新写入值)
-    comb.lsfr_out = LSFR_update_comb_1(state_in.LSFR);
+    LsfrUpdateCombIn lsfr_in{};
+    for (int i = 0; i < 4; ++i) {
+      lsfr_in.current_lsfr[i] = state_in.LSFR[i];
+    }
+    LsfrUpdateCombOut lsfr_out{};
+    lsfr_update_comb(lsfr_in, lsfr_out);
+    comb.lsfr_out = lsfr_out.lsfr_out;
     memset(&comb.upd_calc_res, 0, sizeof(UpdateRequest));
 
     if (comb.next_state == S_STAGE2) { // upd data read ready
@@ -481,8 +707,10 @@ public:
 
       PredResult last_pred;
       bool upd_real_dir;
+      uint32_t upd_pc;
       if(state_in.state == S_IDLE){ // from input
         upd_real_dir = inp.real_dir;
+        upd_pc = inp.pc_update_in;
         last_pred.pred = inp.pred_in; 
         last_pred.alt_pred = inp.alt_pred_in;
         last_pred.pcpn = inp.pcpn_in;
@@ -493,6 +721,7 @@ public:
         }
       } else if(state_in.state == S_IDLE_WAIT_DATA){ // from latch
         upd_real_dir = state_in.upd_real_dir_latch;
+        upd_pc = state_in.upd_pc_latch;
         last_pred.pred = state_in.upd_pred_in_latch;
         last_pred.alt_pred = state_in.upd_alt_pred_in_latch;
         last_pred.pcpn = state_in.upd_pcpn_in_latch;
@@ -502,9 +731,15 @@ public:
           last_pred.index_info.tage_index[i] = state_in.upd_tage_idx_flat_latch[i];
         }
       }
-      comb.upd_calc_res =
-          TAGE_update_comb_1(upd_real_dir, last_pred, old_data,
-                             comb.lsfr_out.random_val, state_in.reset_cnt_reg);
+      const uint32_t upd_sc_idx = tage_sc_idx_from_pc(upd_pc);
+      const uint8_t upd_sc_ctr = sc_ctr_table[upd_sc_idx];
+      TageUpdateCombOut update_out{};
+      tage_update_comb(
+          TageUpdateCombIn{upd_real_dir, last_pred, old_data,
+                           comb.lsfr_out.random_val, upd_sc_ctr,
+                           state_in.reset_cnt_reg},
+          update_out);
+      comb.upd_calc_res = update_out.req;
     }
 
     // 1.6 Stage 2 Calculation (计算预测值)
@@ -524,66 +759,78 @@ public:
             state_in.pred_calc_tage_tag_latch[i]; // only tag is used
         s2_idx_tag.index_info.tage_index[i] = state_in.pred_calc_tage_idx_latch[i];
       }
-      comb.s2_comb_res = TAGE_pred_comb_2(s2_r_data, s2_idx_tag);
+      const uint32_t pred_sc_idx = tage_sc_idx_from_pc(state_in.pred_pc_latch);
+      const uint8_t pred_sc_ctr = sc_ctr_table[pred_sc_idx];
+      TagePredSelectCombOut pred_select_out{};
+      tage_pred_select_comb(TagePredSelectCombIn{s2_r_data, s2_idx_tag, pred_sc_ctr},
+                            pred_select_out);
+      comb.s2_comb_res = pred_select_out.pred_res;
     }
 
-    // 1.7 Next Global Regs Calculation
-    // GHR/FH更新已迁移到BPU_TOP统一管理，以下代码已注释
-    // TAGE不再负责GHR/FH的更新，只负责表项的更新
-#if 0
-    // GHR_update_comb_1(state_in.GHR, state_in.upd_real_dir_latch, comb.next_GHR);
-    // FH_update_comb_1(state_in.FH, comb.next_GHR, state_in.upd_real_dir_latch,
-    //                  comb.next_FH, fh_length, ghr_length);
-    // A. 准备工作：判断当前正在发生什么
-    bool is_predicting = (state_in.state != S_IDLE && comb.next_state == S_IDLE && state_in.do_pred_latch);
-    bool is_updating   = (state_in.state != S_IDLE && comb.next_state == S_IDLE && state_in.do_upd_latch);
-    
-    // 检测误预测 (仅在更新有效时更有意义)
-    bool misprediction = is_updating && (state_in.upd_pred_in_latch != state_in.upd_real_dir_latch);
-
-    // B. 计算 下一拍的 Architectural State (总是基于 real_dir 更新)
-    if (is_updating) {
-        GHR_update_comb_1(Arch_GHR, state_in.upd_real_dir_latch, comb.next_Arch_GHR);
-        FH_update_comb_1(Arch_FH, Arch_GHR, state_in.upd_real_dir_latch, 
-                         comb.next_Arch_FH, fh_length, ghr_length);
-    } else {
-        // 保持不变
-        memcpy(comb.next_Arch_GHR, Arch_GHR, sizeof(Arch_GHR));
-        memcpy(comb.next_Arch_FH, Arch_FH, sizeof(Arch_FH));
+    // 1.7 Next Latch and Commit Request Calculation
+    const bool enter_pipeline = (state_in.state == S_IDLE && comb.next_state != S_IDLE);
+    if (enter_pipeline) {
+      comb.do_pred_latch_next = inp.pred_req;
+      comb.do_upd_latch_next = inp.update_en;
+      comb.upd_real_dir_latch_next = inp.real_dir;
+      comb.upd_pc_latch_next = inp.pc_update_in;
+      comb.upd_pred_in_latch_next = inp.pred_in;
+      comb.upd_alt_pred_in_latch_next = inp.alt_pred_in;
+      comb.upd_pcpn_in_latch_next = inp.pcpn_in;
+      comb.upd_altpcpn_in_latch_next = inp.altpcpn_in;
+      for (int i = 0; i < TN_MAX; ++i) {
+        comb.upd_tage_idx_flat_latch_next[i] = inp.tage_idx_flat_in[i];
+        comb.upd_tage_tag_flat_latch_next[i] = inp.tage_tag_flat_in[i];
+      }
+      comb.pred_calc_base_idx_latch_next = comb.s1_calc.base_idx;
+      if (inp.pred_req) {
+        comb.pred_pc_latch_next = inp.pc_pred_in;
+      }
+      for (int i = 0; i < TN_MAX; ++i) {
+        comb.pred_calc_tage_idx_latch_next[i] = comb.s1_calc.index_info.tage_index[i];
+        comb.pred_calc_tage_tag_latch_next[i] = comb.s1_calc.index_info.tag[i];
+      }
     }
 
-    // C. 计算 Speculative State 的 "候选值" (基于预测结果)
-    bool spec_GHR_cand[GHR_LENGTH];
-    uint32_t spec_FH_cand[FH_N_MAX][TN_MAX];
-    
-    if (is_predicting) {
-        // 使用预测结果 (comb.s2_comb_res.pred) 进行推测更新
-        GHR_update_comb_1(state_in.GHR, comb.s2_comb_res.pred, spec_GHR_cand);
-        FH_update_comb_1(state_in.FH, state_in.GHR, comb.s2_comb_res.pred, 
-                         spec_FH_cand, fh_length, ghr_length);
+    if (comb.next_state == S_STAGE2) {
+      comb.upd_calc_winfo_latch_next = comb.upd_calc_res;
     }
 
-    // D. 决定最终的 Speculative GHR/FH (Recovery Mux)
-    // 优先级：Misprediction Recovery > Speculative Update > Hold
-    
-    if (misprediction) {
-        // CASE 1: 发生误预测，强制回滚到 (Arch_Old + real_dir)
-        // 注意：这里直接使用刚才计算好的 next_Arch 作为修正后的 Spec 状态
-        memcpy(comb.next_Spec_GHR, comb.next_Arch_GHR, sizeof(Arch_GHR));
-        memcpy(comb.next_Spec_FH, comb.next_Arch_FH, sizeof(Arch_FH));
-    } 
-    else if (is_predicting) {
-        // CASE 2: 正常预测，进行推测更新
-        memcpy(comb.next_Spec_GHR, spec_GHR_cand, sizeof(Spec_GHR));
-        memcpy(comb.next_Spec_FH, spec_FH_cand, sizeof(Spec_FH));
-    } 
-    else {
-        // CASE 3: 保持 Spec 状态不变 (可能是单纯的更新且预测正确，或者是空闲)
-        // 注意：如果 update 且预测正确，其实不需要动 Spec GHR，因为它已经在当初预测时更新过了
-        memcpy(comb.next_Spec_GHR, state_in.GHR, sizeof(Spec_GHR));
-        memcpy(comb.next_Spec_FH, state_in.FH, sizeof(Spec_FH));
+    const bool do_commit_update =
+        (state_in.state != S_IDLE && comb.next_state == S_IDLE &&
+         state_in.do_upd_latch);
+    if (do_commit_update) {
+      comb.reset_cnt_reg_we = true;
+      comb.reset_cnt_reg_next = state_in.reset_cnt_reg + 1;
+      comb.lsfr_we = true;
+      for (int i = 0; i < 4; ++i) {
+        comb.LSFR_next[i] = comb.lsfr_out.next_state[i];
+      }
+
+      comb.base_we_commit = state_in.upd_calc_winfo_latch.base_we;
+      comb.base_wr_idx = (state_in.upd_pc_latch >> 2) & TAGE_BASE_IDX_MASK;
+      comb.base_wdata_commit = state_in.upd_calc_winfo_latch.base_wdata;
+      comb.sc_we_commit = state_in.upd_calc_winfo_latch.sc_we;
+      comb.sc_wr_idx = tage_sc_idx_from_pc(state_in.upd_pc_latch);
+      comb.sc_wdata_commit = state_in.upd_calc_winfo_latch.sc_wdata;
+
+      for (int i = 0; i < TN_MAX; ++i) {
+        const uint32_t wr_idx = state_in.upd_tage_idx_flat_latch[i];
+        comb.cnt_we_commit[i] = state_in.upd_calc_winfo_latch.cnt_we[i];
+        comb.cnt_wr_idx[i] = wr_idx;
+        comb.cnt_wdata_commit[i] = state_in.upd_calc_winfo_latch.cnt_wdata[i];
+        comb.useful_we_commit[i] = state_in.upd_calc_winfo_latch.useful_we[i];
+        comb.useful_wr_idx[i] = wr_idx;
+        comb.useful_wdata_commit[i] = state_in.upd_calc_winfo_latch.useful_wdata[i];
+        comb.tag_we_commit[i] = state_in.upd_calc_winfo_latch.tag_we[i];
+        comb.tag_wr_idx[i] = wr_idx;
+        comb.tag_wdata_commit[i] = state_in.upd_calc_winfo_latch.tag_wdata[i];
+        comb.useful_reset_we_commit[i] = state_in.upd_calc_winfo_latch.reset_we;
+        comb.useful_reset_row_commit[i] = state_in.upd_calc_winfo_latch.reset_row_idx;
+        comb.useful_reset_msb_only_commit[i] =
+            state_in.upd_calc_winfo_latch.reset_msb_only;
+      }
     }
-#endif
 
     // 1.8 Output Logic
     // comb.out_regs.busy = (state_in.state != S_IDLE);
@@ -607,230 +854,239 @@ public:
       }
     }
 
-    return comb;
   }
 
   // ------------------------------------------------------------------------
-  // step_comb
+  // 三阶段接口
   // ------------------------------------------------------------------------
-  CombResult step_comb(const InputPayload &inp) {
-    // 构建StateInput
-    StateInput state_in;
-    state_in.state = state;
+  void tage_seq_read(const InputPayload &inp, ReadData &rd) const {
+    std::memset(&rd, 0, sizeof(ReadData));
 
-    // regs - 通过接口函数从BPU读取全局GHR/FH（做一次快照）
-#ifdef SPECULATIVE_ON
-    const bool *ghr_src = BPU_get_Spec_GHR();
-    const uint32_t (*fh_src)[TN_MAX] = BPU_get_Spec_FH();
-#else
-    const bool *ghr_src = BPU_get_Arch_GHR();
-    const uint32_t (*fh_src)[TN_MAX] = BPU_get_Arch_FH();
-#endif
+    rd.state_in.state = state;
 
     for (int k = 0; k < FH_N_MAX; ++k) {
       for (int i = 0; i < TN_MAX; ++i) {
-        state_in.FH[k][i] = fh_src[k][i];
+        rd.state_in.FH[k][i] = inp.fh_in[k][i];
       }
     }
     for (int i = 0; i < GHR_LENGTH; ++i) {
-      state_in.GHR[i] = ghr_src[i];
+      rd.state_in.GHR[i] = inp.ghr_in[i];
     }
 
     for (int i = 0; i < 4; ++i) {
-      state_in.LSFR[i] = LSFR[i];
+      rd.state_in.LSFR[i] = LSFR[i];
     }
-    state_in.reset_cnt_reg = reset_cnt_reg;
-    // input latches
-    state_in.do_pred_latch = do_pred_latch;
-    state_in.do_upd_latch = do_upd_latch;
-    state_in.upd_real_dir_latch = upd_real_dir_latch;
-    state_in.upd_pred_in_latch = upd_pred_in_latch;
-    state_in.upd_alt_pred_in_latch = upd_alt_pred_in_latch;
-    state_in.upd_pcpn_in_latch = upd_pcpn_in_latch;
-    state_in.upd_altpcpn_in_latch = upd_altpcpn_in_latch;
+    rd.state_in.reset_cnt_reg = reset_cnt_reg;
+    rd.state_in.do_pred_latch = do_pred_latch;
+    rd.state_in.do_upd_latch = do_upd_latch;
+    rd.state_in.upd_real_dir_latch = upd_real_dir_latch;
+    rd.state_in.upd_pc_latch = upd_pc_latch;
+    rd.state_in.upd_pred_in_latch = upd_pred_in_latch;
+    rd.state_in.upd_alt_pred_in_latch = upd_alt_pred_in_latch;
+    rd.state_in.upd_pcpn_in_latch = upd_pcpn_in_latch;
+    rd.state_in.upd_altpcpn_in_latch = upd_altpcpn_in_latch;
     for (int i = 0; i < TN_MAX; ++i) {
-      state_in.upd_tage_tag_flat_latch[i] = upd_tage_tag_flat_latch[i];
-      state_in.upd_tage_idx_flat_latch[i] = upd_tage_idx_flat_latch[i];
+      rd.state_in.upd_tage_tag_flat_latch[i] = upd_tage_tag_flat_latch[i];
+      rd.state_in.upd_tage_idx_flat_latch[i] = upd_tage_idx_flat_latch[i];
     }
-    // pipeline latches
-    state_in.pred_calc_base_idx_latch = pred_calc_base_idx_latch;
+    rd.state_in.pred_calc_base_idx_latch = pred_calc_base_idx_latch;
+    rd.state_in.pred_pc_latch = pred_pc_latch;
     for (int i = 0; i < TN_MAX; ++i) {
-      state_in.pred_calc_tage_idx_latch[i] = pred_calc_tage_idx_latch[i];
-      state_in.pred_calc_tage_tag_latch[i] = pred_calc_tage_tag_latch[i];
+      rd.state_in.pred_calc_tage_idx_latch[i] = pred_calc_tage_idx_latch[i];
+      rd.state_in.pred_calc_tage_tag_latch[i] = pred_calc_tage_tag_latch[i];
     }
+    rd.state_in.upd_calc_winfo_latch = upd_calc_winfo_latch;
 
-    IndexResult idx = step_comb_gen_index(inp, state_in);
-    MemReadResult mem = step_comb_mem_read(idx);
-    return step_comb_calc(inp, state_in, idx, mem);
+    rd.sram_delay_active = sram_delay_active;
+    rd.sram_delay_counter = sram_delay_counter;
+    rd.sram_delayed_data = sram_delayed_data;
+    rd.sram_prng_state = sram_prng_state;
+    tage_prepare_comb_read(inp, rd);
   }
 
-  // ------------------------------------------------------------------------
-  // 时序逻辑函数 (Sequential Logic)
-  // ------------------------------------------------------------------------
-  void step_seq(bool rst_n, const InputPayload &inp, const CombResult &comb) {
+  void tage_prepare_comb_read(const InputPayload &inp, ReadData &rd) const {
+    rd.new_read_valid = false;
+    rd.useful_reset_row_data_valid = false;
+    std::memset(rd.useful_reset_row_data, 0, sizeof(rd.useful_reset_row_data));
+
+    if (rd.state_in.upd_calc_winfo_latch.reset_we) {
+      uint32_t row = rd.state_in.upd_calc_winfo_latch.reset_row_idx;
+      for (int i = 0; i < TN_MAX; i++) {
+        rd.useful_reset_row_data[i] = useful_table[i][row];
+      }
+      rd.useful_reset_row_data_valid = true;
+    }
+
+    TageGenIndexCombOut gen_index_out{};
+    tage_gen_index_comb(TageGenIndexCombIn{inp, rd.state_in}, gen_index_out);
+    rd.idx = gen_index_out.idx;
+
+    if (rd.sram_delay_active) {
+      rd.mem.table_r = rd.sram_delayed_data;
+      rd.mem.table_read_data_valid = (rd.sram_delay_counter == 0);
+      rd.new_read_valid = false;
+      return;
+    }
+
+    if (!rd.idx.table_read_address_valid) {
+      rd.mem.table_read_data_valid = false;
+      rd.new_read_valid = false;
+      return;
+    }
+
+    rd.mem.table_r.base_cnt = base_counter[rd.idx.table_base_idx];
+    for (int i = 0; i < TN_MAX; i++) {
+      uint32_t mem_idx = rd.idx.table_tage_idx[i];
+      rd.mem.table_r.tag[i] = tag_table[i][mem_idx];
+      rd.mem.table_r.cnt[i] = cnt_table[i][mem_idx];
+      rd.mem.table_r.useful[i] = useful_table[i][mem_idx];
+    }
+    rd.new_read_valid = true;
+    rd.new_read_data = rd.mem.table_r;
 
 #ifdef SRAM_DELAY_ENABLE
-    if (sram_new_req_this_cycle && !sram_delay_active) {
-      sram_delay_active = true;
-      sram_delay_counter = delay_dist(rng); 
-    }  
-    if (sram_delay_active) {
-      if (sram_delay_counter > 0) {
-        sram_delay_counter--;
-      } 
+    rd.mem.table_read_data_valid = false;
+#else
+    rd.mem.table_read_data_valid = true;
+#endif
+  }
+
+  void tage_comb(const TageCombIn &in, TageCombOut &out_bundle) const {
+    const InputPayload &inp = in.inp;
+    const ReadData &rd = in.rd;
+    OutputPayload &out = out_bundle.out_regs;
+    CombResult &req = out_bundle.req;
+    TageCoreCombOut core_out{};
+    tage_core_comb(TageCoreCombIn{inp, rd.state_in, rd.idx, rd.mem}, core_out);
+    req = core_out.result;
+    req.sram_delay_active_next = rd.sram_delay_active;
+    req.sram_delay_counter_next = rd.sram_delay_counter;
+    req.sram_delayed_data_next = rd.sram_delayed_data;
+    req.sram_prng_state_next = rd.sram_prng_state;
+    for (int i = 0; i < TN_MAX; i++) {
+      if (req.useful_reset_we_commit[i] && rd.useful_reset_row_data_valid) {
+        uint8_t cur = rd.useful_reset_row_data[i];
+        req.useful_reset_wdata_commit[i] =
+            req.useful_reset_msb_only_commit[i] ? (cur & 0x1) : (cur & 0x2);
+      }
+    }
+
+#ifdef SRAM_DELAY_ENABLE
+    if (rd.sram_delay_active) {
+      if (rd.sram_delay_counter > 0) {
+        req.sram_delay_counter_next = rd.sram_delay_counter - 1;
+        req.sram_delay_active_next = true;
+      } else {
+        req.sram_delay_counter_next = 0;
+        req.sram_delay_active_next = false;
+      }
+    } else if (rd.new_read_valid) {
+      TageXorshift32CombOut xorshift_out{};
+      tage_xorshift32_comb(TageXorshift32CombIn{rd.sram_prng_state}, xorshift_out);
+      uint32_t prng_next = xorshift_out.next_state;
+      req.sram_prng_state_next = prng_next;
+      int delay_range = SRAM_DELAY_MAX - SRAM_DELAY_MIN + 1;
+      int delay_val = SRAM_DELAY_MIN;
+      if (delay_range > 0) {
+        delay_val = SRAM_DELAY_MIN + static_cast<int>(prng_next % delay_range);
+      }
+      req.sram_delay_counter_next = delay_val;
+      req.sram_delay_active_next = true;
+      req.sram_delayed_data_next = rd.new_read_data;
+    } else {
+      req.sram_delay_counter_next = 0;
+      req.sram_delay_active_next = false;
+    }
+#else
+    req.sram_delay_counter_next = 0;
+    req.sram_delay_active_next = false;
+    if (rd.new_read_valid) {
+      req.sram_delayed_data_next = rd.new_read_data;
     }
 #endif
-    // Latch Requests
-    if (state == S_IDLE && comb.next_state != S_IDLE) { // moving out from IDLE
-      do_pred_latch =inp.pred_req; // this will only be changed here, latched!
-      
-      do_upd_latch = inp.update_en;
-      upd_real_dir_latch = inp.real_dir;
-      upd_pc_latch = inp.pc_update_in;
-      upd_pred_in_latch = inp.pred_in;
-      upd_alt_pred_in_latch = inp.alt_pred_in;
-      upd_pcpn_in_latch = inp.pcpn_in;
-      upd_altpcpn_in_latch = inp.altpcpn_in;
-      for (int i = 0; i < TN_MAX; ++i) {
-        upd_tage_idx_flat_latch[i] = inp.tage_idx_flat_in[i];
-        upd_tage_tag_flat_latch[i] = inp.tage_tag_flat_in[i];
-      }
 
-      pred_calc_base_idx_latch = comb.s1_calc.base_idx; // we may latch 0 but this will not cause any problem
-      
-      for (int i = 0; i < TN_MAX; ++i) {
-        pred_calc_tage_idx_latch[i] = comb.s1_calc.index_info.tage_index[i];
-        pred_calc_tage_tag_latch[i] = comb.s1_calc.index_info.tag[i];
+    req.out_regs.busy = (req.next_state != S_IDLE);
+    out = req.out_regs;
+  }
+
+  void tage_seq_write(const InputPayload &inp, const CombResult &req, bool reset) {
+    if (reset) {
+      this->reset();
+      return;
+    }
+    (void)inp;
+    do_pred_latch = req.do_pred_latch_next;
+    do_upd_latch = req.do_upd_latch_next;
+    upd_real_dir_latch = req.upd_real_dir_latch_next;
+    upd_pc_latch = req.upd_pc_latch_next;
+    upd_pred_in_latch = req.upd_pred_in_latch_next;
+    upd_alt_pred_in_latch = req.upd_alt_pred_in_latch_next;
+    upd_pcpn_in_latch = req.upd_pcpn_in_latch_next;
+    upd_altpcpn_in_latch = req.upd_altpcpn_in_latch_next;
+    for (int i = 0; i < TN_MAX; ++i) {
+      upd_tage_idx_flat_latch[i] = req.upd_tage_idx_flat_latch_next[i];
+      upd_tage_tag_flat_latch[i] = req.upd_tage_tag_flat_latch_next[i];
+      pred_calc_tage_idx_latch[i] = req.pred_calc_tage_idx_latch_next[i];
+      pred_calc_tage_tag_latch[i] = req.pred_calc_tage_tag_latch_next[i];
+    }
+    pred_calc_base_idx_latch = req.pred_calc_base_idx_latch_next;
+    pred_pc_latch = req.pred_pc_latch_next;
+    upd_calc_winfo_latch = req.upd_calc_winfo_latch_next;
+
+    if (req.reset_cnt_reg_we) {
+      reset_cnt_reg = req.reset_cnt_reg_next;
+    }
+    if (req.lsfr_we) {
+      for (int i = 0; i < 4; ++i) {
+        LSFR[i] = req.LSFR_next[i];
+      }
+    }
+    if (req.base_we_commit) {
+      base_counter[req.base_wr_idx] = req.base_wdata_commit;
+    }
+    if (req.sc_we_commit) {
+      sc_ctr_table[req.sc_wr_idx] = req.sc_wdata_commit;
+    }
+    for (int i = 0; i < TN_MAX; ++i) {
+      if (req.cnt_we_commit[i]) {
+        cnt_table[i][req.cnt_wr_idx[i]] = req.cnt_wdata_commit[i];
+      }
+      if (req.useful_we_commit[i]) {
+        useful_table[i][req.useful_wr_idx[i]] = req.useful_wdata_commit[i];
+      }
+      if (req.tag_we_commit[i]) {
+        tag_table[i][req.tag_wr_idx[i]] = req.tag_wdata_commit[i];
+      }
+      if (req.useful_reset_we_commit[i]) {
+        uint32_t row = req.useful_reset_row_commit[i];
+        useful_table[i][row] = req.useful_reset_wdata_commit[i];
       }
     }
 
-    if (comb.next_state == S_STAGE2) { // 使用next作为判据保证data_read_ready
-      upd_calc_winfo_latch = comb.upd_calc_res;
-    }
+    sram_delay_active = req.sram_delay_active_next;
+    sram_delay_counter = req.sram_delay_counter_next;
+    sram_delayed_data = req.sram_delayed_data_next;
+    sram_prng_state = req.sram_prng_state_next;
+    sram_new_req_this_cycle = false;
 
-    // reset_cnt_reg++; // update every cycle
-
-    // // Global Registers Update & Memory Write
-    // if (state != S_IDLE && comb.next_state == S_IDLE && do_upd_latch) {
-    //   reset_cnt_reg++; // update every upd
-    //   for (int i = 0; i < GHR_LENGTH; ++i) {
-    //     GHR[i] = comb.next_GHR[i];
-    //   }
-    //   for (int k = 0; k < FH_N_MAX; ++k) {
-    //     for (int i = 0; i < TN_MAX; ++i) {
-    //       FH[k][i] = comb.next_FH[k][i];
-    //     }
-    //   }
-    //   for (int i = 0; i < 4; ++i) {
-    //     LSFR[i] = comb.lsfr_out.next_state[i];
-    //   }
-    //   if (upd_calc_winfo_latch.base_we) {
-    //     uint32_t wr_base = (upd_pc_latch >> 2) & (TAGE_BASE_IDX_MASK);
-    //     base_counter[wr_base] = upd_calc_winfo_latch.base_wdata;
-    //   }
-
-    //   for (int i = 0; i < TN_MAX; i++) {
-    //     uint32_t wr_idx = upd_tage_idx_flat_latch[i];
-    //     if (upd_calc_winfo_latch.cnt_we[i]) {
-    //       cnt_table[i][wr_idx] = upd_calc_winfo_latch.cnt_wdata[i];
-    //     }
-    //     if (upd_calc_winfo_latch.useful_we[i]) {
-    //       useful_table[i][wr_idx] = upd_calc_winfo_latch.useful_wdata[i];
-    //     }
-    //     if (upd_calc_winfo_latch.tag_we[i]) {
-    //       tag_table[i][wr_idx] = upd_calc_winfo_latch.tag_wdata[i];
-    //     }
-
-    //     if (upd_calc_winfo_latch.reset_we) {
-    //       uint32_t row = upd_calc_winfo_latch.reset_row_idx;
-    //       if (upd_calc_winfo_latch.reset_msb_only) {
-    //         useful_table[i][row] &= 0x1;
-    //       } else {
-    //         useful_table[i][row] &= 0x2;
-    //       }
-    //     }
-    //   }
-    // }
-
-    // Global Registers Update & Memory Write
-    // GHR/FH更新已迁移到BPU_TOP，TAGE只负责表项和LSFR的更新
-    if (state != S_IDLE && comb.next_state == S_IDLE) { // Condition loose to allow pred update
-      
-      // GHR/FH更新已迁移到BPU_TOP，以下代码已注释
-#if 0
-      // 1. Update Speculative State (FH/GHR)
-      // 这里的逻辑现在由 comb 计算好的 next_GHR/next_FH 决定 (包含恢复逻辑)
-      // 只要是 Predict 或 Update 完成，都允许写入（因为可能涉及恢复或推测）
-      if (do_pred_latch || do_upd_latch) {
-          for (int i = 0; i < GHR_LENGTH; ++i) {
-            Spec_GHR[i] = comb.next_Spec_GHR[i];
-          }
-          for (int k = 0; k < FH_N_MAX; ++k) {
-            for (int i = 0; i < TN_MAX; ++i) {
-              Spec_FH[k][i] = comb.next_Spec_FH[k][i];
-            }
-          }
-      }
-
-      // 2. Update Architectural State (Arch_GHR/Arch_FH)
-      // 仅在 Update 发生时写入
-      if (do_upd_latch) {
-        reset_cnt_reg++; // update every upd
-        for (int i = 0; i < GHR_LENGTH; ++i) {
-          Arch_GHR[i] = comb.next_Arch_GHR[i];
-        }
-        for (int k = 0; k < FH_N_MAX; ++k) {
-          for (int i = 0; i < TN_MAX; ++i) {
-            Arch_FH[k][i] = comb.next_Arch_FH[k][i];
-          }
-        }
-      }
-#endif
-      // 只保留LSFR和表项的更新
-      if (do_upd_latch) {
-        reset_cnt_reg++; // update every upd
-        for (int i = 0; i < 4; ++i) {
-          LSFR[i] = comb.lsfr_out.next_state[i];
-        }
-        if (upd_calc_winfo_latch.base_we) {
-          uint32_t wr_base = (upd_pc_latch >> 2) & (TAGE_BASE_IDX_MASK);
-          base_counter[wr_base] = upd_calc_winfo_latch.base_wdata;
-        }
-
-        for (int i = 0; i < TN_MAX; i++) {
-          uint32_t wr_idx = upd_tage_idx_flat_latch[i];
-          if (upd_calc_winfo_latch.cnt_we[i]) {
-            cnt_table[i][wr_idx] = upd_calc_winfo_latch.cnt_wdata[i];
-          }
-          if (upd_calc_winfo_latch.useful_we[i]) {
-            useful_table[i][wr_idx] = upd_calc_winfo_latch.useful_wdata[i];
-          }
-          if (upd_calc_winfo_latch.tag_we[i]) {
-            tag_table[i][wr_idx] = upd_calc_winfo_latch.tag_wdata[i];
-          }
-
-          if (upd_calc_winfo_latch.reset_we) {
-            uint32_t row = upd_calc_winfo_latch.reset_row_idx;
-            if (upd_calc_winfo_latch.reset_msb_only) {
-              useful_table[i][row] &= 0x1;
-            } else {
-              useful_table[i][row] &= 0x2;
-            }
-          }
-        }
-      }
-    }
-
-    // State Transition
-    state = comb.next_state;
-
-    return;
+    state = req.next_state;
   }
 
   // ------------------------------------------------------------------------
-  // 周期步进函数 (Cycle Step) - 保留作为兼容接口
-  // 完全对应 Verilog 的 always @(posedge clk) 和组合逻辑
+  // 兼容接口
   // ------------------------------------------------------------------------
+  CombResult step_pipeline(const InputPayload &inp) {
+    ReadData rd;
+    TageCombOut comb_out{};
+    tage_seq_read(inp, rd);
+    tage_comb(TageCombIn{inp, rd}, comb_out);
+    return comb_out.req;
+  }
+
+  void step_seq(bool rst_n, const InputPayload &inp, const CombResult &comb) {
+    tage_seq_write(inp, comb, rst_n);
+  }
+
   OutputPayload step(bool rst_n, const InputPayload &inp) {
     if (rst_n) {
       reset();
@@ -839,10 +1095,12 @@ public:
       std::memset(&out_reg_reset, 0, sizeof(OutputPayload));
       return out_reg_reset;
     }
-    CombResult comb = step_comb(inp);
-    step_seq(rst_n, inp, comb);
-    comb.out_regs.busy = (state != S_IDLE); // 补丁
-    return comb.out_regs;
+    ReadData rd;
+    TageCombOut comb_out{};
+    tage_seq_read(inp, rd);
+    tage_comb(TageCombIn{inp, rd}, comb_out);
+    tage_seq_write(inp, comb_out.req, false);
+    return comb_out.out_regs;
   }
 
 private:
@@ -850,28 +1108,38 @@ private:
   // 组合逻辑函数实现 (Internal Implementation)
   // ============================================================
 
-  // [Comb 1]
-  TageIndexTag TAGE_pred_comb_1(uint32_t PC,
-                                const uint32_t FH_in[FH_N_MAX][TN_MAX]) {
-    TageIndexTag out;
-    memset(&out, 0, sizeof(TageIndexTag));
+  static void tage_xorshift32_comb(const TageXorshift32CombIn &in,
+                                   TageXorshift32CombOut &out) {
+    out = TageXorshift32CombOut{};
+    uint32_t value = (in.state == 0) ? 0x13579bdfu : in.state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    out.next_state = value;
+  }
 
-    out.base_idx = (PC >> 2) & (TAGE_BASE_IDX_MASK);
+  // [Comb 1]
+  static void tage_pred_index_comb(const TagePredIndexCombIn &in,
+                                   TagePredIndexCombOut &out) {
+    memset(&out, 0, sizeof(TagePredIndexCombOut));
+
+    out.index_tag.base_idx = (in.pc >> 2) & (TAGE_BASE_IDX_MASK);
     for (int i = 0; i < TN_MAX; i++) {
-      out.index_info.tag[i] =
-          (FH_in[1][i] ^ FH_in[2][i] ^ (PC >> 2)) & (TAGE_TAG_MASK);
-      out.index_info.tage_index[i] =
-          (FH_in[0][i] ^ (PC >> 2)) & (TAGE_IDX_MASK);
+      out.index_tag.index_info.tag[i] =
+          (in.fh_in[1][i] ^ in.fh_in[2][i] ^ (in.pc >> 2)) & (TAGE_TAG_MASK);
+      out.index_tag.index_info.tage_index[i] =
+          (in.fh_in[0][i] ^ (in.pc >> 2)) & (TAGE_IDX_MASK);
     }
-    return out;
   }
 
   // [Comb 2]
-  PredResult TAGE_pred_comb_2(const TageTableReadData &read_data,
-                              const TageIndexTag &idx_tag) {
-    PredResult res;
-    memset(&res, 0, sizeof(PredResult));
+  static void tage_pred_select_comb(const TagePredSelectCombIn &in,
+                                    TagePredSelectCombOut &out) {
+    memset(&out, 0, sizeof(TagePredSelectCombOut));
 
+    PredResult &res = out.pred_res;
+    const TageTableReadData &read_data = in.read_data;
+    const TageIndexTag &idx_tag = in.idx_tag;
     res.index_info = idx_tag.index_info;
 
     bool base_pred = (read_data.base_cnt >= 2);
@@ -902,48 +1170,91 @@ private:
     if (pcpn >= TN_MAX) {
       res.pred = base_pred;
     } else {
-      res.pred = (read_data.cnt[pcpn] >= 4);
+      const uint8_t provider_cnt = read_data.cnt[pcpn];
+      const bool provider_pred = (provider_cnt >= 4);
+      res.pred = provider_pred;
+      const bool provider_weak_sc =
+          (provider_cnt >= TAGE_SC_PROVIDER_WEAK_LOW) &&
+          (provider_cnt <= TAGE_SC_PROVIDER_WEAK_HIGH);
+#if ENABLE_TAGE_USE_ALT_ON_NA
+      const bool provider_weak = (provider_cnt >= TAGE_PROVIDER_WEAK_LOW) &&
+                                 (provider_cnt <= TAGE_PROVIDER_WEAK_HIGH);
+      const bool useful_low =
+          (read_data.useful[pcpn] <= TAGE_USE_ALT_USEFUL_THRESHOLD);
+      if (provider_weak && useful_low) {
+        res.pred = res.alt_pred;
+      }
+#endif
+#if ENABLE_TAGE_SC_LITE
+      bool sc_can_override = (provider_pred != res.alt_pred);
+#if TAGE_SC_USE_WEAK_ONLY
+      sc_can_override = sc_can_override && provider_weak_sc;
+#endif
+      if (sc_can_override) {
+#if TAGE_SC_STRONG_ONLY_OVERRIDE
+        if (in.sc_ctr == 0) {
+          res.pred = res.alt_pred;
+        } else if (in.sc_ctr == 3) {
+          res.pred = provider_pred;
+        }
+#else
+        res.pred = (in.sc_ctr >= 2) ? provider_pred : res.alt_pred;
+#endif
+      }
+#endif
     }
-    return res;
   }
 
   // [Comb Update]
-  UpdateRequest TAGE_update_comb_1(bool real_dir, const PredResult &pred_res,
-                                   const TageTableReadData &read_vals,
-                                   uint8_t lsfr_rand,
-                                   uint32_t current_reset_cnt) {
-    UpdateRequest req;
-    memset(&req, 0, sizeof(UpdateRequest));
+  static void tage_update_comb(const TageUpdateCombIn &in,
+                               TageUpdateCombOut &out) {
+    std::memset(&out, 0, sizeof(TageUpdateCombOut));
+    UpdateRequest &req = out.req;
+    const bool real_dir = in.real_dir;
+    const PredResult &pred_res = in.pred_res;
+    const TageTableReadData &read_vals = in.read_vals;
+    const uint8_t lsfr_rand = in.lsfr_rand;
+    const uint8_t sc_ctr = in.sc_ctr;
+    const uint32_t current_reset_cnt = in.current_reset_cnt;
 
     bool pred_dir = pred_res.pred;
     int pcpn = pred_res.pcpn;
 
     // 1. Update Provider / Base
     if (pcpn < TN_MAX) {
-      if (pred_dir != pred_res.alt_pred) {
-        uint8_t new_u = read_vals.useful[pcpn];
+      const bool provider_pred_raw = (read_vals.cnt[pcpn] >= 4);
+      const bool alt_used = (pred_dir == pred_res.alt_pred);
+      uint8_t new_u = read_vals.useful[pcpn];
+      bool should_write_useful = false;
+      if (!alt_used) {
         if (pred_dir == real_dir) {
-          new_u = sat_inc_2bit(new_u);
+          new_u = sat_inc_2bit_value(new_u);
         } else {
-          new_u = sat_dec_2bit(new_u);
+          new_u = sat_dec_2bit_value(new_u);
         }
+        should_write_useful = true;
+      } else if (provider_pred_raw != real_dir && pred_res.alt_pred == real_dir) {
+        new_u = sat_dec_2bit_value(new_u);
+        should_write_useful = true;
+      }
+      if (should_write_useful) {
         req.useful_we[pcpn] = true;
         req.useful_wdata[pcpn] = new_u;
       }
       uint8_t new_cnt = read_vals.cnt[pcpn];
       if (real_dir == true) {
-        new_cnt = sat_inc_3bit(new_cnt);
+        new_cnt = sat_inc_3bit_value(new_cnt);
       } else {
-        new_cnt = sat_dec_3bit(new_cnt);
+        new_cnt = sat_dec_3bit_value(new_cnt);
       }
       req.cnt_we[pcpn] = true;
       req.cnt_wdata[pcpn] = new_cnt;
     } else {
       int new_base = read_vals.base_cnt;
       if (real_dir == true) {
-        new_base = sat_inc_2bit(new_base);
+        new_base = sat_inc_2bit_value(new_base);
       } else {
-        new_base = sat_dec_2bit(new_base);
+        new_base = sat_dec_2bit_value(new_base);
       }
       req.base_we = true;
       req.base_wdata = new_base;
@@ -975,7 +1286,7 @@ private:
         if (!new_entry_found_j) {
           for (int i = pcpn + 1; i < TN_MAX; i++) {
             req.useful_we[i] = true;
-            req.useful_wdata[i] = sat_dec_2bit(read_vals.useful[i]);
+            req.useful_wdata[i] = sat_dec_2bit_value(read_vals.useful[i]);
           }
         } else {
           int target_i = -1;
@@ -995,6 +1306,30 @@ private:
       }
     }
 
+#if ENABLE_TAGE_SC_LITE
+    if (pcpn < TN_MAX) {
+      const uint8_t provider_cnt = read_vals.cnt[pcpn];
+      const bool provider_pred_raw = (provider_cnt >= 4);
+      const bool alt_pred_raw = pred_res.alt_pred;
+      bool sc_train_en = (provider_pred_raw != alt_pred_raw);
+#if TAGE_SC_USE_WEAK_ONLY
+      const bool provider_weak =
+          (provider_cnt >= TAGE_SC_PROVIDER_WEAK_LOW) &&
+          (provider_cnt <= TAGE_SC_PROVIDER_WEAK_HIGH);
+      sc_train_en = sc_train_en && provider_weak;
+#endif
+      if (sc_train_en) {
+        const bool provider_correct = (provider_pred_raw == real_dir);
+        const bool alt_correct = (alt_pred_raw == real_dir);
+        if (provider_correct ^ alt_correct) {
+          req.sc_we = true;
+          req.sc_wdata = provider_correct ? sat_inc_2bit_value(sc_ctr)
+                                          : sat_dec_2bit_value(sc_ctr);
+        }
+      }
+    }
+#endif
+
     // 3. Reset Logic
     uint32_t u_cnt = current_reset_cnt &
                      0x7ff; // we leave these numbers here intentionally...
@@ -1006,37 +1341,24 @@ private:
       req.reset_row_idx = row_cnt;
       req.reset_msb_only = u_msb_reset;
     }
-    return req;
   }
 
   // [comb] LSFR Update
-  LSFR_Output LSFR_update_comb_1(const bool current_LSFR[4]) {
-    LSFR_Output out;
-    bool bit0 = current_LSFR[0];
-    bool bit3 = current_LSFR[3];
+  static void lsfr_update_comb(const LsfrUpdateCombIn &in,
+                               LsfrUpdateCombOut &out) {
+    out = LsfrUpdateCombOut{};
+    bool bit0 = in.current_lsfr[0];
+    bool bit3 = in.current_lsfr[3];
     bool feedback = bit0 ^ bit3;
-    out.next_state[0] = feedback;
+    out.lsfr_out.next_state[0] = feedback;
     for (int i = 1; i < 4; i++) {
-      out.next_state[i] = current_LSFR[i - 1];
+      out.lsfr_out.next_state[i] = in.current_lsfr[i - 1];
     }
-    out.random_val = (out.next_state[0] << 1) | out.next_state[1];
-    return out;
+    out.lsfr_out.random_val =
+        (static_cast<uint8_t>(out.lsfr_out.next_state[0]) << 1) |
+        static_cast<uint8_t>(out.lsfr_out.next_state[1]);
   }
 
-  // [comb] GHR Update - 已提取为公共静态函数TAGE_GHR_update_comb_1，保留此函数作为兼容接口（内部调用公共函数）
-  void GHR_update_comb_1(const bool current_GHR[GHR_LENGTH], bool real_dir,
-                         bool next_GHR[GHR_LENGTH]) {
-    TAGE_GHR_update_comb_1(current_GHR, real_dir, next_GHR);
-  }
-
-  // [comb] FH Update - 已提取为公共静态函数TAGE_FH_update_comb_1，保留此函数作为兼容接口（内部调用公共函数）
-  void FH_update_comb_1(const uint32_t current_FH[FH_N_MAX][TN_MAX],
-                        const bool current_GHR[GHR_LENGTH], bool new_history,
-                        uint32_t next_FH[FH_N_MAX][TN_MAX],
-                        const uint32_t fh_len[FH_N_MAX][TN_MAX],
-                        const uint32_t ghr_len[TN_MAX]) {
-    TAGE_FH_update_comb_1(current_FH, current_GHR, new_history, next_FH, fh_len, ghr_len);
-  }
 };
 
 #endif // TAGE_TOP_H

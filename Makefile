@@ -8,7 +8,7 @@ IMG     := ./baremetal/memory
 
 # Compiler & Flags
 CXX      := g++
-CXXFLAGS := -O3 -march=native -funroll-loops -mtune=native -lz 
+CXXFLAGS := -O3 -march=native -funroll-loops -mtune=native
 CXXFLAGS += -MMD -MP 
 CXXFLAGS += -Wall -Wextra -Wno-unused-parameter
 CXXFLAGS += --std=c++2a
@@ -24,7 +24,9 @@ else
     CXXFLAGS += -DNDEBUG
 endif
 
-# Include Paths
+# Front-end source root
+FRONT_DIR := ./front-end
+
 INCLUDES := -I./include/ \
             -I./back-end/include/ \
             -I./back-end/Exu/include/ \
@@ -32,7 +34,8 @@ INCLUDES := -I./include/ \
             -I./back-end/tools/include/ \
             -I./MemSubSystem/include/ \
             -I./diff/include/ \
-            -I./front-end/
+            -I./legacy/mmu/include/ \
+            -I$(FRONT_DIR)/
 
 # Source Files
 # (Using find to locate all cpp files)
@@ -40,7 +43,7 @@ CXXSRC := $(shell find ./back-end -name "*.cpp") \
           ./MemSubSystem/MemSubsystem.cpp \
           ./MemSubSystem/SimpleCache.cpp \
           ./MemSubSystem/PtwWalker.cpp \
-          $(shell find ./front-end -name "*.cpp") \
+          $(shell find $(FRONT_DIR) -name "*.cpp") \
           $(shell find ./diff -name "*.cpp") \
           ./main.cpp \
           ./rv_simu_mmu_v2.cpp
@@ -96,7 +99,7 @@ help:
 	@echo "Usage:"
 	@echo "  make          - Build the simulator"
 	@echo "  make run      - Build and run the simulator"
-	@echo "  make debug    - Build with debug symbols"
+	@echo "  make DEBUG=1  - Build with debug symbols"
 	@echo "  make clean    - Clean build files"
 	@echo "  make gdb_linux - Debug linux"
 

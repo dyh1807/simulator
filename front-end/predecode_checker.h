@@ -10,7 +10,7 @@ struct predecode_checker_in {
   bool predict_dir[FETCH_WIDTH];
   uint32_t predict_next_fetch_address;
   // from instFIFO
-  uint8_t predecode_type[FETCH_WIDTH];
+  predecode_type_t predecode_type[FETCH_WIDTH];
   uint32_t predecode_target_address[FETCH_WIDTH];
   uint32_t seq_next_pc;
 };
@@ -21,6 +21,11 @@ struct predecode_checker_out {
     bool predecode_flush_enable;
 };
 
+void predecode_checker_seq_read(struct predecode_checker_in *in,
+                                struct predecode_checker_out *out);
+void predecode_checker_comb_calc(struct predecode_checker_in *in,
+                                 struct predecode_checker_out *out);
+void predecode_checker_seq_write();
 void predecode_checker_top(struct predecode_checker_in *in, struct predecode_checker_out *out);
 
 #endif

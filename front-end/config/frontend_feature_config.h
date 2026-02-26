@@ -1,0 +1,251 @@
+#ifndef FRONTEND_FEATURE_CONFIG_H
+#define FRONTEND_FEATURE_CONFIG_H
+
+// SRAM delay configs
+// #define SRAM_DELAY_ENABLE  // if not defined, no SRAM delay, back to Register
+#ifndef SRAM_DELAY_MIN
+#define SRAM_DELAY_MIN 0 // n+1
+#endif
+#ifndef SRAM_DELAY_MAX
+#define SRAM_DELAY_MAX 0 // n+1
+#endif
+
+// BPU top-level switches
+#define SPECULATIVE_ON
+#ifndef COMMIT_WIDTH
+#define COMMIT_WIDTH 4
+#endif
+#ifndef FETCH_WIDTH
+#define FETCH_WIDTH 4
+#endif
+#ifndef BPU_BANK_NUM
+#define BPU_BANK_NUM FETCH_WIDTH
+#endif
+
+// RAS feature switch:
+// - keep this macro defined   => enable RAS prediction for BR_RET
+// - comment out this macro    => disable RAS and fallback to BTB target
+#define ENABLE_BPU_RAS
+#ifndef RAS_DEPTH
+#define RAS_DEPTH 64
+#endif
+
+#ifndef BPU_TYPE_ENTRY_NUM
+#define BPU_TYPE_ENTRY_NUM 4096
+#endif
+#ifndef Q_DEPTH
+#define Q_DEPTH 5000 // UQ depth
+#endif
+
+// TAGE configs
+#ifndef BASE_ENTRY_NUM
+#define BASE_ENTRY_NUM 2048
+#endif
+#ifndef GHR_LENGTH
+#define GHR_LENGTH 256
+#endif
+#ifndef TN_MAX
+#define TN_MAX 4
+#endif
+#ifndef TN_ENTRY_NUM
+#define TN_ENTRY_NUM 4096
+#endif
+#ifndef FH_N_MAX
+#define FH_N_MAX 3
+#endif
+#ifndef TAGE_BASE_IDX_WIDTH
+#define TAGE_BASE_IDX_WIDTH 11 // log2(2048)
+#endif
+#ifndef TAGE_TAG_WIDTH
+#define TAGE_TAG_WIDTH 8       // 8-bit tag
+#endif
+#ifndef TAGE_IDX_WIDTH
+#define TAGE_IDX_WIDTH 12      // log2(4096)
+#endif
+#ifndef ENABLE_TAGE_USE_ALT_ON_NA
+#define ENABLE_TAGE_USE_ALT_ON_NA 1
+#endif
+#ifndef TAGE_USE_ALT_USEFUL_THRESHOLD
+#define TAGE_USE_ALT_USEFUL_THRESHOLD 0
+#endif
+#ifndef TAGE_PROVIDER_WEAK_LOW
+#define TAGE_PROVIDER_WEAK_LOW 3
+#endif
+#ifndef TAGE_PROVIDER_WEAK_HIGH
+#define TAGE_PROVIDER_WEAK_HIGH 3
+#endif
+#ifndef ENABLE_TAGE_SC_LITE
+#define ENABLE_TAGE_SC_LITE 1
+#endif
+#ifndef TAGE_SC_ENTRY_NUM
+#define TAGE_SC_ENTRY_NUM 1024
+#endif
+#ifndef TAGE_SC_USE_WEAK_ONLY
+#define TAGE_SC_USE_WEAK_ONLY 1
+#endif
+#ifndef TAGE_SC_STRONG_ONLY_OVERRIDE
+#define TAGE_SC_STRONG_ONLY_OVERRIDE 1
+#endif
+#ifndef TAGE_SC_PROVIDER_WEAK_LOW
+#define TAGE_SC_PROVIDER_WEAK_LOW TAGE_PROVIDER_WEAK_LOW
+#endif
+#ifndef TAGE_SC_PROVIDER_WEAK_HIGH
+#define TAGE_SC_PROVIDER_WEAK_HIGH 4
+#endif
+
+// BTB configs
+#ifndef BTB_ENTRY_NUM
+#define BTB_ENTRY_NUM 512
+#endif
+#ifndef ENABLE_BTB_ALIAS_HASH
+#define ENABLE_BTB_ALIAS_HASH 1
+#endif
+#ifndef BTB_TAG_LEN
+#define BTB_TAG_LEN 8
+#endif
+#ifndef BTB_WAY_NUM
+#define BTB_WAY_NUM 4
+#endif
+#ifndef BTB_TYPE_ENTRY_NUM
+#define BTB_TYPE_ENTRY_NUM 4096
+#endif
+#ifndef BHT_ENTRY_NUM
+#define BHT_ENTRY_NUM 2048
+#endif
+#ifndef TC_ENTRY_NUM
+#define TC_ENTRY_NUM 2048
+#endif
+#ifndef TC_WAY_NUM
+#define TC_WAY_NUM 2
+#endif
+#ifndef TC_TAG_LEN
+#define TC_TAG_LEN 10
+#endif
+#ifndef ENABLE_INDIRECT_BTB_FALLBACK
+#define ENABLE_INDIRECT_BTB_FALLBACK 1
+#endif
+#ifndef ENABLE_INDIRECT_BTB_TRAIN
+#define ENABLE_INDIRECT_BTB_TRAIN 1
+#endif
+#ifndef INDIRECT_BTB_INIT_USEFUL
+#define INDIRECT_BTB_INIT_USEFUL 0
+#endif
+#ifndef INDIRECT_TC_INIT_USEFUL
+#define INDIRECT_TC_INIT_USEFUL 1
+#endif
+#ifndef ENABLE_TC_TARGET_SIGNATURE
+#define ENABLE_TC_TARGET_SIGNATURE 1
+#endif
+
+// 2-Ahead Predictor configs
+#ifndef TWO_AHEAD_TABLE_SIZE
+#define TWO_AHEAD_TABLE_SIZE 4096
+#endif
+#ifndef NLP_TABLE_SIZE
+#define NLP_TABLE_SIZE TWO_AHEAD_TABLE_SIZE
+#endif
+#ifndef NLP_CONF_BITS
+#define NLP_CONF_BITS 2
+#endif
+#ifndef NLP_CONF_THRESHOLD
+#define NLP_CONF_THRESHOLD 2
+#endif
+#ifndef NLP_CONF_INIT
+#define NLP_CONF_INIT 1
+#endif
+
+// 2-Ahead slot1 predictor
+#ifndef ENABLE_2AHEAD_SLOT1_PRED
+#define ENABLE_2AHEAD_SLOT1_PRED 1
+#endif
+#ifndef AHEAD_SLOT1_TABLE_SIZE
+#define AHEAD_SLOT1_TABLE_SIZE TWO_AHEAD_TABLE_SIZE
+#endif
+#ifndef AHEAD_SLOT1_CONF_BITS
+#define AHEAD_SLOT1_CONF_BITS 2
+#endif
+#ifndef AHEAD_SLOT1_CONF_THRESHOLD
+#define AHEAD_SLOT1_CONF_THRESHOLD 2
+#endif
+#ifndef ENABLE_2AHEAD_SLOT1_ADAPTIVE_GATING
+#define ENABLE_2AHEAD_SLOT1_ADAPTIVE_GATING 1
+#endif
+#ifndef AHEAD_GATE_WINDOW
+#define AHEAD_GATE_WINDOW 512
+#endif
+#ifndef AHEAD_GATE_DISABLE_THRESHOLD
+#define AHEAD_GATE_DISABLE_THRESHOLD 35
+#endif
+#ifndef AHEAD_GATE_ENABLE_THRESHOLD
+#define AHEAD_GATE_ENABLE_THRESHOLD 60
+#endif
+
+// Front-end feature switches
+#ifndef FRONTEND_DISABLE_2AHEAD
+#ifndef ENABLE_2AHEAD
+#define ENABLE_2AHEAD
+#endif
+#endif
+
+/* Front-end icache mode switch:
+ * 0 = use true icache
+ * 1 = use ideal icache
+ */
+#ifndef FRONTEND_ICACHE_MODE
+#define FRONTEND_ICACHE_MODE 0
+#endif
+
+/* Front-end dual request switch for ideal icache (1: on, 0: off) */
+#ifndef ENABLE_FRONTEND_IDEAL_ICACHE_DUAL_REQ
+#define ENABLE_FRONTEND_IDEAL_ICACHE_DUAL_REQ 0
+#endif
+
+/* Derive legacy USE_TRUE_ICACHE / USE_IDEAL_ICACHE macros from mode switch */
+#if FRONTEND_ICACHE_MODE == 1
+#ifdef USE_TRUE_ICACHE
+#undef USE_TRUE_ICACHE
+#endif
+#ifndef USE_IDEAL_ICACHE
+#define USE_IDEAL_ICACHE
+#endif
+#elif FRONTEND_ICACHE_MODE == 0
+#ifdef USE_IDEAL_ICACHE
+#undef USE_IDEAL_ICACHE
+#endif
+#ifndef USE_TRUE_ICACHE
+#define USE_TRUE_ICACHE
+#endif
+#else
+#error "FRONTEND_ICACHE_MODE must be 0 (true) or 1 (ideal)"
+#endif
+
+/* Dual request only active under ideal icache mode */
+#if (FRONTEND_ICACHE_MODE == 1) && ENABLE_FRONTEND_IDEAL_ICACHE_DUAL_REQ
+#define FRONTEND_IDEAL_ICACHE_DUAL_REQ_ACTIVE 1
+#else
+#define FRONTEND_IDEAL_ICACHE_DUAL_REQ_ACTIVE 0
+#endif
+
+#ifndef ICACHE_LINE_SIZE
+#define ICACHE_LINE_SIZE 32 // Size of a cache line in bytes
+#endif
+
+#ifndef ICACHE_MISS_LATENCY
+#define ICACHE_MISS_LATENCY 100 // Latency of an icache miss in cycles
+#endif
+
+// FIFO sizes
+#ifndef INSTRUCTION_FIFO_SIZE
+#define INSTRUCTION_FIFO_SIZE 32
+#endif
+#ifndef PTAB_SIZE
+#define PTAB_SIZE 32
+#endif
+#ifndef FETCH_ADDR_FIFO_SIZE
+#define FETCH_ADDR_FIFO_SIZE 32
+#endif
+#ifndef FRONT2BACK_FIFO_SIZE
+#define FRONT2BACK_FIFO_SIZE 64
+#endif
+
+#endif
