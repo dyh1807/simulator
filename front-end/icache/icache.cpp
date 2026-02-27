@@ -1,6 +1,5 @@
 #include "../front_IO.h"
 #include "PtwMemPort.h"
-#include "include/AXI_Interconnect_IO_Compat.h"
 #include "include/ICacheTop.h"
 #include "include/icache_module.h"
 #include <cassert>

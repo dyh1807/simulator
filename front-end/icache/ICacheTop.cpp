@@ -1,7 +1,7 @@
 #include "include/ICacheTop.h"
 #include "../front_module.h"
 #include "../frontend.h"
-#include "include/AXI_Interconnect_IO_Compat.h"
+#include "AXI_Interconnect_IO.h"
 #include "PtwMemPort.h"
 #include "PtwWalkPort.h"
 #include "RISCV.h"
@@ -39,8 +39,13 @@ private:
 constexpr uint32_t kAxiChunkBytes =
     axi_interconnect::CACHELINE_WORDS * sizeof(uint32_t);
 constexpr uint32_t kIcacheLineWords = ICACHE_LINE_SIZE / 4;
-static_assert(kIcacheLineWords == axi_interconnect::CACHELINE_WORDS * 2,
-              "Current AXI bridge expects two 32B chunks per ICache line");
+constexpr uint32_t kAxiChunksPerLine =
+    kIcacheLineWords / axi_interconnect::CACHELINE_WORDS;
+static_assert(kIcacheLineWords > 0, "ICACHE_LINE_SIZE must be non-zero");
+static_assert((kIcacheLineWords % axi_interconnect::CACHELINE_WORDS) == 0,
+              "ICACHE_LINE_SIZE must be divisible by AXI chunk size");
+static_assert(kAxiChunkBytes <= 32,
+              "AXI ReadMaster total_size only supports up to 32 bytes");
 
 inline uint32_t top_xorshift32(uint32_t x) {
   x ^= x << 13;
@@ -52,6 +57,15 @@ inline uint32_t top_xorshift32(uint32_t x) {
 inline uint32_t top_clamp_latency(uint32_t v) { return (v < 1u) ? 1u : v; }
 
 inline bool top_lookup_latency_enabled() { return (ICACHE_LOOKUP_LATENCY > 0); }
+
+inline bool top_axi_backend_enabled() {
+  return (CONFIG_ICACHE_USE_AXI_MEM_PORT != 0);
+}
+
+inline bool top_use_axi_backend(
+    const axi_interconnect::ReadMasterPort_t *port) {
+  return top_axi_backend_enabled() && (port != nullptr);
+}
 
 inline uint32_t top_lookup_index_from_pc(uint32_t pc) {
   constexpr uint32_t offset_bits = __builtin_ctz(ICACHE_LINE_SIZE);
@@ -258,21 +272,12 @@ void TrueICacheTop::comb() {
     valid_reg = false;
     mem_busy = false;
     mem_latency_cnt = 0;
-    if (axi_fill_state == AxiFillState::RESP_READY) {
-      axi_fill_state = AxiFillState::IDLE;
-      axi_fill_stale = false;
-      axi_fill_base_addr = 0;
-      for (uint32_t &w : axi_fill_data) {
-        w = 0;
-      }
-    } else if (axi_fill_state != AxiFillState::IDLE) {
-      axi_fill_stale = true;
-    } else {
-      axi_fill_stale = false;
-      axi_fill_base_addr = 0;
-      for (uint32_t &w : axi_fill_data) {
-        w = 0;
-      }
+    axi_fill_state = AxiFillState::IDLE;
+    axi_fill_stale = false;
+    axi_fill_base_addr = 0;
+    axi_fill_chunk_idx = 0;
+    for (uint32_t &w : axi_fill_data) {
+      w = 0;
     }
     tlb_pending = false;
     tlb_pending_vaddr = 0;
@@ -282,19 +287,11 @@ void TrueICacheTop::comb() {
     lookup_pc = 0;
     lookup_seed = 1;
     if (mem_read_port != nullptr) {
-      bool issue_req = (axi_fill_state == AxiFillState::REQ_LO) ||
-                       (axi_fill_state == AxiFillState::REQ_HI);
-      bool wait_resp = (axi_fill_state == AxiFillState::WAIT_LO) ||
-                       (axi_fill_state == AxiFillState::WAIT_HI);
-      mem_read_port->req.valid = issue_req;
-      mem_read_port->req.addr =
-          axi_fill_base_addr +
-          ((axi_fill_state == AxiFillState::REQ_HI) ? kAxiChunkBytes : 0u);
-      mem_read_port->req.total_size = 31;
-      mem_read_port->req.id =
-          (axi_fill_state == AxiFillState::REQ_HI) ? static_cast<uint8_t>(1)
-                                                   : static_cast<uint8_t>(0);
-      mem_read_port->resp.ready = wait_resp;
+      mem_read_port->req.valid = false;
+      mem_read_port->req.addr = 0;
+      mem_read_port->req.total_size = 0;
+      mem_read_port->req.id = 0;
+      mem_read_port->resp.ready = false;
     }
     fill_lookup_input(icache_hw, false, 0);
     out->icache_read_ready = true;
@@ -315,11 +312,12 @@ void TrueICacheTop::comb() {
   // deal with "refetch" signal (Async Reset behavior)
   if (in->refetch) {
     valid_reg = false;
-    mem_busy = false;
-    mem_latency_cnt = 0;
-    if (axi_fill_state != AxiFillState::IDLE) {
-      axi_fill_stale = true;
+    if (top_use_axi_backend(mem_read_port) || !mem_busy) {
+      mem_busy = false;
+      mem_latency_cnt = 0;
     }
+    // Non-AXI fallback intentionally keeps an in-flight synthetic miss alive to
+    // mirror the post-issue behavior of the real AXI path.
     tlb_pending = false;
     tlb_pending_vaddr = 0;
     lookup_pending = false;
@@ -391,20 +389,15 @@ void TrueICacheTop::comb() {
     icache_hw.io.in.mem_resp_data[i] = 0;
   }
 
-  if (mem_read_port != nullptr) {
-    bool issue_req = (axi_fill_state == AxiFillState::REQ_LO) ||
-                     (axi_fill_state == AxiFillState::REQ_HI);
-    bool wait_resp = (axi_fill_state == AxiFillState::WAIT_LO) ||
-                     (axi_fill_state == AxiFillState::WAIT_HI);
+  if (top_use_axi_backend(mem_read_port)) {
+    bool issue_req = (axi_fill_state == AxiFillState::REQ);
+    bool wait_resp = (axi_fill_state == AxiFillState::WAIT);
 
     mem_read_port->req.valid = issue_req;
-    mem_read_port->req.addr =
-        axi_fill_base_addr +
-        ((axi_fill_state == AxiFillState::REQ_HI) ? kAxiChunkBytes : 0u);
-    mem_read_port->req.total_size = 31; // 32B per AXI read request
-    mem_read_port->req.id =
-        (axi_fill_state == AxiFillState::REQ_HI) ? static_cast<uint8_t>(1)
-                                                 : static_cast<uint8_t>(0);
+    mem_read_port->req.addr = axi_fill_base_addr + (axi_fill_chunk_idx * kAxiChunkBytes);
+    mem_read_port->req.total_size =
+        static_cast<uint8_t>(kAxiChunkBytes - 1u);
+    mem_read_port->req.id = static_cast<uint8_t>(axi_fill_chunk_idx & 0xFu);
     mem_read_port->resp.ready = wait_resp;
 
     icache_hw.io.in.mem_req_ready = (axi_fill_state == AxiFillState::IDLE);
@@ -415,6 +408,13 @@ void TrueICacheTop::comb() {
       }
     }
   } else {
+    if (mem_read_port != nullptr) {
+      mem_read_port->req.valid = false;
+      mem_read_port->req.addr = 0;
+      mem_read_port->req.total_size = 0;
+      mem_read_port->req.id = 0;
+      mem_read_port->resp.ready = false;
+    }
     if (mem_busy) {
       if (mem_latency_cnt >= ICACHE_MISS_LATENCY) {
         icache_hw.io.in.mem_resp_valid = true;
@@ -493,8 +493,7 @@ void TrueICacheTop::seq() {
 
   icache_hw.seq();
 
-  if (mem_read_port != nullptr) {
-    auto prev_state = axi_fill_state;
+  if (top_use_axi_backend(mem_read_port)) {
     bool mem_req_fire = icache_hw.io.out.mem_req_valid && icache_hw.io.in.mem_req_ready;
     bool req_fire = mem_read_port->req.valid && mem_read_port->req.ready;
     bool resp_fire = mem_read_port->resp.valid && mem_read_port->resp.ready;
@@ -502,33 +501,30 @@ void TrueICacheTop::seq() {
 
     if (axi_fill_state == AxiFillState::IDLE && mem_req_fire) {
       axi_fill_base_addr = icache_hw.io.out.mem_req_addr & ~(ICACHE_LINE_SIZE - 1u);
-      axi_fill_state = AxiFillState::REQ_LO;
+      axi_fill_chunk_idx = 0;
+      axi_fill_state = AxiFillState::REQ;
       axi_fill_stale = false;
       miss_delta++;
     }
 
-    if (axi_fill_state == AxiFillState::REQ_LO && req_fire) {
-      axi_fill_state = AxiFillState::WAIT_LO;
-    } else if (axi_fill_state == AxiFillState::WAIT_LO && resp_fire) {
+    if (axi_fill_state == AxiFillState::REQ && req_fire) {
+      axi_fill_state = AxiFillState::WAIT;
+    } else if (axi_fill_state == AxiFillState::WAIT && resp_fire) {
+      uint32_t word_base = axi_fill_chunk_idx * axi_interconnect::CACHELINE_WORDS;
       for (uint32_t i = 0; i < axi_interconnect::CACHELINE_WORDS; i++) {
-        axi_fill_data[i] = mem_read_port->resp.data[i];
+        axi_fill_data[word_base + i] = mem_read_port->resp.data[i];
       }
-      axi_fill_state = AxiFillState::REQ_HI;
-    } else if (axi_fill_state == AxiFillState::REQ_HI && req_fire) {
-      axi_fill_state = AxiFillState::WAIT_HI;
-    } else if (axi_fill_state == AxiFillState::WAIT_HI && resp_fire) {
-      for (uint32_t i = 0; i < axi_interconnect::CACHELINE_WORDS; i++) {
-        axi_fill_data[axi_interconnect::CACHELINE_WORDS + i] =
-            mem_read_port->resp.data[i];
+      if ((axi_fill_chunk_idx + 1u) < kAxiChunksPerLine) {
+        axi_fill_chunk_idx++;
+        axi_fill_state = AxiFillState::REQ;
+      } else {
+        axi_fill_state = AxiFillState::RESP_READY;
       }
-      axi_fill_state = AxiFillState::RESP_READY;
-    } else if (axi_fill_state == AxiFillState::RESP_READY &&
-               (mem_resp_fire || axi_fill_stale)) {
+    } else if (axi_fill_state == AxiFillState::RESP_READY && mem_resp_fire) {
       axi_fill_state = AxiFillState::IDLE;
+      axi_fill_chunk_idx = 0;
       axi_fill_stale = false;
     }
-
-    (void)prev_state;
   } else {
     if (mem_busy) {
       mem_latency_cnt++;

@@ -64,17 +64,16 @@ class TrueICacheTop : public ICacheTop {
 private:
   enum class AxiFillState : uint8_t {
     IDLE = 0,
-    REQ_LO = 1,
-    WAIT_LO = 2,
-    REQ_HI = 3,
-    WAIT_HI = 4,
-    RESP_READY = 5,
+    REQ = 1,
+    WAIT = 2,
+    RESP_READY = 3,
   };
   bool mem_busy = false;
   int mem_latency_cnt = 0;
   AxiFillState axi_fill_state = AxiFillState::IDLE;
   bool axi_fill_stale = false;
   uint32_t axi_fill_base_addr = 0;
+  uint32_t axi_fill_chunk_idx = 0;
   uint32_t axi_fill_data[ICACHE_LINE_SIZE / 4] = {};
   uint32_t current_vaddr_reg = 0;
   bool valid_reg = false;
