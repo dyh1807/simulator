@@ -1,0 +1,43 @@
+{
+  "header": "front-end/icache/include/icache_module.h",
+  "include_path": "front-end/icache/include/icache_module.h",
+  "namespace": "icache_module_n",
+  "out_namespace": "icache_v1_pi_po",
+  "wrapper_type": "ICache_IO_t",
+  "pi_field": [
+    "in:ICache_in_t",
+    "regs:ICache_regs_t",
+    "lookup_in:ICache_lookup_in_t"
+  ],
+  "po_field": [
+    "out:ICache_out_t",
+    "reg_write:ICache_regs_t",
+    "table_write:ICache_table_write_t"
+  ],
+  "module_type": "icache_module_n::ICache",
+  "module_header": "front-end/icache/include/icache_module.h",
+  "module_source": [
+    "front-end/icache/icache_module.cpp"
+  ],
+  "guard_range": [
+    "regs.state:0:2",
+    "regs.mem_axi_state:0:1"
+  ],
+  "api_namespace": "icache_v1_dl",
+  "function_name": "io_generator_outer",
+  "export_po_begin": 132,
+  "export_po_width": 2,
+  "basename": "icache_v1",
+  "c_linkage": true,
+  "build_shared": true,
+  "cxx": "g++",
+  "include_dir": [
+    ".",
+    "front-end",
+    "front-end/icache/include",
+    "back-end/include",
+    "include"
+  ],
+  "cxxflag": [],
+  "out_dir": "./icache-outer-model"
+}
