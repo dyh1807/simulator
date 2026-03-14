@@ -74,6 +74,18 @@ python3 script/bsd_train/gen_io_generator_so.py --config script/bsd_train/config
 - `icache_v1_api.cpp`
 - `libicache_v1.so`
 
+### `export_po_width` 的默认行为
+
+如果配置文件中：
+- 不设置 `export_po_width`
+- 或显式写成 `null`
+
+那么脚本会自动采用：
+- `export_po_begin = 0`
+- `PO_WIDTH = PO_WIDTH_FULL`
+
+也就是默认导出完整输出，而不是 slice。
+
 ## 4. 其它项目接入时，到底需要什么
 
 ### 结论
@@ -194,6 +206,50 @@ bool pi[PI_WIDTH];
 bool po_slice[2];
 io_generator_outer_range(pi, po_slice, 0, 2);
 ```
+
+### 在 `another_proj` 目录下使用相对路径的脚本示例
+
+如果：
+- 当前工作目录是 `another_proj`
+- 生成出来的 `icache_v1_api.h` 和 `libicache_v1.so` 放在上一级目录的 `icache-outer-model/`
+
+那么可以使用下面这个脚本：
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BSD_PROJ_DIR="$(pwd)"
+
+# 只改这一项即可
+MODEL_REL="../icache-outer-model"
+
+MODEL_DIR="$(cd "$BSD_PROJ_DIR/$MODEL_REL" && pwd)"
+RPATH_REL="\$ORIGIN/${MODEL_REL#./}"
+
+OUT_BIN="a.out"
+
+cd "$BSD_PROJ_DIR"
+
+g++ BSD.cpp -o "$OUT_BIN" \
+  -O2 -std=c++11 -fopenmp \
+  -I./io_generator/simulator_include \
+  -I./io_generator \
+  -I"$MODEL_DIR" \
+  -DDYNAMIC_HEADER='"icache_v1_api.h"' \
+  -DDYNAMIC_THREADS=128 \
+  -L"$MODEL_DIR" \
+  -licache_v1 \
+  -Wl,-rpath,"$RPATH_REL"
+
+cd "$BSD_PROJ_DIR"
+./"$OUT_BIN"
+```
+
+这段脚本的特点是：
+- 编译时使用绝对 `MODEL_DIR`
+- 运行时使用相对 `rpath`
+- 真正需要人工改动的只有 `MODEL_REL`
 
 ## 7. `PO_WIDTH` 与 `PO_WIDTH_FULL`
 
