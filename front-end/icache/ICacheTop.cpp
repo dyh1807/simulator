@@ -213,15 +213,18 @@ public:
       port_->req.bypass = false;
       port_->resp.ready = false;
     }
+    pending_req_valid_ = false;
+    pending_req_addr_ = 0;
+    pending_req_id_ = 0;
+    lower_req_fire_comb_ = false;
   }
 
   MemReadView comb_view() const {
     MemReadView view;
+    view.req_ready = !pending_req_valid_;
     if (port_ == nullptr) {
-      view.req_ready = false;
       return view;
     }
-    view.req_ready = port_->req.ready;
     view.resp_valid = port_->resp.valid;
     view.resp_id = static_cast<uint8_t>(port_->resp.id & 0xF);
     for (int i = 0; i < ICACHE_LINE_SIZE / 4; ++i) {
@@ -232,21 +235,47 @@ public:
 
   void comb_accept(bool req_valid, uint32_t req_addr, uint8_t req_id,
                    bool resp_ready) {
+    lower_req_fire_comb_ = false;
     if (port_ == nullptr) {
       return;
     }
-    port_->req.valid = req_valid;
-    port_->req.addr = req_addr;
+    const bool drive_pending = pending_req_valid_;
+    port_->req.valid = drive_pending;
+    port_->req.addr = pending_req_addr_;
     port_->req.total_size = static_cast<uint8_t>(ICACHE_LINE_SIZE - 1u);
-    port_->req.id = static_cast<uint8_t>(req_id & 0xF);
+    port_->req.id = pending_req_id_;
     port_->req.bypass = false;
     port_->resp.ready = resp_ready;
+    lower_req_fire_comb_ = drive_pending && port_->req.ready;
+    req_capture_valid_comb_ = !pending_req_valid_ && req_valid;
+    req_capture_addr_comb_ = req_addr;
+    req_capture_id_comb_ = static_cast<uint8_t>(req_id & 0xF);
   }
 
-  void seq(bool, uint32_t, uint8_t, bool, uint8_t, bool) {}
+  void seq(bool, uint32_t, uint8_t, bool, uint8_t, bool) {
+    if (lower_req_fire_comb_) {
+      pending_req_valid_ = false;
+      pending_req_addr_ = 0;
+      pending_req_id_ = 0;
+    }
+
+    if (!pending_req_valid_ && req_capture_valid_comb_) {
+      pending_req_valid_ = true;
+      pending_req_addr_ = req_capture_addr_comb_;
+      pending_req_id_ = req_capture_id_comb_;
+    }
+    req_capture_valid_comb_ = false;
+  }
 
 private:
   axi_interconnect::ReadMasterPort_t *port_ = nullptr;
+  bool pending_req_valid_ = false;
+  uint32_t pending_req_addr_ = 0;
+  uint8_t pending_req_id_ = 0;
+  bool lower_req_fire_comb_ = false;
+  bool req_capture_valid_comb_ = false;
+  uint32_t req_capture_addr_comb_ = 0;
+  uint8_t req_capture_id_comb_ = 0;
 };
 
 template <typename ReadPort> ReadPort &read_port_runtime() {
