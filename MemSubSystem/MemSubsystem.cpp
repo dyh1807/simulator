@@ -1,4 +1,5 @@
 #include "MemSubsystem.h"
+#include "SimCpu.h"
 #include "SimpleCache.h"
 #include "config.h"
 #include "icache/GenericTable.h"
@@ -226,6 +227,75 @@ MemPtwBlock::Client MemSubsystem::to_block_client(PtwClient c) {
                                                : MemPtwBlock::Client::ITLB;
 }
 
+void MemSubsystem::sync_llc_perf() {
+#if AXI_KIT_RUNTIME_ENABLED
+  if (axi_kit_runtime == nullptr) {
+    return;
+  }
+
+  const auto &perf = axi_kit_runtime->interconnect.get_llc_perf_counters();
+  LlcPerfShadow current{};
+  current.read_access = perf.read_access;
+  current.read_hit = perf.read_hit;
+  current.read_miss = perf.read_miss;
+  current.bypass_read = perf.bypass_read;
+  current.write_passthrough = perf.write_passthrough;
+  current.refill = perf.refill;
+  current.mshr_alloc = perf.mshr_alloc;
+  current.mshr_merge = perf.mshr_merge;
+  current.prefetch_issue = perf.prefetch_issue;
+  current.prefetch_hit = perf.prefetch_hit;
+  current.prefetch_drop_inflight = perf.prefetch_drop_inflight;
+  current.prefetch_drop_mshr_full = perf.prefetch_drop_mshr_full;
+  current.prefetch_drop_queue_full = perf.prefetch_drop_queue_full;
+  current.prefetch_drop_table_hit = perf.prefetch_drop_table_hit;
+
+  if (!llc_perf_shadow_valid_) {
+    llc_perf_shadow_ = current;
+    llc_perf_shadow_valid_ = true;
+    return;
+  }
+
+  auto sync_counter = [](uint64_t current_value, uint64_t &shadow_value,
+                         uint64_t &perf_value) {
+    perf_value +=
+        current_value >= shadow_value ? current_value - shadow_value : current_value;
+    shadow_value = current_value;
+  };
+
+  sync_counter(current.read_access, llc_perf_shadow_.read_access,
+               ctx->perf.llc_read_access);
+  sync_counter(current.read_hit, llc_perf_shadow_.read_hit, ctx->perf.llc_read_hit);
+  sync_counter(current.read_miss, llc_perf_shadow_.read_miss,
+               ctx->perf.llc_read_miss);
+  sync_counter(current.bypass_read, llc_perf_shadow_.bypass_read,
+               ctx->perf.llc_bypass_read);
+  sync_counter(current.write_passthrough, llc_perf_shadow_.write_passthrough,
+               ctx->perf.llc_write_passthrough);
+  sync_counter(current.refill, llc_perf_shadow_.refill, ctx->perf.llc_refill);
+  sync_counter(current.mshr_alloc, llc_perf_shadow_.mshr_alloc,
+               ctx->perf.llc_mshr_alloc);
+  sync_counter(current.mshr_merge, llc_perf_shadow_.mshr_merge,
+               ctx->perf.llc_mshr_merge);
+  sync_counter(current.prefetch_issue, llc_perf_shadow_.prefetch_issue,
+               ctx->perf.llc_prefetch_issue);
+  sync_counter(current.prefetch_hit, llc_perf_shadow_.prefetch_hit,
+               ctx->perf.llc_prefetch_hit);
+  sync_counter(current.prefetch_drop_inflight,
+               llc_perf_shadow_.prefetch_drop_inflight,
+               ctx->perf.llc_prefetch_drop_inflight);
+  sync_counter(current.prefetch_drop_mshr_full,
+               llc_perf_shadow_.prefetch_drop_mshr_full,
+               ctx->perf.llc_prefetch_drop_mshr_full);
+  sync_counter(current.prefetch_drop_queue_full,
+               llc_perf_shadow_.prefetch_drop_queue_full,
+               ctx->perf.llc_prefetch_drop_queue_full);
+  sync_counter(current.prefetch_drop_table_hit,
+               llc_perf_shadow_.prefetch_drop_table_hit,
+               ctx->perf.llc_prefetch_drop_table_hit);
+#endif
+}
+
 void MemSubsystem::refresh_ptw_client_outputs() {
   for (size_t i = 0; i < kPtwClientCount; i++) {
     PtwClient client = static_cast<PtwClient>(i);
@@ -338,6 +408,8 @@ void MemSubsystem::init() {
   llc_cfg.ways = AXI_LLC_DEFAULT_WAYS;
   llc_cfg.mshr_num = AXI_LLC_DEFAULT_MSHR_NUM;
   llc_cfg.lookup_latency = AXI_LLC_DEFAULT_LOOKUP_LATENCY;
+  llc_cfg.prefetch_enable = AXI_LLC_DEFAULT_PREFETCH_ENABLE;
+  llc_cfg.prefetch_degree = AXI_LLC_DEFAULT_PREFETCH_DEGREE;
   axi_kit_runtime->interconnect.set_llc_config(llc_cfg);
   axi_kit_runtime->llc_tables.configure(llc_cfg);
   axi_kit_runtime->interconnect.init();
@@ -358,6 +430,8 @@ void MemSubsystem::init() {
   ptw_mem_resp_ios = {};
   ptw_walk_resp_ios = {};
   refresh_ptw_client_outputs();
+  llc_perf_shadow_ = {};
+  llc_perf_shadow_valid_ = false;
 
   dcache_req_mux = {};
   dcache_wreq_mux = {};
@@ -403,9 +477,12 @@ void MemSubsystem::comb() {
   auto &router = axi_kit_runtime->router;
   auto &mmio = axi_kit_runtime->mmio;
   auto &llc_tables = axi_kit_runtime->llc_tables;
+  const bool llc_invalidate =
+      ctx != nullptr && ctx->cpu != nullptr && ctx->cpu->back.out.itlb_flush;
 
   llc_tables.comb_outputs();
   interconnect.set_llc_lookup_in(llc_tables.lookup_in);
+  interconnect.set_llc_invalidate(llc_invalidate);
 
   // AXI-kit phase-1 combinational outputs.
   ddr.comb_outputs();
@@ -514,5 +591,6 @@ void MemSubsystem::seq() {
   axi_kit_runtime->interconnect.seq();
   axi_kit_runtime->llc_tables.seq(
       axi_kit_runtime->interconnect.get_llc_table_out());
+  sync_llc_perf();
 #endif
 }

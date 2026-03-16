@@ -55,9 +55,9 @@ struct ReadMasterPort_t {
 
 extern uint32_t *p_memory;
 extern icache_module_n::ICache icache;
+extern long long sim_time;
 
 namespace {
-
 #if CONFIG_ICACHE_USE_AXI_MEM_PORT
 static_assert(ICACHE_LINE_SIZE <= axi_interconnect::MAX_READ_TRANSACTION_BYTES,
               "ICACHE_LINE_SIZE exceeds AXI upstream read transaction limit");
@@ -216,43 +216,64 @@ public:
     pending_req_valid_ = false;
     pending_req_addr_ = 0;
     pending_req_id_ = 0;
+    accepted_req_valid_ = false;
+    accepted_req_id_ = 0;
+    buffered_resp_valid_ = false;
+    buffered_resp_id_ = 0;
+    for (auto &word : buffered_resp_data_) {
+      word = 0;
+    }
     lower_req_fire_comb_ = false;
+    lower_resp_capture_comb_ = false;
+    upper_req_accept_comb_ = false;
   }
 
   MemReadView comb_view() const {
     MemReadView view;
-    view.req_ready = !pending_req_valid_;
+    // The adapter is part of the lower memory system. Once it accepts an upper
+    // request, it becomes responsible for eventually launching it downstream
+    // and for buffering the returning response until icache consumes it.
+    view.req_ready = !accepted_req_valid_ && !pending_req_valid_;
     if (port_ == nullptr) {
       return view;
     }
-    view.resp_valid = port_->resp.valid;
-    view.resp_id = static_cast<uint8_t>(port_->resp.id & 0xF);
+    view.resp_valid = buffered_resp_valid_;
+    view.resp_id = buffered_resp_id_;
     for (int i = 0; i < ICACHE_LINE_SIZE / 4; ++i) {
-      view.resp_data[i] = port_->resp.data[i];
+      view.resp_data[i] = buffered_resp_data_[i];
     }
     return view;
   }
 
   void comb_accept(bool req_valid, uint32_t req_addr, uint8_t req_id,
-                   bool resp_ready) {
+                   bool) {
     lower_req_fire_comb_ = false;
+    lower_resp_capture_comb_ = false;
+    upper_req_accept_comb_ = false;
     if (port_ == nullptr) {
       return;
     }
     const bool drive_pending = pending_req_valid_;
+    const bool accept_upper = req_valid && !accepted_req_valid_ && !pending_req_valid_;
     port_->req.valid = drive_pending;
     port_->req.addr = pending_req_addr_;
     port_->req.total_size = static_cast<uint8_t>(ICACHE_LINE_SIZE - 1u);
     port_->req.id = pending_req_id_;
     port_->req.bypass = false;
-    port_->resp.ready = resp_ready;
+    port_->resp.ready = !buffered_resp_valid_;
     lower_req_fire_comb_ = drive_pending && port_->req.ready;
-    req_capture_valid_comb_ = !pending_req_valid_ && req_valid;
+    lower_resp_capture_comb_ = port_->resp.valid && port_->resp.ready;
+    req_capture_valid_comb_ = accept_upper;
+    upper_req_accept_comb_ = accept_upper;
     req_capture_addr_comb_ = req_addr;
     req_capture_id_comb_ = static_cast<uint8_t>(req_id & 0xF);
+    lower_resp_id_comb_ = static_cast<uint8_t>(port_->resp.id & 0xF);
+    for (int i = 0; i < ICACHE_LINE_SIZE / 4; ++i) {
+      lower_resp_data_comb_[i] = port_->resp.data[i];
+    }
   }
 
-  void seq(bool, uint32_t, uint8_t, bool, uint8_t, bool) {
+  void seq(bool, uint32_t, uint8_t, bool resp_fire, uint8_t, bool) {
     if (lower_req_fire_comb_) {
       pending_req_valid_ = false;
       pending_req_addr_ = 0;
@@ -264,7 +285,29 @@ public:
       pending_req_addr_ = req_capture_addr_comb_;
       pending_req_id_ = req_capture_id_comb_;
     }
+    if (upper_req_accept_comb_) {
+      accepted_req_valid_ = true;
+      accepted_req_id_ = req_capture_id_comb_;
+    }
+    if (lower_resp_capture_comb_ && !buffered_resp_valid_) {
+      buffered_resp_valid_ = true;
+      buffered_resp_id_ = lower_resp_id_comb_;
+      for (int i = 0; i < ICACHE_LINE_SIZE / 4; ++i) {
+        buffered_resp_data_[i] = lower_resp_data_comb_[i];
+      }
+    }
+    if (resp_fire) {
+      buffered_resp_valid_ = false;
+      buffered_resp_id_ = 0;
+      for (auto &word : buffered_resp_data_) {
+        word = 0;
+      }
+      accepted_req_valid_ = false;
+      accepted_req_id_ = 0;
+    }
     req_capture_valid_comb_ = false;
+    upper_req_accept_comb_ = false;
+    lower_resp_capture_comb_ = false;
   }
 
 private:
@@ -272,10 +315,19 @@ private:
   bool pending_req_valid_ = false;
   uint32_t pending_req_addr_ = 0;
   uint8_t pending_req_id_ = 0;
+  bool accepted_req_valid_ = false;
+  uint8_t accepted_req_id_ = 0;
+  bool buffered_resp_valid_ = false;
+  uint8_t buffered_resp_id_ = 0;
+  std::array<uint32_t, ICACHE_LINE_SIZE / 4> buffered_resp_data_{};
   bool lower_req_fire_comb_ = false;
+  bool lower_resp_capture_comb_ = false;
+  bool upper_req_accept_comb_ = false;
   bool req_capture_valid_comb_ = false;
   uint32_t req_capture_addr_comb_ = 0;
   uint8_t req_capture_id_comb_ = 0;
+  uint8_t lower_resp_id_comb_ = 0;
+  std::array<uint32_t, ICACHE_LINE_SIZE / 4> lower_resp_data_comb_{};
 };
 
 template <typename ReadPort> ReadPort &read_port_runtime() {
