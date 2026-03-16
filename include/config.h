@@ -112,7 +112,7 @@ constexpr int ICACHE_MISS_LATENCY = 50;
 // Enable the dedicated AXI-backed icache memory path.
 // Keep this disabled when axi-interconnect-kit is not present.
 #ifndef CONFIG_ICACHE_USE_AXI_MEM_PORT
-#define CONFIG_ICACHE_USE_AXI_MEM_PORT 0
+#define CONFIG_ICACHE_USE_AXI_MEM_PORT 1
 #endif
 
 // AXI protocol flavor for the dedicated icache memory path.
@@ -129,7 +129,7 @@ constexpr uint32_t AXI_LLC_DEFAULT_SIZE_BYTES = 8u * 1024u * 1024u;
 constexpr uint32_t AXI_LLC_DEFAULT_LINE_SIZE = 64u;
 constexpr uint32_t AXI_LLC_DEFAULT_WAYS = 16u;
 constexpr uint32_t AXI_LLC_DEFAULT_MSHR_NUM = 4u;
-constexpr uint32_t AXI_LLC_DEFAULT_LOOKUP_LATENCY = 1u;
+constexpr uint32_t AXI_LLC_DEFAULT_LOOKUP_LATENCY = 4u;
 
 constexpr int ICACHE_WAY_NUM = 8;
 constexpr int ICACHE_OFFSET_BITS = clog2(ICACHE_LINE_SIZE);
