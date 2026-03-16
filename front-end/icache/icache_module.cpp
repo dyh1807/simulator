@@ -81,13 +81,6 @@ void ICache::reset() {
   lookup_pc_next = 0;
   sram_load_fire = false;
 
-  if (lookup_latency_enabled()) {
-    std::cout << "[icache] lookup source: external delayed response"
-              << std::endl;
-  } else {
-    std::cout << "[icache] lookup source: register-style internal set read"
-              << std::endl;
-  }
 }
 
 void ICache::comb() {
