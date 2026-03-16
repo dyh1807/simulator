@@ -210,6 +210,7 @@ public:
       port_->req.addr = 0;
       port_->req.total_size = 0;
       port_->req.id = 0;
+      port_->req.bypass = false;
       port_->resp.ready = false;
     }
   }
@@ -238,6 +239,7 @@ public:
     port_->req.addr = req_addr;
     port_->req.total_size = static_cast<uint8_t>(ICACHE_LINE_SIZE - 1u);
     port_->req.id = static_cast<uint8_t>(req_id & 0xF);
+    port_->req.bypass = false;
     port_->resp.ready = resp_ready;
   }
 

@@ -1,6 +1,7 @@
 #include "MemSubsystem.h"
 #include "SimpleCache.h"
 #include "config.h"
+#include "icache/GenericTable.h"
 #include <memory>
 
 #if __has_include("UART16550_Device.h") && \
@@ -53,12 +54,133 @@ using MmioImpl = mmio::MMIO_Bus_AXI3;
 #endif
 
 #if AXI_KIT_RUNTIME_ENABLED
+namespace {
+
+struct AxiLlcTableRuntime {
+  DynamicGenericTable<SramTablePolicy> data;
+  DynamicGenericTable<SramTablePolicy> meta;
+  DynamicGenericTable<SramTablePolicy> repl;
+  axi_interconnect::AXI_LLC_LookupIn_t lookup_in{};
+  axi_interconnect::AXI_LLCConfig config{};
+  bool enabled = false;
+
+  static DynamicTableConfig make_table_config(uint32_t rows, uint32_t row_bytes,
+                                              uint32_t latency) {
+    DynamicTableConfig cfg;
+    cfg.rows = rows;
+    cfg.chunks = row_bytes;
+    cfg.chunk_bits = 8;
+    cfg.timing.fixed_latency = latency == 0 ? 1 : latency;
+    cfg.timing.random_delay = false;
+    return cfg;
+  }
+
+  static DynamicTableReadReq make_read_req(
+      const axi_interconnect::AXI_LLC_TableReq_t &req) {
+    DynamicTableReadReq read_req;
+    read_req.enable = req.enable && !req.write;
+    read_req.address = req.index;
+    return read_req;
+  }
+
+  static DynamicTableWriteReq make_write_req(
+      const axi_interconnect::AXI_LLC_TableReq_t &req, uint32_t row_bytes,
+      uint32_t unit_bytes) {
+    DynamicTableWriteReq write_req;
+    write_req.enable = req.enable && req.write;
+    write_req.address = req.index;
+    write_req.payload.reset(row_bytes);
+    write_req.chunk_enable.assign(row_bytes, 0);
+    if (!write_req.enable) {
+      return write_req;
+    }
+    const size_t base = unit_bytes == 0 ? 0 : static_cast<size_t>(req.way) * unit_bytes;
+    const size_t copy_bytes =
+        std::min(req.payload.size(), row_bytes > base ? row_bytes - base : 0u);
+    if (copy_bytes == 0) {
+      return write_req;
+    }
+    std::memcpy(write_req.payload.data() + base, req.payload.data(), copy_bytes);
+    const size_t en_bytes = std::min(req.byte_enable.size(), copy_bytes);
+    for (size_t i = 0; i < en_bytes; ++i) {
+      write_req.chunk_enable[base + i] = req.byte_enable[i];
+    }
+    return write_req;
+  }
+
+  void configure(const axi_interconnect::AXI_LLCConfig &cfg) {
+    config = cfg;
+    enabled = cfg.enable && cfg.valid();
+    lookup_in = {};
+    if (!enabled) {
+      return;
+    }
+    const uint32_t sets = cfg.set_count();
+    data.configure(make_table_config(sets, cfg.ways * cfg.line_bytes,
+                                     cfg.lookup_latency));
+    meta.configure(make_table_config(
+        sets, cfg.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES,
+        cfg.lookup_latency));
+    repl.configure(make_table_config(sets, axi_interconnect::AXI_LLC_REPL_BYTES,
+                                     cfg.lookup_latency));
+    data.reset();
+    meta.reset();
+    repl.reset();
+  }
+
+  void comb_outputs() {
+    lookup_in = {};
+    if (!enabled) {
+      return;
+    }
+    DynamicTableReadResp data_resp, meta_resp, repl_resp;
+    data.comb({}, data_resp);
+    meta.comb({}, meta_resp);
+    repl.comb({}, repl_resp);
+    lookup_in.data_valid = data_resp.valid;
+    lookup_in.meta_valid = meta_resp.valid;
+    lookup_in.repl_valid = repl_resp.valid;
+    lookup_in.data.bytes = data_resp.payload.bytes;
+    lookup_in.meta.bytes = meta_resp.payload.bytes;
+    lookup_in.repl.bytes = repl_resp.payload.bytes;
+  }
+
+  void seq(const axi_interconnect::AXI_LLC_TableOut_t &table_out) {
+    if (!enabled) {
+      return;
+    }
+    if (table_out.invalidate_all) {
+      data.reset();
+      meta.reset();
+      repl.reset();
+    }
+    const auto data_read = make_read_req(table_out.data);
+    const auto meta_read = make_read_req(table_out.meta);
+    const auto repl_read = make_read_req(table_out.repl);
+    const auto data_write =
+        make_write_req(table_out.data, config.ways * config.line_bytes,
+                       config.line_bytes);
+    const auto meta_write = make_write_req(
+        table_out.meta,
+        config.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES,
+        axi_interconnect::AXI_LLC_META_ENTRY_BYTES);
+    const auto repl_write =
+        make_write_req(table_out.repl, axi_interconnect::AXI_LLC_REPL_BYTES, 0);
+    data.seq(data_read, data_write);
+    meta.seq(meta_read, meta_write);
+    repl.seq(repl_read, repl_write);
+  }
+};
+
+} // namespace
+
 struct AxiKitRuntime {
   InterconnectImpl interconnect;
   DdrImpl ddr;
   RouterImpl router;
   MmioImpl mmio;
   mmio::UART16550_Device uart0{0x10000000u};
+  AxiLlcTableRuntime llc_tables;
 };
 #else
 struct AxiKitRuntime {};
@@ -209,6 +331,15 @@ void MemSubsystem::init() {
   peripheral.init();
 
 #if AXI_KIT_RUNTIME_ENABLED
+  axi_interconnect::AXI_LLCConfig llc_cfg;
+  llc_cfg.enable = CONFIG_AXI_PROTOCOL == 4 && CONFIG_AXI_LLC_ENABLE;
+  llc_cfg.size_bytes = AXI_LLC_DEFAULT_SIZE_BYTES;
+  llc_cfg.line_bytes = AXI_LLC_DEFAULT_LINE_SIZE;
+  llc_cfg.ways = AXI_LLC_DEFAULT_WAYS;
+  llc_cfg.mshr_num = AXI_LLC_DEFAULT_MSHR_NUM;
+  llc_cfg.lookup_latency = AXI_LLC_DEFAULT_LOOKUP_LATENCY;
+  axi_kit_runtime->interconnect.set_llc_config(llc_cfg);
+  axi_kit_runtime->llc_tables.configure(llc_cfg);
   axi_kit_runtime->interconnect.init();
   axi_kit_runtime->router.init();
   axi_kit_runtime->mmio.init();
@@ -242,6 +373,7 @@ void MemSubsystem::init() {
     port.req.addr = 0;
     port.req.total_size = 0;
     port.req.id = 0;
+    port.req.bypass = false;
     port.resp.ready = false;
   }
   for (int i = 0; i < axi_interconnect::NUM_WRITE_MASTERS; i++) {
@@ -252,6 +384,7 @@ void MemSubsystem::init() {
     port.req.wstrb = 0;
     port.req.total_size = 0;
     port.req.id = 0;
+    port.req.bypass = false;
     port.resp.ready = false;
   }
 #endif
@@ -269,6 +402,10 @@ void MemSubsystem::comb() {
   auto &ddr = axi_kit_runtime->ddr;
   auto &router = axi_kit_runtime->router;
   auto &mmio = axi_kit_runtime->mmio;
+  auto &llc_tables = axi_kit_runtime->llc_tables;
+
+  llc_tables.comb_outputs();
+  interconnect.set_llc_lookup_in(llc_tables.lookup_in);
 
   // AXI-kit phase-1 combinational outputs.
   ddr.comb_outputs();
@@ -342,6 +479,7 @@ void MemSubsystem::comb() {
     port.req.addr = 0;
     port.req.total_size = 0;
     port.req.id = 0;
+    port.req.bypass = false;
     port.resp.ready = false;
   }
   for (int i = 0; i < axi_interconnect::NUM_WRITE_MASTERS; i++) {
@@ -352,6 +490,7 @@ void MemSubsystem::comb() {
     port.req.wstrb = 0;
     port.req.total_size = 0;
     port.req.id = 0;
+    port.req.bypass = false;
     port.resp.ready = false;
   }
 
@@ -373,5 +512,7 @@ void MemSubsystem::seq() {
   axi_kit_runtime->router.seq(axi_kit_runtime->interconnect.axi_io, axi_kit_runtime->ddr.io,
                           axi_kit_runtime->mmio.io);
   axi_kit_runtime->interconnect.seq();
+  axi_kit_runtime->llc_tables.seq(
+      axi_kit_runtime->interconnect.get_llc_table_out());
 #endif
 }
