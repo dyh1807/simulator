@@ -119,6 +119,7 @@ void bridge_mem_subsystem_to_axi(SimCpu &cpu) {
   peri_wport.resp.ready = cpu.mem_subsystem.peripheral_axi_write_out.resp_ready;
 }
 } // namespace
+
 void SimCpu::commit_sync(InstInfo *inst) {
   BackTop *back = &this->back;
   if (inst->type == JALR) {
