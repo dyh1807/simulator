@@ -151,9 +151,10 @@ struct AxiLlcTableRuntime {
       return;
     }
     if (table_out.invalidate_all) {
-      data.reset();
+      // The current prototype clears line validity by resetting metadata only.
+      // Data/replacement contents may stay stale because they are ignored once
+      // the meta valid bit is cleared.
       meta.reset();
-      repl.reset();
       lookup_pending_valid = false;
       lookup_pending_index = 0;
       lookup_delay_left = 0;
