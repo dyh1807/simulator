@@ -43,7 +43,7 @@ namespace {
 struct AxiLlcTableRuntime {
   DynamicGenericTable<SramTablePolicy> data;
   DynamicGenericTable<SramTablePolicy> meta;
-  DynamicGenericTable<SramTablePolicy> valid;
+  DynamicGenericTable<RegfileTablePolicy> valid;
   DynamicGenericTable<SramTablePolicy> repl;
   axi_interconnect::AXI_LLC_LookupIn_t lookup_in{};
   axi_interconnect::AXI_LLCConfig config{};
@@ -96,6 +96,43 @@ struct AxiLlcTableRuntime {
     for (size_t i = 0; i < en_bytes; ++i) {
       write_req.chunk_enable[base + i] = req.byte_enable[i];
     }
+    return write_req;
+  }
+
+  DynamicTableWriteReq make_valid_write_req(
+      const axi_interconnect::AXI_LLC_TableReq_t &req) const {
+    DynamicTableWriteReq write_req;
+    const uint32_t row_bytes = axi_interconnect::AXI_LLC::valid_row_bytes(config);
+    write_req.enable = req.enable && req.write;
+    write_req.address = req.index;
+    write_req.payload.reset(row_bytes);
+    write_req.chunk_enable.assign(row_bytes, 0);
+    if (!write_req.enable || row_bytes == 0) {
+      return write_req;
+    }
+
+    DynamicTablePayload current_payload;
+    current_payload.reset(row_bytes);
+    (void)valid.debug_read_row(req.index, current_payload);
+    write_req.payload.bytes = current_payload.bytes;
+
+    const uint32_t byte_idx = req.way >> 3;
+    const uint8_t bit_mask = static_cast<uint8_t>(1u << (req.way & 0x7u));
+    if (byte_idx >= row_bytes) {
+      return write_req;
+    }
+
+    const bool set_valid =
+        byte_idx < req.payload.size() &&
+        ((req.payload.data()[byte_idx] & bit_mask) != 0);
+    if (set_valid) {
+      write_req.payload.data()[byte_idx] =
+          static_cast<uint8_t>(write_req.payload.data()[byte_idx] | bit_mask);
+    } else {
+      write_req.payload.data()[byte_idx] =
+          static_cast<uint8_t>(write_req.payload.data()[byte_idx] & ~bit_mask);
+    }
+    write_req.chunk_enable[byte_idx] = 1;
     return write_req;
   }
 
@@ -175,8 +212,7 @@ struct AxiLlcTableRuntime {
         table_out.meta,
         config.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES,
         axi_interconnect::AXI_LLC_META_ENTRY_BYTES);
-    const auto valid_write =
-        make_write_req(table_out.valid, axi_interconnect::AXI_LLC::valid_row_bytes(config), 0);
+    const auto valid_write = make_valid_write_req(table_out.valid);
     const auto repl_write =
         make_write_req(table_out.repl, axi_interconnect::AXI_LLC_REPL_BYTES, 0);
 
