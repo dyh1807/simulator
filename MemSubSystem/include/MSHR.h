@@ -36,6 +36,11 @@ struct MSHR_STATE{
     bool wb_valid;
     uint32_t wb_addr;
     uint32_t wb_data[DCACHE_LINE_WORDS];
+
+    // A just-retired response ID stays quarantined for one full cycle so a
+    // same-ID duplicate visible-cycle from the shared AXI fabric cannot be
+    // mistaken for a new fill after the slot is freed.
+    bool resp_quarantine[DCACHE_MSHR_ENTRIES] = {};
 };
 
 // AXI read-channel interface signals (IC's read_ports[MASTER_DCACHE_R]).

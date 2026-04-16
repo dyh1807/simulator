@@ -12,6 +12,20 @@ namespace {
 static constexpr uint8_t kCacheLineReqTotalSize =
     static_cast<uint8_t>(DCACHE_LINE_BYTES - 1u);
 
+uint32_t count_allocatable_slots(const MSHR_STATE &state) {
+    uint32_t free = 0;
+    for (int i = 0; i < DCACHE_MSHR_ENTRIES; i++) {
+        if (mshr_entries[i].valid) {
+            continue;
+        }
+        if (state.resp_quarantine[i]) {
+            continue;
+        }
+        free++;
+    }
+    return free;
+}
+
 bool victim_has_same_cycle_store_hit(const DcacheMSHRIO &dcachemshr,
                                      uint32_t set_idx, uint32_t way_idx) {
     for (int p = 0; p < LSU_STA_COUNT; ++p) {
@@ -87,7 +101,7 @@ void MSHR::init()
 // ─────────────────────────────────────────────────────────────────────────────
 void MSHR::comb_outputs()
 {   
-    out.mshr2dcache.free = DCACHE_MSHR_ENTRIES - cur.mshr_count;
+    out.mshr2dcache.free = count_allocatable_slots(cur);
     out.replay_resp.replay = cur.fill; // MSHR full replay code
     out.replay_resp.replay_addr = cur.fill_addr;
     out.replay_resp.free_slots = out.mshr2dcache.free;
@@ -137,7 +151,8 @@ int MSHR::entries_add(int set_idx, int tag)
     int alloc_idx = -1;
     for (int off = 0; off < DCACHE_MSHR_ENTRIES; off++)
     {
-        if (!mshr_entries_nxt[off].valid)
+        if (!mshr_entries_nxt[off].valid && !cur.resp_quarantine[off] &&
+            !nxt.resp_quarantine[off])
         {
             alloc_idx = off;
             break;
@@ -214,6 +229,15 @@ void MSHR::comb_inputs()
             using_held_resp ? cur.axi_resp_hold_data : in.axi_in.resp_data;
         if (resp_id < DCACHE_MSHR_ENTRIES)
         {
+            if (cur.resp_quarantine[resp_id]) {
+                // Shared AXI fabric may keep a just-produced response visible
+                // for one extra cycle. Once the original consumer retired it
+                // and freed the slot, drop that duplicate instead of treating
+                // it as a new fill on a reused ID.
+                nxt.axi_resp_hold_valid = false;
+                out.axi_out.resp_ready = true;
+                return;
+            }
             const MSHREntry &e_cur = mshr_entries[resp_id];
             if (e_cur.valid && e_cur.issued && !e_cur.fill)
             {
@@ -356,6 +380,7 @@ void MSHR::comb_inputs()
                     }
 #endif
                     mshr_entries_nxt[resp_id] = {};
+                    nxt.resp_quarantine[resp_id] = true;
                     nxt.fill = true;
                     nxt.fill_addr = fill_line_addr;
                     if (nxt.mshr_count > 0)
@@ -421,4 +446,5 @@ void MSHR::seq()
     memcpy(mshr_entries, mshr_entries_nxt, sizeof(mshr_entries));
 
     nxt = cur;
+    std::memset(nxt.resp_quarantine, 0, sizeof(nxt.resp_quarantine));
 }
