@@ -44,6 +44,7 @@ struct AxiLlcTableRuntime {
   DynamicGenericTable<SramTablePolicy> data;
   DynamicGenericTable<SramTablePolicy> meta;
   DynamicGenericTable<SramTablePolicy> repl;
+  std::vector<axi_interconnect::AXI_LLC_Bytes_t> valid_rows;
   axi_interconnect::AXI_LLC_LookupIn_t lookup_in{};
   axi_interconnect::AXI_LLCConfig config{};
   bool enabled = false;
@@ -121,6 +122,11 @@ struct AxiLlcTableRuntime {
     data.reset();
     meta.reset();
     repl.reset();
+    valid_rows.assign(sets, {});
+    const uint32_t valid_bytes = axi_interconnect::AXI_LLC::valid_row_bytes(cfg);
+    for (auto &row : valid_rows) {
+      row.resize(valid_bytes);
+    }
   }
 
   void comb_outputs() {
@@ -144,6 +150,10 @@ struct AxiLlcTableRuntime {
     lookup_in.data.bytes = data_payload.bytes;
     lookup_in.meta.bytes = meta_payload.bytes;
     lookup_in.repl.bytes = repl_payload.bytes;
+    if (lookup_pending_index < valid_rows.size()) {
+      lookup_in.valid_valid = true;
+      lookup_in.valid = valid_rows[lookup_pending_index];
+    }
   }
 
   void seq(const axi_interconnect::AXI_LLC_TableOut_t &table_out) {
@@ -154,6 +164,10 @@ struct AxiLlcTableRuntime {
       data.reset();
       meta.reset();
       repl.reset();
+      for (auto &row : valid_rows) {
+        row.resize(axi_interconnect::AXI_LLC::valid_row_bytes(config));
+        std::memset(row.data(), 0, row.size());
+      }
       lookup_pending_valid = false;
       lookup_pending_index = 0;
       lookup_delay_left = 0;
@@ -175,13 +189,35 @@ struct AxiLlcTableRuntime {
     meta.seq({}, meta_write);
     repl.seq({}, repl_write);
 
+    if (table_out.valid.enable && table_out.valid.write &&
+        table_out.valid.index < valid_rows.size()) {
+      auto &row = valid_rows[table_out.valid.index];
+      const uint32_t way = table_out.valid.way;
+      const size_t byte_idx = static_cast<size_t>(way >> 3);
+      const uint8_t bit_mask = static_cast<uint8_t>(1u << (way & 0x7u));
+      if (byte_idx < row.size()) {
+        const bool set_valid =
+            byte_idx < table_out.valid.payload.size() &&
+            ((table_out.valid.payload.data()[byte_idx] & bit_mask) != 0);
+        if (set_valid) {
+          row.data()[byte_idx] =
+              static_cast<uint8_t>(row.data()[byte_idx] | bit_mask);
+        } else {
+          row.data()[byte_idx] =
+              static_cast<uint8_t>(row.data()[byte_idx] & ~bit_mask);
+        }
+      }
+    }
+
     const bool data_read_en = table_out.data.enable && !table_out.data.write;
     const bool meta_read_en = table_out.meta.enable && !table_out.meta.write;
+    const bool valid_read_en = table_out.valid.enable && !table_out.valid.write;
     const bool repl_read_en = table_out.repl.enable && !table_out.repl.write;
-    const bool any_read_en = data_read_en || meta_read_en || repl_read_en;
+    const bool any_read_en = data_read_en || meta_read_en || valid_read_en || repl_read_en;
     if (any_read_en) {
-      assert(data_read_en && meta_read_en && repl_read_en);
+      assert(data_read_en && meta_read_en && valid_read_en && repl_read_en);
       assert(table_out.data.index == table_out.meta.index);
+      assert(table_out.data.index == table_out.valid.index);
       assert(table_out.data.index == table_out.repl.index);
     }
 
