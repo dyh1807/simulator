@@ -28,8 +28,8 @@ struct SimConfig {
   std::string target_file;
   // 存储 Fast-forward 的指令数/周期数
   uint64_t fast_forward_count = 0;
-  // CKPT 模式下，O3 目标 warmup 步数（0~WARMUP，默认 1000 万）
-  uint64_t ckpt_warmup_target = 10000000ULL;
+  // CKPT 模式下，O3 目标 warmup 步数（0~WARMUP，默认使用配置里的 WARMUP）
+  uint64_t ckpt_warmup_target = static_cast<uint64_t>(WARMUP);
   bool ckpt_warmup_target_set = false;
   uint64_t max_commit_inst = static_cast<uint64_t>(MAX_COMMIT_INST);
   bool max_commit_inst_set = false;
@@ -45,9 +45,8 @@ void print_help(char *argv[]) {
   std::cout << "  -f, --fast-forward <num>    Number of cycles/insts to "
                "fast-forward (only for fast mode)"
             << std::endl;
-  std::cout << "  -w, --warmup <num>  In CKPT mode, target O3 "
-               "warmup steps in [0,100000000] (default: 10000000)"
-            << std::endl;
+  std::cout << "  -w, --warmup <num>  In CKPT mode, target O3 warmup steps in [0,"
+            << WARMUP << "] (default: " << WARMUP << ")" << std::endl;
   std::cout
       << "  -c, --max-commit <num>  Stop after <num> committed instructions "
          "(default: SIMPOINT_INTERVAL in CKPT mode, compile-time "
@@ -399,7 +398,8 @@ int main(int argc, char *argv[]) {
       return 130;
     }
 
-    if (cpu.ctx.perf.commit_num >= config.max_commit_inst) {
+    if (config.mode != SimConfig::CKPT &&
+        cpu.ctx.perf.commit_num >= config.max_commit_inst) {
       cpu.ctx.exit_reason = ExitReason::SIMPOINT;
       std::cout << "[sim] Reached MAX_COMMIT_INST=" << std::dec
                 << config.max_commit_inst << std::endl;
