@@ -245,6 +245,12 @@ struct AxiLlcTableRuntime {
         lookup_queued_valid = true;
         lookup_queued_index = req_index;
       } else if (lookup_pending_index != req_index) {
+        if (lookup_queued_valid && lookup_queued_index != req_index) {
+          std::fprintf(stderr,
+                       "[AxiLlcTableRuntime] queued lookup overwrite pending=%u old=%u new=%u\n",
+                       lookup_pending_index, lookup_queued_index, req_index);
+          assert(false && "AxiLlcTableRuntime supports at most one queued lookup");
+        }
         lookup_queued_valid = true;
         lookup_queued_index = req_index;
       }
