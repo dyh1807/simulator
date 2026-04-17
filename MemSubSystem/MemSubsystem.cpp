@@ -161,9 +161,6 @@ struct AxiLlcTableRuntime {
       return;
     }
     if (table_out.invalidate_all) {
-      data.reset();
-      meta.reset();
-      repl.reset();
       for (auto &row : valid_rows) {
         row.resize(axi_interconnect::AXI_LLC::valid_row_bytes(config));
         std::memset(row.data(), 0, row.size());
