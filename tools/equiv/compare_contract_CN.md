@@ -4,7 +4,7 @@
 
 ## 当前强比较项
 
-当前 comparator 做逐行强比较，事件集合为：
+当前 comparator 做**同序列、按事件类型规范化后的强比较**，事件集合为：
 
 - `READ_ACCEPT`
 - `WRITE_ACCEPT`
@@ -20,7 +20,7 @@
 
 - 事件类型必须一致
 - 事件顺序必须一致
-- 同一事件上的 `master/id/addr/size/bypass/data hash` 必须一致
+- 同一事件上的**规范化字段**必须一致
 
 其中 `MAINT_ACCEPT` 当前只针对 **stimulus 显式请求** 的 maintenance：
 
@@ -33,7 +33,7 @@
 
 当前 MVP 明确不比较：
 
-- lower AXI 原始 `AR/AW/W/B/R` 轨迹
+- lower AXI 原始 `id/size/burst/strb hash`
 - final DDR / MMIO / mapped-window memory state
 - 内部 table / queue / pending slot 状态
 
@@ -43,6 +43,7 @@
 
 当前 seed 生成和比较默认建立在下面这些约束上：
 
+- 顶层事件前允许存在 `warmup_cycles`
 - 不生成 overlapping same-master same-write-ID case
 - 不生成依赖 `invalidate_line` accept policy 差异的 case
 - 不生成依赖 parent host queued lookup hidden contract 的 case
@@ -79,7 +80,32 @@
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 
-这两条 seed 的目标是：
+这些 seed 的目标是：
 
 - 先证明 shared-stimulus + C++ runner + RTL replay + comparator 这条链路可运行
 - 并在当前共同合同子集内产出一致结果
+
+## 当前规范化规则
+
+为避免把不同抽象层的表示差异误判成语义差异，当前 comparator 使用以下规则：
+
+- `MODE_ACTIVE`
+  比较 `mode/offset`
+- `READ_ACCEPT`
+  比较 `master/id/addr/size/bypass`
+- `WRITE_ACCEPT`
+  比较 `master/id/addr/size/bypass/data0`
+- `READ_RESP`
+  当前只比较 `master/id/d0`
+- `WRITE_RESP`
+  比较 `master/id/code`
+- `MAINT_ACCEPT`
+  比较 `op/addr`
+- `AXI_AR_HS`
+  当前只比较 `addr`
+- `AXI_AW_HS`
+  当前只比较 `addr`
+- `AXI_W_HS`
+  当前只比较 `d0/last`
+
+换句话说，当前 MVP 已经把下游 AXI issue 纳入 compare，但还没有把所有 raw AXI 字段都冻结成强等价项。

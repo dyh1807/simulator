@@ -33,11 +33,17 @@ MVP 当前覆盖：
 
 当前不比较：
 
-- raw `axi_id`
-- lower AXI 全路径 normalized trace
+- raw `axi_id/size/burst/strb hash`
 - final DDR/MMIO state
 
 这些会在后续阶段扩展。
+
+当前 stimulus 额外支持：
+
+- `warmup_cycles`
+- `hold_until_accept`
+
+其中 `warmup_cycles` 用来吸收 RTL 顶层 reset 后的 invalidate sweep / reconfig busy 初始化窗口。
 
 ## 用法
 

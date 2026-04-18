@@ -1,5 +1,6 @@
 {
   "name": "mode1_bypass_rw",
+  "warmup_cycles": 8300,
   "tail_cycles": 6,
   "defaults": {
     "mode_req": 1,
@@ -20,10 +21,11 @@
       "addr": "0x80001000",
       "size": 3,
       "id": 1,
-      "bypass": 1
+      "bypass": 1,
+      "hold_until_accept": 1
     },
     {
-      "cycle": 4,
+      "cycle": 12,
       "type": "axi_r",
       "valid": 1,
       "id": 0,
@@ -48,6 +50,7 @@
       "size": 3,
       "id": 2,
       "bypass": 1,
+      "hold_until_accept": 1,
       "wdata_words": [
         "0xabc00000",
         "0xabc00001",
@@ -75,7 +78,7 @@
       ]
     },
     {
-      "cycle": 9,
+      "cycle": 18,
       "type": "axi_b",
       "valid": 1,
       "id": 0,

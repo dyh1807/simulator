@@ -39,7 +39,7 @@ def zero_frame(defaults):
         "axi_rlast": parse_int(defaults.get("axi_rlast", 0)),
         "axi_rdata_words": [parse_int(x) for x in defaults.get("axi_rdata_words", [0] * READ_BEAT_WORDS)] + [0] * READ_BEAT_WORDS,
         "read_req": [
-            {"valid": 0, "addr": 0, "size": 0, "id": 0, "bypass": 0}
+            {"valid": 0, "addr": 0, "size": 0, "id": 0, "bypass": 0, "hold_until_accept": 0}
             for _ in range(NUM_READ_MASTERS)
         ],
         "write_req": [
@@ -49,6 +49,7 @@ def zero_frame(defaults):
                 "size": 0,
                 "id": 0,
                 "bypass": 0,
+                "hold_until_accept": 0,
                 "wdata_words": [0] * WRITE_WORDS,
                 "wstrb_bytes": [0] * WRITE_STRB_BYTES,
             }
@@ -76,6 +77,7 @@ def apply_event(frame, event):
         rq["size"] = parse_int(event["size"])
         rq["id"] = parse_int(event["id"])
         rq["bypass"] = parse_int(event.get("bypass", 0))
+        rq["hold_until_accept"] = parse_int(event.get("hold_until_accept", 0))
     elif t == "write_req":
         m = parse_int(event["master"])
         rq = frame["write_req"][m]
@@ -84,6 +86,7 @@ def apply_event(frame, event):
         rq["size"] = parse_int(event["size"])
         rq["id"] = parse_int(event["id"])
         rq["bypass"] = parse_int(event.get("bypass", 0))
+        rq["hold_until_accept"] = parse_int(event.get("hold_until_accept", 0))
         words = [parse_int(x) for x in event.get("wdata_words", [])]
         bytes_ = [parse_int(x) for x in event.get("wstrb_bytes", [])]
         rq["wdata_words"] = (words + [0] * WRITE_WORDS)[:WRITE_WORDS]
@@ -136,8 +139,8 @@ def emit_header(frames, out_path):
     lines.append("#include <cstdint>")
     lines.append("namespace equiv_case {")
     lines.append(f"constexpr int kNumCycles = {len(frames)};")
-    lines.append("struct ReadReq { bool valid; uint32_t addr; uint8_t size; uint8_t id; bool bypass; };")
-    lines.append("struct WriteReq { bool valid; uint32_t addr; uint8_t size; uint8_t id; bool bypass; std::array<uint32_t, 16> wdata_words; std::array<uint8_t, 64> wstrb_bytes; };")
+    lines.append("struct ReadReq { bool valid; uint32_t addr; uint8_t size; uint8_t id; bool bypass; bool hold_until_accept; };")
+    lines.append("struct WriteReq { bool valid; uint32_t addr; uint8_t size; uint8_t id; bool bypass; bool hold_until_accept; std::array<uint32_t, 16> wdata_words; std::array<uint8_t, 64> wstrb_bytes; };")
     lines.append("struct Frame {")
     lines.append("  uint8_t mode_req;")
     lines.append("  uint32_t llc_mapped_offset_req;")
@@ -157,14 +160,14 @@ def emit_header(frames, out_path):
     for frame in frames:
         rr = []
         for r in frame["read_req"]:
-            rr.append(f"ReadReq{{{int(r['valid'])}, 0x{r['addr']:08x}u, {r['size']}, {r['id']}, {int(r['bypass'])}}}")
+            rr.append(f"ReadReq{{{int(r['valid'])}, 0x{r['addr']:08x}u, {r['size']}, {r['id']}, {int(r['bypass'])}, {int(r['hold_until_accept'])}}}")
         wr = []
         for w in frame["write_req"]:
             words = ", ".join(f"0x{x:08x}u" for x in w["wdata_words"])
             strb = ", ".join(str(int(x)) for x in w["wstrb_bytes"])
             wr.append(
                 "WriteReq{" +
-                f"{int(w['valid'])}, 0x{w['addr']:08x}u, {w['size']}, {w['id']}, {int(w['bypass'])}, " +
+                f"{int(w['valid'])}, 0x{w['addr']:08x}u, {w['size']}, {w['id']}, {int(w['bypass'])}, {int(w['hold_until_accept'])}, " +
                 f"{{{words}}}, {{{strb}}}" +
                 "}"
             )
@@ -211,6 +214,7 @@ def emit_verilog(frames, out_path):
     lines.append("reg [31:0] stim_read_req_size [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [15:0] stim_read_req_id [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [3:0] stim_read_req_bypass [0:EQUIV_NUM_CYCLES-1];")
+    lines.append("reg [3:0] stim_read_req_hold [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [1:0] stim_write_req_valid [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [63:0] stim_write_req_addr [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [1023:0] stim_write_req_wdata [0:EQUIV_NUM_CYCLES-1];")
@@ -218,6 +222,7 @@ def emit_verilog(frames, out_path):
     lines.append("reg [15:0] stim_write_req_size [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [7:0] stim_write_req_id [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [1:0] stim_write_req_bypass [0:EQUIV_NUM_CYCLES-1];")
+    lines.append("reg [1:0] stim_write_req_hold [0:EQUIV_NUM_CYCLES-1];")
     lines.append("integer equiv_init_idx;")
     lines.append("initial begin")
     lines.append("  for (equiv_init_idx = 0; equiv_init_idx < EQUIV_NUM_CYCLES; equiv_init_idx = equiv_init_idx + 1) begin")
@@ -244,6 +249,7 @@ def emit_verilog(frames, out_path):
     lines.append("    stim_read_req_size[equiv_init_idx] = 32'd0;")
     lines.append("    stim_read_req_id[equiv_init_idx] = 16'd0;")
     lines.append("    stim_read_req_bypass[equiv_init_idx] = 4'd0;")
+    lines.append("    stim_read_req_hold[equiv_init_idx] = 4'd0;")
     lines.append("    stim_write_req_valid[equiv_init_idx] = 2'd0;")
     lines.append("    stim_write_req_addr[equiv_init_idx] = 64'd0;")
     lines.append("    stim_write_req_wdata[equiv_init_idx] = 1024'd0;")
@@ -251,6 +257,7 @@ def emit_verilog(frames, out_path):
     lines.append("    stim_write_req_size[equiv_init_idx] = 16'd0;")
     lines.append("    stim_write_req_id[equiv_init_idx] = 8'd0;")
     lines.append("    stim_write_req_bypass[equiv_init_idx] = 2'd0;")
+    lines.append("    stim_write_req_hold[equiv_init_idx] = 2'd0;")
     lines.append("  end")
     for i, frame in enumerate(frames):
         lines.append(f"  stim_mode_req[{i}] = 2'd{frame['mode_req']};")
@@ -276,9 +283,11 @@ def emit_verilog(frames, out_path):
         read_size = 0
         read_id = 0
         read_bypass = 0
+        read_hold = 0
         for m, req in enumerate(frame["read_req"]):
             read_valid |= (req["valid"] & 1) << m
             read_bypass |= (req["bypass"] & 1) << m
+            read_hold |= (req["hold_until_accept"] & 1) << m
             read_addr_words.append(req["addr"])
             read_size |= (req["size"] & 0xFF) << (m * 8)
             read_id |= (req["id"] & 0xF) << (m * 4)
@@ -287,6 +296,7 @@ def emit_verilog(frames, out_path):
         lines.append(f"  stim_read_req_size[{i}] = 32'h{read_size:08x};")
         lines.append(f"  stim_read_req_id[{i}] = 16'h{read_id:04x};")
         lines.append(f"  stim_read_req_bypass[{i}] = 4'h{read_bypass:x};")
+        lines.append(f"  stim_read_req_hold[{i}] = 4'h{read_hold:x};")
         write_valid = 0
         write_addr_words = []
         write_wdata_words = []
@@ -294,9 +304,11 @@ def emit_verilog(frames, out_path):
         write_size = 0
         write_id = 0
         write_bypass = 0
+        write_hold = 0
         for m, req in enumerate(frame["write_req"]):
             write_valid |= (req["valid"] & 1) << m
             write_bypass |= (req["bypass"] & 1) << m
+            write_hold |= (req["hold_until_accept"] & 1) << m
             write_addr_words.append(req["addr"])
             write_size |= (req["size"] & 0xFF) << (m * 8)
             write_id |= (req["id"] & 0xF) << (m * 4)
@@ -309,6 +321,7 @@ def emit_verilog(frames, out_path):
         lines.append(f"  stim_write_req_size[{i}] = 16'h{write_size:04x};")
         lines.append(f"  stim_write_req_id[{i}] = 8'h{write_id:02x};")
         lines.append(f"  stim_write_req_bypass[{i}] = 2'h{write_bypass:x};")
+        lines.append(f"  stim_write_req_hold[{i}] = 2'h{write_hold:x};")
     lines.append("end")
     out_path.write_text("\n".join(lines) + "\n")
 
@@ -319,13 +332,19 @@ def main():
     ap.add_argument("outdir")
     args = ap.parse_args()
     seed = json.loads(Path(args.seed).read_text())
+    warmup_cycles = parse_int(seed.get("warmup_cycles", 0))
     max_cycle = 0
     for ev in seed.get("events", []):
-        max_cycle = max(max_cycle, parse_int(ev["cycle"]))
+        start_cycle = warmup_cycles + parse_int(ev["cycle"])
+        duration = parse_int(ev.get("duration", 1))
+        max_cycle = max(max_cycle, start_cycle + max(duration, 1) - 1)
     total_cycles = max_cycle + 1 + parse_int(seed.get("tail_cycles", 0))
     frames = [zero_frame(seed.get("defaults", {})) for _ in range(total_cycles)]
     for ev in seed.get("events", []):
-        apply_event(frames[parse_int(ev["cycle"])], ev)
+        start_cycle = warmup_cycles + parse_int(ev["cycle"])
+        duration = max(parse_int(ev.get("duration", 1)), 1)
+        for cycle in range(start_cycle, start_cycle + duration):
+            apply_event(frames[cycle], ev)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     emit_header(frames, outdir / "case_data.h")
@@ -333,6 +352,7 @@ def main():
     meta = {
         "name": seed.get("name", Path(args.seed).stem),
         "num_cycles": total_cycles,
+        "warmup_cycles": warmup_cycles,
     }
     (outdir / "case_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 

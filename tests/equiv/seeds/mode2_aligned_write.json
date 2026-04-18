@@ -1,5 +1,6 @@
 {
   "name": "mode2_aligned_write",
+  "warmup_cycles": 8300,
   "tail_cycles": 24,
   "defaults": {
     "mode_req": 1,
@@ -26,6 +27,7 @@
       "size": 3,
       "id": 4,
       "bypass": 0,
+      "hold_until_accept": 1,
       "wdata_words": [
         "0x12345678",
         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
@@ -39,7 +41,7 @@
       ]
     },
     {
-      "cycle": 9,
+      "cycle": 18,
       "type": "axi_b",
       "valid": 1,
       "id": 0,

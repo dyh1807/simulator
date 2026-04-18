@@ -1,6 +1,7 @@
 {
   "name": "mode_transition_flush_write_block",
-  "tail_cycles": 6,
+  "warmup_cycles": 8300,
+  "tail_cycles": 24,
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": 0,
@@ -26,6 +27,7 @@
       "size": 3,
       "id": 3,
       "bypass": 0,
+      "hold_until_accept": 1,
       "wdata_words": [
         "0xdeadbeef",
         0,0,0,0,0,0,0,0,0,0,0,0,0,0,0

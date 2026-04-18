@@ -49,6 +49,16 @@ void clear_inputs(AXI_Interconnect &interconnect) {
   }
 }
 
+struct HeldReadReq {
+  bool active = false;
+  equiv_case::ReadReq req{};
+};
+
+struct HeldWriteReq {
+  bool active = false;
+  equiv_case::WriteReq req{};
+};
+
 uint32_t hash_read_words(const axi_interconnect::WideReadData_t &data) {
   uint32_t h = 0x811C9DC5u;
   for (int i = 0; i < 8; ++i) {
@@ -94,7 +104,9 @@ uint32_t hash_axi_strb(const sim_ddr::axi_strb_t &strb) {
 }
 
 void apply_frame(AXI_Interconnect &interconnect, FakeLlcTables &tables,
-                 const equiv_case::Frame &frame) {
+                 const equiv_case::Frame &frame,
+                 HeldReadReq held_read[axi_interconnect::NUM_READ_MASTERS],
+                 HeldWriteReq held_write[axi_interconnect::NUM_WRITE_MASTERS]) {
   clear_inputs(interconnect);
 
   interconnect.mode = frame.mode_req;
@@ -104,7 +116,12 @@ void apply_frame(AXI_Interconnect &interconnect, FakeLlcTables &tables,
                                        frame.invalidate_line_addr);
 
   for (int m = 0; m < axi_interconnect::NUM_READ_MASTERS; ++m) {
-    const auto &src = frame.read_req[m];
+    if (frame.read_req[m].valid && frame.read_req[m].hold_until_accept &&
+        !held_read[m].active) {
+      held_read[m].active = true;
+      held_read[m].req = frame.read_req[m];
+    }
+    const auto &src = held_read[m].active ? held_read[m].req : frame.read_req[m];
     auto &dst = interconnect.read_ports[m];
     dst.req.valid = src.valid;
     dst.req.addr = src.addr;
@@ -115,7 +132,12 @@ void apply_frame(AXI_Interconnect &interconnect, FakeLlcTables &tables,
   }
 
   for (int m = 0; m < axi_interconnect::NUM_WRITE_MASTERS; ++m) {
-    const auto &src = frame.write_req[m];
+    if (frame.write_req[m].valid && frame.write_req[m].hold_until_accept &&
+        !held_write[m].active) {
+      held_write[m].active = true;
+      held_write[m].req = frame.write_req[m];
+    }
+    const auto &src = held_write[m].active ? held_write[m].req : frame.write_req[m];
     auto &dst = interconnect.write_ports[m];
     dst.req.valid = src.valid;
     dst.req.addr = src.addr;
@@ -173,6 +195,8 @@ int main(int argc, char **argv) {
   interconnect.set_llc_config(cfg);
   interconnect.init();
   tables.init(cfg);
+  HeldReadReq held_read[axi_interconnect::NUM_READ_MASTERS];
+  HeldWriteReq held_write[axi_interconnect::NUM_WRITE_MASTERS];
 
   uint8_t prev_mode = 0xFF;
   uint32_t prev_offset = 0xFFFFFFFFu;
@@ -180,35 +204,47 @@ int main(int argc, char **argv) {
   for (int cycle = 0; cycle < equiv_case::kNumCycles; ++cycle) {
     const auto &frame = equiv_case::kFrames[cycle];
     const int trace_cycle = cycle + 1;
-    apply_frame(interconnect, tables, frame);
+    apply_frame(interconnect, tables, frame, held_read, held_write);
     interconnect.comb_outputs();
     interconnect.comb_inputs();
 
     for (int m = 0; m < axi_interconnect::NUM_READ_MASTERS; ++m) {
       if (interconnect.read_req_accepted[m]) {
-        const auto &rq = frame.read_req[m];
+        const auto &rq = interconnect.read_ports[m].req;
         std::fprintf(fp,
                      "%d READ_ACCEPT m=%d id=%u addr=0x%08x size=%u bypass=%u\n",
                      trace_cycle, m, static_cast<unsigned>(rq.id), rq.addr,
-                     static_cast<unsigned>(rq.size),
+                     static_cast<unsigned>(rq.total_size),
                      static_cast<unsigned>(rq.bypass));
+      }
+      if (held_read[m].active && interconnect.read_req_accepted[m]) {
+        held_read[m].active = false;
       }
     }
     for (int m = 0; m < axi_interconnect::NUM_WRITE_MASTERS; ++m) {
       if (interconnect.write_req_accepted[m]) {
-        const auto &rq = frame.write_req[m];
+        const auto &rq = interconnect.write_ports[m].req;
         std::fprintf(
             fp,
             "%d WRITE_ACCEPT m=%d id=%u addr=0x%08x size=%u bypass=%u data0=0x%08x strbhash=0x%08x\n",
             trace_cycle, m, static_cast<unsigned>(rq.id), rq.addr,
-            static_cast<unsigned>(rq.size),
-            static_cast<unsigned>(rq.bypass), rq.wdata_words[0],
-            hash_write_strobe(interconnect.write_ports[m].req.wstrb));
+            static_cast<unsigned>(rq.total_size),
+            static_cast<unsigned>(rq.bypass), rq.wdata[0],
+            hash_write_strobe(rq.wstrb));
+      }
+      if (held_write[m].active && interconnect.write_req_accepted[m]) {
+        held_write[m].active = false;
       }
     }
     for (int m = 0; m < axi_interconnect::NUM_READ_MASTERS; ++m) {
       auto &resp = interconnect.read_ports[m].resp;
-      if (resp.valid && interconnect.read_ports[m].resp.ready) {
+      const bool llc_fresh_visible =
+          interconnect.llc_enabled() &&
+          interconnect.llc.io.regs.read_resp_valid_r[m] &&
+          interconnect.llc.io.regs.read_resp_fresh_r[m] &&
+          interconnect.llc.io.regs.read_resp_id_r[m] == resp.id;
+      if (resp.valid && interconnect.read_ports[m].resp.ready &&
+          !llc_fresh_visible) {
         std::fprintf(
             fp,
             "%d READ_RESP m=%d id=%u hash=0x%08x d0=0x%08x d1=0x%08x\n",
