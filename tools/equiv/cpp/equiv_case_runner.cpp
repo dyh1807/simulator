@@ -71,6 +71,28 @@ uint32_t hash_write_strobe(const axi_interconnect::WideWriteStrb_t &wstrb) {
   return h;
 }
 
+uint32_t hash_axi_data(const sim_ddr::axi_data_t &data) {
+  uint32_t h = 0x2468ACE1u;
+  const uint32_t word_count = sim_ddr::SIM_DDR_BEAT_BYTES / 4u;
+  for (uint32_t i = 0; i < word_count; ++i) {
+    h = ((h << 5) | (h >> 27)) ^
+        axi_compat::get_u32(data, i) ^ static_cast<uint32_t>(i);
+  }
+  return h;
+}
+
+uint32_t hash_axi_strb(const sim_ddr::axi_strb_t &strb) {
+  uint32_t h = 0x5A5A1357u;
+  for (uint32_t i = 0; i < sim_ddr::SIM_DDR_BEAT_BYTES; i += 4u) {
+    uint32_t nib = 0;
+    for (uint32_t b = 0; b < 4u && (i + b) < sim_ddr::SIM_DDR_BEAT_BYTES; ++b) {
+      nib |= static_cast<uint32_t>(axi_compat::get_byte(strb, i + b) & 0x1u) << b;
+    }
+    h = ((h << 3) | (h >> 29)) ^ nib ^ i;
+  }
+  return h;
+}
+
 void apply_frame(AXI_Interconnect &interconnect, FakeLlcTables &tables,
                  const equiv_case::Frame &frame) {
   clear_inputs(interconnect);
@@ -202,12 +224,42 @@ int main(int argc, char **argv) {
                      static_cast<unsigned>(resp.resp));
       }
     }
-    if (interconnect.llc_invalidate_line_accepted()) {
+    if (frame.invalidate_line_valid &&
+        interconnect.llc_invalidate_line_accepted()) {
       std::fprintf(fp, "%d MAINT_ACCEPT op=invalidate_line addr=0x%08x\n",
                    trace_cycle, frame.invalidate_line_addr);
     }
-    if (interconnect.llc_invalidate_all_accepted()) {
+    if (frame.invalidate_all_valid && interconnect.llc_invalidate_all_accepted()) {
       std::fprintf(fp, "%d MAINT_ACCEPT op=invalidate_all\n", trace_cycle);
+    }
+    if (interconnect.axi_io.ar.arvalid && interconnect.axi_io.ar.arready) {
+      std::fprintf(fp,
+                   "%d AXI_AR_HS id=%u addr=0x%08x len=%u size=%u burst=%u\n",
+                   trace_cycle,
+                   static_cast<unsigned>(interconnect.axi_io.ar.arid),
+                   static_cast<unsigned>(interconnect.axi_io.ar.araddr),
+                   static_cast<unsigned>(interconnect.axi_io.ar.arlen),
+                   static_cast<unsigned>(interconnect.axi_io.ar.arsize),
+                   static_cast<unsigned>(interconnect.axi_io.ar.arburst));
+    }
+    if (interconnect.axi_io.aw.awvalid && interconnect.axi_io.aw.awready) {
+      std::fprintf(fp,
+                   "%d AXI_AW_HS id=%u addr=0x%08x len=%u size=%u burst=%u\n",
+                   trace_cycle,
+                   static_cast<unsigned>(interconnect.axi_io.aw.awid),
+                   static_cast<unsigned>(interconnect.axi_io.aw.awaddr),
+                   static_cast<unsigned>(interconnect.axi_io.aw.awlen),
+                   static_cast<unsigned>(interconnect.axi_io.aw.awsize),
+                   static_cast<unsigned>(interconnect.axi_io.aw.awburst));
+    }
+    if (interconnect.axi_io.w.wvalid && interconnect.axi_io.w.wready) {
+      std::fprintf(fp,
+                   "%d AXI_W_HS hash=0x%08x d0=0x%08x strbhash=0x%08x last=%u\n",
+                   trace_cycle,
+                   hash_axi_data(interconnect.axi_io.w.wdata),
+                   axi_compat::get_u32(interconnect.axi_io.w.wdata, 0),
+                   hash_axi_strb(interconnect.axi_io.w.wstrb),
+                   static_cast<unsigned>(interconnect.axi_io.w.wlast));
     }
     if (interconnect.runtime_mode_ != prev_mode ||
         interconnect.llc_mapped_offset_ != prev_offset) {

@@ -11,6 +11,9 @@
 - `READ_RESP`
 - `WRITE_RESP`
 - `MAINT_ACCEPT`
+- `AXI_AR_HS`
+- `AXI_AW_HS`
+- `AXI_W_HS`
 - `MODE_ACTIVE`
 
 这意味着：
@@ -18,6 +21,13 @@
 - 事件类型必须一致
 - 事件顺序必须一致
 - 同一事件上的 `master/id/addr/size/bypass/data hash` 必须一致
+
+其中 `MAINT_ACCEPT` 当前只针对 **stimulus 显式请求** 的 maintenance：
+
+- `invalidate_all_valid`
+- `invalidate_line_valid`
+
+内部 mode-transition flush 不计入 `MAINT_ACCEPT` compare。
 
 ## 当前未纳入比较的项
 
@@ -67,6 +77,7 @@
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
+- `tests/equiv/seeds/mode2_aligned_write.json`
 
 这两条 seed 的目标是：
 

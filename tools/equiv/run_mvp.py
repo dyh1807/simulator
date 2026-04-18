@@ -56,6 +56,7 @@ def main():
     seeds = args.seed or [
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_bypass_rw.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode_transition_flush_write_block.json"),
+        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode2_aligned_write.json"),
     ]
 
     for seed in seeds:

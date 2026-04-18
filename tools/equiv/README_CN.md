@@ -26,6 +26,9 @@ MVP 当前覆盖：
 - `READ_RESP`
 - `WRITE_RESP`
 - `MAINT_ACCEPT`
+- `AXI_AR_HS`
+- `AXI_AW_HS`
+- `AXI_W_HS`
 - `MODE_ACTIVE`
 
 当前不比较：
@@ -56,6 +59,7 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
+- `tests/equiv/seeds/mode2_aligned_write.json`
 
 合同边界见：
 
