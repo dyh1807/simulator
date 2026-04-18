@@ -6,6 +6,7 @@
 - C++ reference runner
 - RTL replay/trace 运行脚本
 - trace comparator
+- compare contract 文档
 
 当前目标是做一个可运行的 MVP，而不是一次做完完整 fuzz 框架。
 
@@ -55,6 +56,10 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
+
+合同边界见：
+
+- `tools/equiv/compare_contract_CN.md`
 
 如需用独立的 submodule worktree 做 C++/RTL 双侧构建，可显式指定：
 
