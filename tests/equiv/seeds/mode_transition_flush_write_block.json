@@ -1,0 +1,42 @@
+{
+  "name": "mode_transition_flush_write_block",
+  "tail_cycles": 6,
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": 0,
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "set_mode",
+      "mode": 2
+    },
+    {
+      "cycle": 1,
+      "type": "write_req",
+      "master": 0,
+      "addr": "0x80004000",
+      "size": 3,
+      "id": 3,
+      "bypass": 0,
+      "wdata_words": [
+        "0xdeadbeef",
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      ],
+      "wstrb_bytes": [
+        1,1,1,1,
+        0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      ]
+    }
+  ]
+}

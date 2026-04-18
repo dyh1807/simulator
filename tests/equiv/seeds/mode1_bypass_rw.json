@@ -1,0 +1,85 @@
+{
+  "name": "mode1_bypass_rw",
+  "tail_cycles": 6,
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": 0,
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "read_req",
+      "master": 0,
+      "addr": "0x80001000",
+      "size": 3,
+      "id": 1,
+      "bypass": 1
+    },
+    {
+      "cycle": 4,
+      "type": "axi_r",
+      "valid": 1,
+      "id": 0,
+      "resp": 0,
+      "last": 1,
+      "data_words": [
+        "0x11111111",
+        "0x22222222",
+        "0x33333333",
+        "0x44444444",
+        "0x55555555",
+        "0x66666666",
+        "0x77777777",
+        "0x88888888"
+      ]
+    },
+    {
+      "cycle": 6,
+      "type": "write_req",
+      "master": 0,
+      "addr": "0x80002000",
+      "size": 3,
+      "id": 2,
+      "bypass": 1,
+      "wdata_words": [
+        "0xabc00000",
+        "0xabc00001",
+        "0xabc00002",
+        "0xabc00003",
+        "0xabc00004",
+        "0xabc00005",
+        "0xabc00006",
+        "0xabc00007",
+        "0xabc00008",
+        "0xabc00009",
+        "0xabc0000a",
+        "0xabc0000b",
+        "0xabc0000c",
+        "0xabc0000d",
+        "0xabc0000e",
+        "0xabc0000f"
+      ],
+      "wstrb_bytes": [
+        1,1,1,1,
+        0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      ]
+    },
+    {
+      "cycle": 9,
+      "type": "axi_b",
+      "valid": 1,
+      "id": 0,
+      "resp": 0
+    }
+  ]
+}
