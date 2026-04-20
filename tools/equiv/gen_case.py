@@ -29,6 +29,16 @@ def parse_final_mem_samples(seed):
     return out
 
 
+def parse_final_mmio_samples(seed):
+    out = []
+    for item in seed.get("final_mmio_samples", []):
+        if isinstance(item, dict):
+            out.append(parse_int(item["addr"]))
+        else:
+            out.append(parse_int(item))
+    return out
+
+
 def parse_final_mapped_samples(seed):
     out = []
     for item in seed.get("final_mapped_samples", []):
@@ -159,7 +169,8 @@ def flatten_bytes(bytes_, total_bits):
     return f"{total_bits}'h{value:0{width_hex}x}"
 
 
-def emit_header(frames, final_mem_samples, final_mapped_samples, out_path):
+def emit_header(frames, final_mem_samples, final_mmio_samples,
+                final_mapped_samples, out_path):
     lines = []
     lines.append("#pragma once")
     lines.append("#include <array>")
@@ -167,6 +178,7 @@ def emit_header(frames, final_mem_samples, final_mapped_samples, out_path):
     lines.append("namespace equiv_case {")
     lines.append(f"constexpr int kNumCycles = {len(frames)};")
     lines.append(f"constexpr int kNumFinalMemSamples = {len(final_mem_samples)};")
+    lines.append(f"constexpr int kNumFinalMmioSamples = {len(final_mmio_samples)};")
     lines.append(f"constexpr int kNumFinalMappedSamples = {len(final_mapped_samples)};")
     if final_mem_samples:
         addrs = ", ".join(f"0x{x:08x}u" for x in final_mem_samples)
@@ -178,6 +190,17 @@ def emit_header(frames, final_mem_samples, final_mapped_samples, out_path):
         lines.append(
             "inline constexpr std::array<uint32_t, kNumFinalMemSamples> "
             "kFinalMemSampleAddrs = {};"
+        )
+    if final_mmio_samples:
+        addrs = ", ".join(f"0x{x:08x}u" for x in final_mmio_samples)
+        lines.append(
+            f"inline constexpr std::array<uint32_t, kNumFinalMmioSamples> "
+            f"kFinalMmioSampleAddrs = {{{addrs}}};"
+        )
+    else:
+        lines.append(
+            "inline constexpr std::array<uint32_t, kNumFinalMmioSamples> "
+            "kFinalMmioSampleAddrs = {};"
         )
     if final_mapped_samples:
         addrs = ", ".join(f"0x{x:08x}u" for x in final_mapped_samples)
@@ -245,7 +268,8 @@ def emit_header(frames, final_mem_samples, final_mapped_samples, out_path):
     out_path.write_text("\n".join(lines) + "\n")
 
 
-def emit_verilog(frames, final_mem_samples, final_mapped_samples, out_path):
+def emit_verilog(frames, final_mem_samples, final_mmio_samples,
+                 final_mapped_samples, out_path):
     lines = []
     lines.append("localparam integer EQUIV_NUM_CYCLES = %d;" % len(frames))
     lines.append(
@@ -255,6 +279,14 @@ def emit_verilog(frames, final_mem_samples, final_mapped_samples, out_path):
     lines.append(
         "localparam integer EQUIV_NUM_FINAL_MEM_STORAGE_SAMPLES = "
         "(EQUIV_NUM_FINAL_MEM_SAMPLES > 0) ? EQUIV_NUM_FINAL_MEM_SAMPLES : 1;"
+    )
+    lines.append(
+        "localparam integer EQUIV_NUM_FINAL_MMIO_SAMPLES = %d;" %
+        len(final_mmio_samples)
+    )
+    lines.append(
+        "localparam integer EQUIV_NUM_FINAL_MMIO_STORAGE_SAMPLES = "
+        "(EQUIV_NUM_FINAL_MMIO_SAMPLES > 0) ? EQUIV_NUM_FINAL_MMIO_SAMPLES : 1;"
     )
     lines.append(
         "localparam integer EQUIV_NUM_FINAL_MAPPED_SAMPLES = %d;" %
@@ -267,6 +299,10 @@ def emit_verilog(frames, final_mem_samples, final_mapped_samples, out_path):
     lines.append(
         "reg [31:0] stim_final_mem_sample_addr "
         "[0:EQUIV_NUM_FINAL_MEM_STORAGE_SAMPLES-1];"
+    )
+    lines.append(
+        "reg [31:0] stim_final_mmio_sample_addr "
+        "[0:EQUIV_NUM_FINAL_MMIO_STORAGE_SAMPLES-1];"
     )
     lines.append(
         "reg [31:0] stim_final_mapped_sample_addr "
@@ -347,11 +383,16 @@ def emit_verilog(frames, final_mem_samples, final_mapped_samples, out_path):
     lines.append("  for (equiv_init_idx = 0; equiv_init_idx < EQUIV_NUM_FINAL_MEM_STORAGE_SAMPLES; equiv_init_idx = equiv_init_idx + 1) begin")
     lines.append("    stim_final_mem_sample_addr[equiv_init_idx] = 32'd0;")
     lines.append("  end")
+    lines.append("  for (equiv_init_idx = 0; equiv_init_idx < EQUIV_NUM_FINAL_MMIO_STORAGE_SAMPLES; equiv_init_idx = equiv_init_idx + 1) begin")
+    lines.append("    stim_final_mmio_sample_addr[equiv_init_idx] = 32'd0;")
+    lines.append("  end")
     lines.append("  for (equiv_init_idx = 0; equiv_init_idx < EQUIV_NUM_FINAL_MAPPED_STORAGE_SAMPLES; equiv_init_idx = equiv_init_idx + 1) begin")
     lines.append("    stim_final_mapped_sample_addr[equiv_init_idx] = 32'd0;")
     lines.append("  end")
     for i, addr in enumerate(final_mem_samples):
         lines.append(f"  stim_final_mem_sample_addr[{i}] = 32'h{addr:08x};")
+    for i, addr in enumerate(final_mmio_samples):
+        lines.append(f"  stim_final_mmio_sample_addr[{i}] = 32'h{addr:08x};")
     for i, addr in enumerate(final_mapped_samples):
         lines.append(f"  stim_final_mapped_sample_addr[{i}] = 32'h{addr:08x};")
     for i, frame in enumerate(frames):
@@ -445,14 +486,18 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     final_mem_samples = parse_final_mem_samples(seed)
+    final_mmio_samples = parse_final_mmio_samples(seed)
     final_mapped_samples = parse_final_mapped_samples(seed)
-    emit_header(frames, final_mem_samples, final_mapped_samples, outdir / "case_data.h")
-    emit_verilog(frames, final_mem_samples, final_mapped_samples, outdir / "equiv_case.vh")
+    emit_header(frames, final_mem_samples, final_mmio_samples,
+                final_mapped_samples, outdir / "case_data.h")
+    emit_verilog(frames, final_mem_samples, final_mmio_samples,
+                 final_mapped_samples, outdir / "equiv_case.vh")
     meta = {
         "name": seed.get("name", Path(args.seed).stem),
         "num_cycles": total_cycles,
         "warmup_cycles": warmup_cycles,
         "final_mem_samples": final_mem_samples,
+        "final_mmio_samples": final_mmio_samples,
         "final_mapped_samples": final_mapped_samples,
     }
     (outdir / "case_meta.json").write_text(json.dumps(meta, indent=2) + "\n")

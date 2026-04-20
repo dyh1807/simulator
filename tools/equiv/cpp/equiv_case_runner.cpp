@@ -85,9 +85,10 @@ template <size_t N>
 void apply_line_to_samples(const uint32_t base_addr,
                            const std::array<uint32_t, 16> &line_words,
                            std::array<bool, N> &known,
-                           std::array<uint32_t, N> &values) {
+                           std::array<uint32_t, N> &values,
+                           const std::array<uint32_t, N> &addrs) {
   for (size_t idx = 0; idx < N; ++idx) {
-    const uint32_t sample_addr = equiv_case::kFinalMemSampleAddrs[idx];
+    const uint32_t sample_addr = addrs[idx];
     if (sample_addr < base_addr || sample_addr >= (base_addr + 64u)) {
       continue;
     }
@@ -104,9 +105,10 @@ void apply_write_beat_to_samples(const uint32_t beat_addr,
                                  const sim_ddr::axi_data_t &wdata,
                                  const sim_ddr::axi_strb_t &wstrb,
                                  std::array<bool, N> &known,
-                                 std::array<uint32_t, N> &values) {
+                                 std::array<uint32_t, N> &values,
+                                 const std::array<uint32_t, N> &addrs) {
   for (size_t idx = 0; idx < N; ++idx) {
-    const uint32_t sample_addr = equiv_case::kFinalMemSampleAddrs[idx];
+    const uint32_t sample_addr = addrs[idx];
     if (sample_addr < beat_addr ||
         sample_addr >= (beat_addr + sim_ddr::SIM_DDR_BEAT_BYTES)) {
       continue;
@@ -376,6 +378,8 @@ int main(int argc, char **argv) {
   GeneratedMemReadLineResp gen_mem_read_resp;
   std::array<bool, equiv_case::kNumFinalMemSamples> final_mem_known{};
   std::array<uint32_t, equiv_case::kNumFinalMemSamples> final_mem_values{};
+  std::array<bool, equiv_case::kNumFinalMmioSamples> final_mmio_known{};
+  std::array<uint32_t, equiv_case::kNumFinalMmioSamples> final_mmio_values{};
   std::array<bool, equiv_case::kNumFinalMappedSamples> final_mapped_known{};
   std::array<uint32_t, equiv_case::kNumFinalMappedSamples> final_mapped_values{};
   bool final_mem_write_pending = false;
@@ -403,7 +407,8 @@ int main(int argc, char **argv) {
       if (pending_idx >= 0) {
         const auto &txn = interconnect.r_pending[static_cast<size_t>(pending_idx)];
         apply_line_to_samples(txn.addr, gen_mem_read_resp.line_words,
-                              final_mem_known, final_mem_values);
+                              final_mem_known, final_mem_values,
+                              equiv_case::kFinalMemSampleAddrs);
       }
     }
     drive_generated_mem_read_line_resp(interconnect, gen_mem_read_resp);
@@ -531,7 +536,12 @@ int main(int argc, char **argv) {
             static_cast<uint32_t>(final_mem_write_beat_idx) * sim_ddr::SIM_DDR_BEAT_BYTES;
         apply_write_beat_to_samples(beat_addr, interconnect.axi_io.w.wdata,
                                     interconnect.axi_io.w.wstrb,
-                                    final_mem_known, final_mem_values);
+                                    final_mem_known, final_mem_values,
+                                    equiv_case::kFinalMemSampleAddrs);
+        apply_write_beat_to_samples(beat_addr, interconnect.axi_io.w.wdata,
+                                    interconnect.axi_io.w.wstrb,
+                                    final_mmio_known, final_mmio_values,
+                                    equiv_case::kFinalMmioSampleAddrs);
         if (interconnect.axi_io.w.wlast) {
           final_mem_write_pending = false;
           final_mem_write_beat_idx = 0;
@@ -592,6 +602,13 @@ int main(int argc, char **argv) {
                  equiv_case::kFinalMemSampleAddrs[idx],
                  final_mem_known[idx] ? 1u : 0u,
                  final_mem_values[idx]);
+  }
+  for (int idx = 0; idx < equiv_case::kNumFinalMmioSamples; ++idx) {
+    std::fprintf(fp, "%d FINAL_MMIO addr=0x%08x known=%u val=0x%08x\n",
+                 equiv_case::kNumCycles + 1,
+                 equiv_case::kFinalMmioSampleAddrs[idx],
+                 final_mmio_known[idx] ? 1u : 0u,
+                 final_mmio_values[idx]);
   }
   for (int idx = 0; idx < equiv_case::kNumFinalMappedSamples; ++idx) {
     uint32_t value = 0;

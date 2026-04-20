@@ -31,12 +31,12 @@ MVP 当前覆盖：
 - `AXI_W_HS`
 - `MODE_ACTIVE`
 - `FINAL_MEM`
+- `FINAL_MMIO`
 - `FINAL_MAPPED`
 
 当前不比较：
 
 - raw `axi_id/size/burst/strb hash`
-- final MMIO state
 
 当前已经支持 **final DDR sample state** compare：
 
@@ -58,7 +58,12 @@ MVP 当前覆盖：
 - `mode2_aligned_write`
 - `mode2_window_local_write`
 
-更完整的 final MMIO state compare 仍留在后续阶段扩展。
+当前也已经支持 **final MMIO sample state** compare：
+
+- seed 可以通过 `final_mmio_samples` 指定一组 MMIO 地址
+- harness 会根据下游 `AW/W` 握手维护 MMIO sample shadow state
+- 仿真结束时输出：
+  - `FINAL_MMIO`
 
 当前 stimulus 额外支持：
 
@@ -66,6 +71,7 @@ MVP 当前覆盖：
 - `hold_until_accept`
 - `mem_read_line_resp`
 - `final_mem_samples`
+- `final_mmio_samples`
 - `final_mapped_samples`
 
 其中 `warmup_cycles` 用来吸收 RTL 顶层 reset 后的 invalidate sweep / reconfig busy 初始化窗口。
@@ -98,6 +104,7 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
+- `tests/equiv/seeds/mode1_mmio_write.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 - `tests/equiv/seeds/mode2_window_local_write.json`
