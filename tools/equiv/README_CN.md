@@ -102,6 +102,22 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 
 默认 RTL 在 `eda-03` 上用 VCS 重放。
 
+也可以跑一批受当前 compare contract 约束的小规模随机 smoke：
+
+```bash
+python3 tools/equiv/run_random_smoke.py --count 8 --root-seed 20260420
+```
+
+这条脚本会：
+
+- 生成一组可复现的随机 seed
+- 约束在当前共同合同子集内
+- 复用 `run_mvp.py` 做 C++ / RTL 对拍
+
+生成出来的随机 seed 与 manifest 会写到：
+
+- `tools/equiv/out/random_smoke/`
+
 当前默认通过的 seed：
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
@@ -120,6 +136,14 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 - MMIO write：同 master、同 `id`，第一笔 `WRITE_RESP/B` 完成后再发第二笔
 
 仍然没有纳入默认 PASS 集的，是 **overlapping same-master same-ID reuse**。
+
+随机 smoke 当前也沿用同样限制：
+
+- 允许 **serial** ID reuse
+- 不生成 overlapping same-master same-ID reuse
+- 不生成同地址 `AR/AW` overlap
+- 只拼接当前已经冻结到共同合同内的操作模板
+- 如需包含 mode2 写模板，只会放在 seed 尾部，不再在它后面继续拼接新 op
 
 当前还有一条**策略化** seed：
 

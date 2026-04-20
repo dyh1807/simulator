@@ -78,6 +78,7 @@
 
 - 顶层事件前允许存在 `warmup_cycles`
 - 不生成 overlapping same-master same-write-ID case
+- 允许串行 reuse，但不生成 overlapping same-master same-read-ID case
 - 不生成依赖 `invalidate_line` accept policy 差异的 case
 - 不生成依赖 parent host queued lookup hidden contract 的 case
 - cacheable line fill 优先使用 `mem_read_line_resp`，而不是跨模型直接复用 raw `axi_r` beat
@@ -87,6 +88,16 @@
 - shared stimulus 在共同合同子集内，C++ reference 与 RTL 是否产出一致的上游可见行为
 
 而不是一次覆盖所有边角合同。
+
+当前 `run_random_smoke.py` 生成的随机 seed 也遵守同一组约束。它不会扩大合同边界，只会在当前共同合同子集内随机拼接：
+
+- bypass read
+- MMIO write
+- idle invalidate_line
+- mode2 DDR aligned write
+- mode2 mapped-window local write
+
+其中 mode2 写模板如果被选中，只会出现在 seed 尾部；随机 smoke 不再依赖“mode2 写未完全退休时还能继续安全发后续 op”这类尚未冻结的组合语义。
 
 ## 已知合同差异的处理策略
 
