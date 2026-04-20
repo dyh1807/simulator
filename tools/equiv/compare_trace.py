@@ -57,13 +57,28 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cpp_trace")
     ap.add_argument("rtl_trace")
+    ap.add_argument(
+        "--ignore-maint-op",
+        action="append",
+        default=[],
+        help="ignore MAINT_ACCEPT events for the given maintenance op",
+    )
     args = ap.parse_args()
 
     cpp = load_events(args.cpp_trace)
     rtl = load_events(args.rtl_trace)
+    ignore_maint_ops = set(args.ignore_maint_op)
 
-    cpp_norm = [canonicalize(ev) for ev in cpp]
-    rtl_norm = [canonicalize(ev) for ev in rtl]
+    def normalize(events):
+        out = []
+        for ev in events:
+            if ev["type"] == "MAINT_ACCEPT" and ev["fields"].get("op") in ignore_maint_ops:
+                continue
+            out.append(canonicalize(ev))
+        return out
+
+    cpp_norm = normalize(cpp)
+    rtl_norm = normalize(rtl)
 
     if cpp_norm == rtl_norm:
         print("TRACE_COMPARE_PASS")

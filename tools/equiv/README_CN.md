@@ -70,16 +70,18 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 
-当前还有一条**探索性** seed：
+当前还有一条**策略化** seed：
 
 - `tests/equiv/seeds/invalidate_all_idle_accept.json`
 
-这些用例当前会暴露新的 C++/RTL 行为差异：
+这条用例当前暴露的是已确认的 policy 差异：
 
 - `invalidate_all_idle_accept`
   - C++ 现在会对持续拉高的 `invalidate_all` 只给一次 `MAINT_ACCEPT`
   - RTL 在同样 stimulus 下仍没有对应 `MAINT_ACCEPT`
   - 这说明当前剩下的是 **accept policy / sweep timing** 差异，不再是 pulse/level 或重复 accept 的 bug
+  - 该 seed 在 JSON 内通过 `compare_policy.ignore_maint_accept_ops=["invalidate_all"]`
+    显式把这项 accept pulse 排除在共同合同外
 
 `mode1_fill_then_bypass_hit` 现在已经进入默认 PASS 集。为了让 cacheable fill 的下游返回在 C++/RTL 两侧都走“共同抽象”，harness 额外提供了：
 

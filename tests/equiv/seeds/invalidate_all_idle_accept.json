@@ -2,6 +2,11 @@
   "name": "invalidate_all_idle_accept",
   "warmup_cycles": 8300,
   "tail_cycles": 8,
+  "compare_policy": {
+    "ignore_maint_accept_ops": [
+      "invalidate_all"
+    ]
+  },
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": 0,

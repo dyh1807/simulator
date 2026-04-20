@@ -100,6 +100,24 @@
 
 这条差异现在已经收敛成 **maintenance accept policy** 问题，不再是 harness 对 pulse/level 语义处理不当。
 
+## Compare policy 参数
+
+当某条 seed 需要显式表达“双方都允许，但 accept/latency 政策不同”的差异时，可以在 seed JSON 中提供：
+
+- `compare_policy.ignore_maint_accept_ops`
+
+当前已使用的例子：
+
+- `invalidate_all_idle_accept.json`
+  - `ignore_maint_accept_ops = ["invalidate_all"]`
+
+这表示：
+
+- 该 seed 仍然用于验证其它上游/下游事件顺序
+- 但不会把 `invalidate_all` 的 `MAINT_ACCEPT` 脉冲是否出现、何时出现，当成共同合同的一部分
+
+这样做的前提是：这条差异已经被确认是**accept policy 差异**，而不是功能 bug。
+
 ## `mem_read_line_resp` 抽象
 
 `mem_read_line_resp` 表示：

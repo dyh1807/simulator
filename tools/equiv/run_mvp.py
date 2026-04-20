@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import time
 import shutil
 import subprocess
@@ -63,6 +64,8 @@ def main():
 
     for seed in seeds:
         seed_path = Path(seed).resolve()
+        seed_meta = json.loads(seed_path.read_text())
+        compare_policy = seed_meta.get("compare_policy", {})
         case_name = seed_path.stem
         out_dir = TOOLS_DIR / "out" / case_name
         gen_dir = out_dir / "generated"
@@ -106,9 +109,16 @@ def main():
         run(["ssh", args.rtl_node, compile_cmd])
         wait_for_file(rtl_trace)
 
+        compare_cmd = [
+            "python3",
+            str(TOOLS_DIR / "compare_trace.py"),
+            str(cpp_trace),
+            str(rtl_trace),
+        ]
+        for op in compare_policy.get("ignore_maint_accept_ops", []):
+            compare_cmd.extend(["--ignore-maint-op", str(op)])
         with open(compare_log, "w") as fp:
-            run(["python3", str(TOOLS_DIR / "compare_trace.py"),
-                 str(cpp_trace), str(rtl_trace)], stdout=fp)
+            run(compare_cmd, stdout=fp)
         print(f"case {case_name}: PASS")
 
 
