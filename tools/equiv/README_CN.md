@@ -64,8 +64,18 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 当前默认通过的 seed：
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
+- `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
+
+当前还有一条**探索性** seed：
+
+- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
+
+这条用例当前会暴露一条新的 C++/RTL 行为差异：
+
+- RTL 在 cacheable fill 完成后会先返回第一次 `READ_RESP`，随后同 line 的 bypass read 走 resident hit
+- C++ reference 当前没有在同样时序下给出第一次 `READ_RESP`
 
 合同边界见：
 

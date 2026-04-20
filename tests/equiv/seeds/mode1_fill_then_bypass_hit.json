@@ -1,0 +1,57 @@
+{
+  "name": "mode1_fill_then_bypass_hit",
+  "warmup_cycles": 8300,
+  "tail_cycles": 40,
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": 0,
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "read_req",
+      "master": 0,
+      "addr": "0x80006000",
+      "size": 3,
+      "id": 5,
+      "bypass": 0,
+      "hold_until_accept": 1
+    },
+    {
+      "cycle": 12,
+      "type": "axi_r",
+      "duration": 8,
+      "valid": 1,
+      "id": 0,
+      "resp": 0,
+      "last": 1,
+      "data_words": [
+        "0x01020304",
+        "0x11121314",
+        "0x21222324",
+        "0x31323334",
+        "0x41424344",
+        "0x51525354",
+        "0x61626364",
+        "0x71727374"
+      ]
+    },
+    {
+      "cycle": 28,
+      "type": "read_req",
+      "master": 0,
+      "addr": "0x80006000",
+      "size": 3,
+      "id": 6,
+      "bypass": 1,
+      "hold_until_accept": 1
+    }
+  ]
+}

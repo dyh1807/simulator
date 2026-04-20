@@ -1,0 +1,23 @@
+{
+  "name": "invalidate_line_idle_accept",
+  "warmup_cycles": 8300,
+  "tail_cycles": 8,
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": 0,
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "invalidate_line",
+      "addr": "0x80007000"
+    }
+  ]
+}

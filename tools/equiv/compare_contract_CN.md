@@ -77,6 +77,7 @@
 ## 当前通过的 MVP seed
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
+- `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 
@@ -84,6 +85,17 @@
 
 - 先证明 shared-stimulus + C++ runner + RTL replay + comparator 这条链路可运行
 - 并在当前共同合同子集内产出一致结果
+
+## 当前探索性用例
+
+- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
+
+这条用例目前**不纳入默认 PASS 集**。它正在暴露一条新的差异：
+
+- RTL 已经表现出 `cacheable fill -> first READ_RESP -> same-line bypass hit`
+- C++ reference 当前在相同时序下没有产出第一次 `READ_RESP`
+
+后续需要先把这条差异定位清楚，再决定是修 reference、修 RTL，还是进一步收紧 stimulus / compare contract。
 
 ## 当前规范化规则
 

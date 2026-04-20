@@ -197,6 +197,12 @@ int main(int argc, char **argv) {
   tables.init(cfg);
   HeldReadReq held_read[axi_interconnect::NUM_READ_MASTERS];
   HeldWriteReq held_write[axi_interconnect::NUM_WRITE_MASTERS];
+  bool prev_read_resp_valid[axi_interconnect::NUM_READ_MASTERS] = {};
+  uint8_t prev_read_resp_id[axi_interconnect::NUM_READ_MASTERS] = {};
+  uint32_t prev_read_resp_d0[axi_interconnect::NUM_READ_MASTERS] = {};
+  bool prev_write_resp_valid[axi_interconnect::NUM_WRITE_MASTERS] = {};
+  uint8_t prev_write_resp_id[axi_interconnect::NUM_WRITE_MASTERS] = {};
+  uint8_t prev_write_resp_code[axi_interconnect::NUM_WRITE_MASTERS] = {};
 
   uint8_t prev_mode = 0xFF;
   uint32_t prev_offset = 0xFFFFFFFFu;
@@ -238,27 +244,35 @@ int main(int argc, char **argv) {
     }
     for (int m = 0; m < axi_interconnect::NUM_READ_MASTERS; ++m) {
       auto &resp = interconnect.read_ports[m].resp;
-      const bool llc_fresh_visible =
-          interconnect.llc_enabled() &&
-          interconnect.llc.io.regs.read_resp_valid_r[m] &&
-          interconnect.llc.io.regs.read_resp_fresh_r[m] &&
-          interconnect.llc.io.regs.read_resp_id_r[m] == resp.id;
+      const bool new_visible_resp =
+          !prev_read_resp_valid[m] || prev_read_resp_id[m] != resp.id ||
+          prev_read_resp_d0[m] != resp.data[0];
       if (resp.valid && interconnect.read_ports[m].resp.ready &&
-          !llc_fresh_visible) {
+          new_visible_resp) {
         std::fprintf(
             fp,
             "%d READ_RESP m=%d id=%u hash=0x%08x d0=0x%08x d1=0x%08x\n",
             trace_cycle, m, static_cast<unsigned>(resp.id),
             hash_read_words(resp.data), resp.data[0], resp.data[1]);
       }
+      prev_read_resp_valid[m] = resp.valid;
+      prev_read_resp_id[m] = resp.id;
+      prev_read_resp_d0[m] = resp.data[0];
     }
     for (int m = 0; m < axi_interconnect::NUM_WRITE_MASTERS; ++m) {
       auto &resp = interconnect.write_ports[m].resp;
-      if (resp.valid && interconnect.write_ports[m].resp.ready) {
+      const bool new_visible_resp =
+          !prev_write_resp_valid[m] || prev_write_resp_id[m] != resp.id ||
+          prev_write_resp_code[m] != resp.resp;
+      if (resp.valid && interconnect.write_ports[m].resp.ready &&
+          new_visible_resp) {
         std::fprintf(fp, "%d WRITE_RESP m=%d id=%u code=%u\n", trace_cycle, m,
                      static_cast<unsigned>(resp.id),
                      static_cast<unsigned>(resp.resp));
       }
+      prev_write_resp_valid[m] = resp.valid;
+      prev_write_resp_id[m] = resp.id;
+      prev_write_resp_code[m] = resp.resp;
     }
     if (frame.invalidate_line_valid &&
         interconnect.llc_invalidate_line_accepted()) {
