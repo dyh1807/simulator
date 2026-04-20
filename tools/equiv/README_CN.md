@@ -7,6 +7,7 @@
 - RTL replay/trace 运行脚本
 - trace comparator
 - compare contract 文档
+- harness 架构说明
 
 当前目标是做一个可运行的 MVP，而不是一次做完完整 fuzz 框架。
 
@@ -167,6 +168,7 @@ python3 tools/equiv/run_random_smoke.py --count 8 --root-seed 20260420
 合同边界见：
 
 - `tools/equiv/compare_contract_CN.md`
+- `tools/equiv/ARCHITECTURE_CN.md`
 
 如需用独立的 submodule worktree 做 C++/RTL 双侧构建，可显式指定：
 
