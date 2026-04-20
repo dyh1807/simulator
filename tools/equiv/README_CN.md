@@ -136,6 +136,24 @@ python3 tools/equiv/run_random_matrix.py \
 
 - `tools/equiv/out/random_matrix/`
 
+如果要把三类回归统一起来执行，可直接运行总入口：
+
+```bash
+python3 tools/equiv/run_regression_suite.py \
+  --matrix-count 16 \
+  --matrix-root-seed 20260423
+```
+
+默认会顺序执行：
+
+- `run_mvp.py`
+- `run_expected_diff.py`
+- `run_random_matrix.py`
+
+摘要会写到：
+
+- `tools/equiv/out/regression_suite/`
+
 当前默认通过的 seed：
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`

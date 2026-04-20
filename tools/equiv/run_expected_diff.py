@@ -2,7 +2,6 @@
 import argparse
 import json
 import subprocess
-import tempfile
 from pathlib import Path
 
 
