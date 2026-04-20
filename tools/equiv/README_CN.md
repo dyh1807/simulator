@@ -177,6 +177,16 @@ python3 tools/equiv/run_random_matrix.py \
   - 该 seed 在 JSON 内通过 `compare_policy.ignore_maint_accept_ops=["invalidate_all"]`
     显式把这项 accept pulse 排除在共同合同外
 
+同一条 seed 现在也带 `expected_diff` 元数据，因此可以单独作为
+**expected-diff regression** 运行：
+
+```bash
+python3 tools/equiv/run_expected_diff.py
+```
+
+这条回归不会忽略差异，而是要求 compare 失败，并且失败形态必须匹配
+seed 里声明的已知差异签名。
+
 `mode1_fill_then_bypass_hit` 现在已经进入默认 PASS 集。为了让 cacheable fill 的下游返回在 C++/RTL 两侧都走“共同抽象”，harness 额外提供了：
 
 - `mem_read_line_resp`

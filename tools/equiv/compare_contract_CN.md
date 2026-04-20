@@ -258,6 +258,30 @@
 
 当前 `run_random_smoke.py` 生成的随机 seed 也遵守同一组约束。它不会扩大合同边界，只会在当前共同合同子集内随机拼接：
 
+## Expected-Diff 回归
+
+当前除了 `PASS` 回归，也支持一类单独的 **expected-diff** 回归。
+
+它的用途是：
+
+- 对于已知的 policy / contract 差异，不把它们混进默认 PASS 集
+- 也不靠人工记忆“这条失败是预期的”
+- 而是要求 compare 必须失败，并且失败形态必须命中 seed 声明的签名
+
+当前入口：
+
+- `tools/equiv/run_expected_diff.py`
+
+当前纳入的例子：
+
+- `invalidate_all_idle_accept`
+  - C++：空闲窗口下会产生一次 `MAINT_ACCEPT op=invalidate_all`
+  - RTL：同样 stimulus 下没有对应 `MAINT_ACCEPT`
+  - 因此 compare 预期表现为：
+    - `TRACE_COMPARE_FAIL`
+    - `length_mismatch cpp=2 rtl=1`
+    - `cpp_extra_norm: ('MAINT_ACCEPT', 'invalidate_all', None)`
+
 - bypass read
 - MMIO write
 - idle invalidate_line

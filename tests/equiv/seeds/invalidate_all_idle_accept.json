@@ -7,6 +7,14 @@
       "invalidate_all"
     ]
   },
+  "expected_diff": {
+    "disable_compare_policy": true,
+    "must_contain": [
+      "TRACE_COMPARE_FAIL",
+      "length_mismatch cpp=2 rtl=1",
+      "cpp_extra_norm: ('MAINT_ACCEPT', 'invalidate_all', None)"
+    ]
+  },
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": 0,
