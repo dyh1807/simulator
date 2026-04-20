@@ -55,8 +55,16 @@ MVP 当前覆盖：
 - `warmup_cycles`
 - `hold_until_accept`
 - `mem_read_line_resp`
+- `final_mem_samples`
 
 其中 `warmup_cycles` 用来吸收 RTL 顶层 reset 后的 invalidate sweep / reconfig busy 初始化窗口。
+
+当前 replay harness 还会在 C++ runner 和 RTL bench 两侧同时执行一条运行时约束检查：
+
+- DDR 侧同地址 `AR` 未完成前，不允许再发同地址 `AW`
+- DDR 侧同地址 `AW` 未完成前，不允许再发同地址 `AR`
+
+一旦违反，这条 seed 会直接失败，而不是继续做 trace compare。
 
 ## 用法
 

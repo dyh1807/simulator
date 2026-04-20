@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
+#include <vector>
 
 #define private public
 #include "AXI_Interconnect.h"
@@ -65,6 +66,17 @@ struct GeneratedMemReadLineResp {
   uint8_t total_beats = 0;
   uint8_t beat_idx = 0;
   std::array<uint32_t, 16> line_words{};
+};
+
+struct PendingReadOrder {
+  uint8_t rid = 0;
+  uint32_t addr = 0;
+  uint8_t beats_left = 0;
+};
+
+struct PendingWriteOrder {
+  uint8_t wid = 0;
+  uint32_t addr = 0;
 };
 
 template <size_t N>
@@ -321,6 +333,8 @@ int main(int argc, char **argv) {
   bool final_mem_write_pending = false;
   uint32_t final_mem_write_addr = 0;
   uint8_t final_mem_write_beat_idx = 0;
+  std::vector<PendingReadOrder> pending_order_reads;
+  std::vector<PendingWriteOrder> pending_order_writes;
   bool prev_read_resp_valid[axi_interconnect::NUM_READ_MASTERS] = {};
   uint8_t prev_read_resp_id[axi_interconnect::NUM_READ_MASTERS] = {};
   uint32_t prev_read_resp_d0[axi_interconnect::NUM_READ_MASTERS] = {};
@@ -417,6 +431,18 @@ int main(int argc, char **argv) {
       std::fprintf(fp, "%d MAINT_ACCEPT op=invalidate_all\n", trace_cycle);
     }
     if (interconnect.axi_io.ar.arvalid && interconnect.axi_io.ar.arready) {
+      for (const auto &wr : pending_order_writes) {
+        if (wr.addr == interconnect.axi_io.ar.araddr) {
+          std::fprintf(stderr,
+                       "DDR_ORDER_FAIL: AR overlapped same-address pending AW addr=0x%08x\n",
+                       interconnect.axi_io.ar.araddr);
+          return 3;
+        }
+      }
+      pending_order_reads.push_back(
+          {static_cast<uint8_t>(interconnect.axi_io.ar.arid),
+           static_cast<uint32_t>(interconnect.axi_io.ar.araddr),
+           static_cast<uint8_t>(interconnect.axi_io.ar.arlen + 1u)});
       std::fprintf(fp,
                    "%d AXI_AR_HS id=%u addr=0x%08x len=%u size=%u burst=%u\n",
                    trace_cycle,
@@ -427,6 +453,17 @@ int main(int argc, char **argv) {
                    static_cast<unsigned>(interconnect.axi_io.ar.arburst));
     }
     if (interconnect.axi_io.aw.awvalid && interconnect.axi_io.aw.awready) {
+      for (const auto &rd : pending_order_reads) {
+        if (rd.addr == interconnect.axi_io.aw.awaddr) {
+          std::fprintf(stderr,
+                       "DDR_ORDER_FAIL: AW overlapped same-address pending AR addr=0x%08x\n",
+                       interconnect.axi_io.aw.awaddr);
+          return 3;
+        }
+      }
+      pending_order_writes.push_back(
+          {static_cast<uint8_t>(interconnect.axi_io.aw.awid),
+           static_cast<uint32_t>(interconnect.axi_io.aw.awaddr)});
       final_mem_write_pending = true;
       final_mem_write_addr = interconnect.axi_io.aw.awaddr;
       final_mem_write_beat_idx = 0;
@@ -461,6 +498,30 @@ int main(int argc, char **argv) {
                    axi_compat::get_u32(interconnect.axi_io.w.wdata, 0),
                    hash_axi_strb(interconnect.axi_io.w.wstrb),
                    static_cast<unsigned>(interconnect.axi_io.w.wlast));
+    }
+    if (interconnect.axi_io.r.rvalid && interconnect.axi_io.r.rready) {
+      for (size_t idx = 0; idx < pending_order_reads.size(); ++idx) {
+        auto &rd = pending_order_reads[idx];
+        if (rd.rid != static_cast<uint8_t>(interconnect.axi_io.r.rid)) {
+          continue;
+        }
+        if (rd.beats_left > 0) {
+          rd.beats_left--;
+        }
+        if (interconnect.axi_io.r.rlast || rd.beats_left == 0) {
+          pending_order_reads.erase(pending_order_reads.begin() + static_cast<long>(idx));
+        }
+        break;
+      }
+    }
+    if (interconnect.axi_io.b.bvalid && interconnect.axi_io.b.bready) {
+      for (size_t idx = 0; idx < pending_order_writes.size(); ++idx) {
+        if (pending_order_writes[idx].wid != static_cast<uint8_t>(interconnect.axi_io.b.bid)) {
+          continue;
+        }
+        pending_order_writes.erase(pending_order_writes.begin() + static_cast<long>(idx));
+        break;
+      }
     }
     if (interconnect.runtime_mode_ != prev_mode ||
         interconnect.llc_mapped_offset_ != prev_offset) {

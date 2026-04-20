@@ -173,6 +173,11 @@
 - 在 harness 里作为显式禁止约束
 - 要么升级成共享内存一致性模型后，再正式纳入 compare
 
+当前状态：
+
+- 这组约束已经在 C++ runner 和 RTL replay bench 中作为**运行时 validator** 落地
+- 一旦出现同地址 `AR/AW` overlap，harness 会直接 fail
+
 ## 当前规范化规则
 
 为避免把不同抽象层的表示差异误判成语义差异，当前 comparator 使用以下规则：
