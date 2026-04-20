@@ -18,6 +18,8 @@ DDR_READ_ADDRS = [
     0x80005000,
     0x80006000,
 ]
+READ_MASTERS = [0, 1, 2, 3]
+WRITE_MASTERS = [0, 1]
 MMIO_ADDRS = [
     0x10000000,
     0x10000004,
@@ -47,11 +49,11 @@ def word_list_from_base(base, count):
     return [f"0x{(base + idx * 0x01010101) & 0xffffffff:08x}" for idx in range(count)]
 
 
-def make_write_event(cycle, addr, req_id, data0):
+def make_write_event(cycle, master, addr, req_id, data0):
     return {
         "cycle": cycle,
         "type": "write_req",
-        "master": 0,
+        "master": master,
         "addr": f"0x{addr:08x}",
         "size": 3,
         "id": req_id,
@@ -72,12 +74,12 @@ def make_b_event(cycle):
     }
 
 
-def make_bypass_read_events(cycle, addr, req_id, base_word):
+def make_bypass_read_events(cycle, master, addr, req_id, base_word):
     return [
         {
             "cycle": cycle,
             "type": "read_req",
-            "master": 0,
+            "master": master,
             "addr": f"0x{addr:08x}",
             "size": 3,
             "id": req_id,
@@ -96,8 +98,8 @@ def make_bypass_read_events(cycle, addr, req_id, base_word):
     ]
 
 
-def make_mmio_write_events(cycle, addr, req_id, data0):
-    return [make_write_event(cycle, addr, req_id, data0), make_b_event(cycle + 12)]
+def make_mmio_write_events(cycle, master, addr, req_id, data0):
+    return [make_write_event(cycle, master, addr, req_id, data0), make_b_event(cycle + 12)]
 
 
 def make_invalidate_line_event(cycle, addr):
@@ -108,21 +110,52 @@ def make_invalidate_line_event(cycle, addr):
     }
 
 
-def make_mode2_ddr_write_events(cycle, addr, data0):
+def make_mode2_ddr_write_events(cycle, master, addr, req_id, data0):
     return [
         {"cycle": cycle, "type": "set_mode", "mode": 2},
-        make_write_event(cycle + 4, addr, 5, data0),
+        make_write_event(cycle + 4, master, addr, req_id, data0),
         make_b_event(cycle + 16),
         {"cycle": cycle + 20, "type": "set_mode", "mode": 1},
     ]
 
 
-def make_mode2_mapped_write_events(cycle, addr, data0):
+def make_mode2_mapped_write_events(cycle, master, addr, req_id, data0):
     return [
         {"cycle": cycle, "type": "set_mode", "mode": 2},
-        make_write_event(cycle + 4, addr, 6, data0),
+        make_write_event(cycle + 4, master, addr, req_id, data0),
         {"cycle": cycle + 20, "type": "set_mode", "mode": 1},
     ]
+
+
+def make_temp_level(cycle, t, value, restore_cycle, restore_value):
+    return [
+        {"cycle": cycle, "type": t, "value": value},
+        {"cycle": restore_cycle, "type": t, "value": restore_value},
+    ]
+
+
+def maybe_backpressure_events(rng, cycle, op_kind, master):
+    events = []
+    if op_kind == "read":
+        if rng.random() < 0.45:
+            stall_len = rng.randint(2, 4)
+            events.extend(make_temp_level(cycle + 1, "axi_arready", 0, cycle + 1 + stall_len, 1))
+        if rng.random() < 0.45:
+            stall_len = rng.randint(2, 4)
+            blocked_mask = 0xF & ~(1 << master)
+            events.extend(make_temp_level(cycle + 12, "read_resp_ready_mask", blocked_mask, cycle + 12 + stall_len, 0xF))
+    elif op_kind == "write":
+        if rng.random() < 0.35:
+            stall_len = rng.randint(2, 4)
+            events.extend(make_temp_level(cycle + 1, "axi_awready", 0, cycle + 1 + stall_len, 1))
+        if rng.random() < 0.35:
+            stall_len = rng.randint(2, 4)
+            events.extend(make_temp_level(cycle + 1, "axi_wready", 0, cycle + 1 + stall_len, 1))
+        if rng.random() < 0.45:
+            stall_len = rng.randint(2, 4)
+            blocked_mask = 0x3 & ~(1 << master)
+            events.extend(make_temp_level(cycle + 12, "write_resp_ready_mask", blocked_mask, cycle + 12 + stall_len, 0x3))
+    return events
 
 
 def build_seed(rng, case_idx):
@@ -132,8 +165,8 @@ def build_seed(rng, case_idx):
     final_mem_samples = []
     final_mmio_samples = []
     final_mapped_samples = []
-    retired_read_ids = [1, 2, 3, 4]
-    retired_write_ids = [5, 6, 7]
+    retired_read_ids = {m: [1, 2, 3, 4] for m in READ_MASTERS}
+    retired_write_ids = {m: [5, 6, 7] for m in WRITE_MASTERS}
 
     for _ in range(prefix_op_count):
         op = rng.choice([
@@ -142,19 +175,23 @@ def build_seed(rng, case_idx):
             "invalidate_line",
         ])
         if op == "bypass_read":
-            req_id = rng.choice(retired_read_ids)
+            master = rng.choice(READ_MASTERS)
+            req_id = rng.choice(retired_read_ids[master])
             addr = rng.choice(DDR_READ_ADDRS)
             base_word = rng.getrandbits(32) & 0xF0F0F0F0
-            events.extend(make_bypass_read_events(cycle, addr, req_id, base_word))
-            cycle += 24
+            events.extend(maybe_backpressure_events(rng, cycle, "read", master))
+            events.extend(make_bypass_read_events(cycle, master, addr, req_id, base_word))
+            cycle += 36
         elif op == "mmio_write":
-            req_id = rng.choice(retired_write_ids)
+            master = rng.choice(WRITE_MASTERS)
+            req_id = rng.choice(retired_write_ids[master])
             addr = rng.choice(MMIO_ADDRS)
             data0 = rng.getrandbits(32)
-            events.extend(make_mmio_write_events(cycle, addr, req_id, data0))
+            events.extend(maybe_backpressure_events(rng, cycle, "write", master))
+            events.extend(make_mmio_write_events(cycle, master, addr, req_id, data0))
             if addr not in final_mmio_samples:
                 final_mmio_samples.append(addr)
-            cycle += 24
+            cycle += 36
         elif op == "invalidate_line":
             addr = rng.choice(DDR_READ_ADDRS)
             events.append(make_invalidate_line_event(cycle, addr))
@@ -164,19 +201,25 @@ def build_seed(rng, case_idx):
     # unfinished mode2 write retirement semantics before another op is launched.
     tail_mode2 = rng.choice(["none", "mode2_ddr_write", "mode2_mapped_write"])
     if tail_mode2 == "mode2_ddr_write":
+        master = rng.choice(WRITE_MASTERS)
+        req_id = rng.choice(retired_write_ids[master])
         addr = rng.choice(MODE2_DDR_ADDRS)
         data0 = rng.getrandbits(32)
-        events.extend(make_mode2_ddr_write_events(cycle, addr, data0))
+        events.extend(maybe_backpressure_events(rng, cycle + 4, "write", master))
+        events.extend(make_mode2_ddr_write_events(cycle, master, addr, req_id, data0))
         if addr not in final_mem_samples:
             final_mem_samples.append(addr)
-        cycle += 28
+        cycle += 40
     elif tail_mode2 == "mode2_mapped_write":
+        master = rng.choice(WRITE_MASTERS)
+        req_id = rng.choice(retired_write_ids[master])
         addr = rng.choice(MAPPED_ADDRS)
         data0 = rng.getrandbits(32)
-        events.extend(make_mode2_mapped_write_events(cycle, addr, data0))
+        events.extend(maybe_backpressure_events(rng, cycle + 4, "write", master))
+        events.extend(make_mode2_mapped_write_events(cycle, master, addr, req_id, data0))
         if addr not in final_mapped_samples:
             final_mapped_samples.append(addr)
-        cycle += 28
+        cycle += 40
 
     seed = {
         "name": f"random_smoke_{case_idx:02d}",

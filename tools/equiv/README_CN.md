@@ -114,6 +114,10 @@ python3 tools/equiv/run_random_smoke.py --count 8 --root-seed 20260420
 - 生成一组可复现的随机 seed
 - 约束在当前共同合同子集内
 - 复用 `run_mvp.py` 做 C++ / RTL 对拍
+- 在受控范围内引入：
+  - 多 read/write master 选择
+  - `read_resp_ready_mask` / `write_resp_ready_mask` 抖动
+  - `axi_arready` / `axi_awready` / `axi_wready` 抖动
 
 生成出来的随机 seed 与 manifest 会写到：
 
@@ -145,6 +149,7 @@ python3 tools/equiv/run_random_smoke.py --count 8 --root-seed 20260420
 - 不生成同地址 `AR/AW` overlap
 - 只拼接当前已经冻结到共同合同内的操作模板
 - 如需包含 mode2 写模板，只会放在 seed 尾部，不再在它后面继续拼接新 op
+- 虽然会引入 master/ready/backpressure 抖动，但仍然保证不会跨出当前 contract
 
 当前还有一条**策略化** seed：
 

@@ -263,6 +263,9 @@
 - idle invalidate_line
 - mode2 DDR aligned write
 - mode2 mapped-window local write
+- 多 master 选择
+- 上游 response ready mask 抖动
+- 下游 `axi_arready/axi_awready/axi_wready` 抖动
 
 其中 mode2 写模板如果被选中，只会出现在 seed 尾部；随机 smoke 不再依赖“mode2 写未完全退休时还能继续安全发后续 op”这类尚未冻结的组合语义。
 
