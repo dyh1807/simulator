@@ -88,14 +88,40 @@
 
 ## 当前探索性用例
 
+- `tests/equiv/seeds/invalidate_all_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 
-这条用例目前**不纳入默认 PASS 集**。它正在暴露一条新的差异：
+这些用例目前**不纳入默认 PASS 集**。它们正在暴露新的差异：
+
+- `invalidate_all_idle_accept`
+  - C++ 在空闲窗口下会给 `MAINT_ACCEPT`
+  - RTL 当前在同样 stimulus 下没有给出对应 `MAINT_ACCEPT`
 
 - RTL 已经表现出 `cacheable fill -> first READ_RESP -> same-line bypass hit`
 - C++ reference 当前在相同时序下没有产出第一次 `READ_RESP`
 
 后续需要先把这条差异定位清楚，再决定是修 reference、修 RTL，还是进一步收紧 stimulus / compare contract。
+
+## 下一阶段计划约束
+
+### DDR 侧 `AR/AW` 顺序约束
+
+后续 shared-stimulus / compare contract 需要显式纳入下面这些约束，且 C++ / RTL 两边都应遵守：
+
+- 上游发出某地址 `AR` 之后，在收到对应 `R` 完成前，不应再对同地址发 `AW`
+- 反过来同理：某地址 `AW` 发出后，在收到对应 `B` 完成前，不应再对同地址发 `AR`
+- 不允许依赖这种顺序：
+  - `AR` 与 `AW`（顺序任意）都发出
+  - 先收到 `B`
+  - 清本地 buffer / owner
+  - 之后才收到对应 `R`
+
+原因不是 AXI 协议禁止，而是当前 DDR / ref-model / RTL 的一致性合同并没有冻结“未完成读写重叠时，同地址可见的是旧值还是新值”。
+
+这类场景未来要么：
+
+- 在 harness 里作为显式禁止约束
+- 要么升级成共享内存一致性模型后，再正式纳入 compare
 
 ## 当前规范化规则
 
