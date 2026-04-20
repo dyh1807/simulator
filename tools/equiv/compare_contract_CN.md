@@ -282,6 +282,17 @@
     - `length_mismatch cpp=2 rtl=1`
     - `cpp_extra_norm: ('MAINT_ACCEPT', 'invalidate_all', None)`
 
+- `mode1_mmio_write_id_reuse_overlap`
+  - 场景：同 master、同 write `id=7` 的第二笔 MMIO write 在第一笔 `WRITE_RESP` 退休前就再次发起
+  - 当前稳定差异：
+    - C++ 会先接受第二笔 write
+    - RTL 会先给出第一笔 `WRITE_RESP`
+  - 因此 compare 预期表现为：
+    - `TRACE_COMPARE_FAIL`
+    - `first_diff_index=4`
+    - `cpp_norm: ('WRITE_ACCEPT', '0', '7', '0x10000008', '3', '0', '0x0badf00d')`
+    - `rtl_norm: ('WRITE_RESP', '0', '7', '0')`
+
 - bypass read
 - MMIO write
 - idle invalidate_line

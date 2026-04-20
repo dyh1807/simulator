@@ -1,0 +1,86 @@
+{
+  "name": "mode1_mmio_write_id_reuse_overlap",
+  "warmup_cycles": 8300,
+  "tail_cycles": 24,
+  "final_mmio_samples": [
+    "0x10000004",
+    "0x10000008"
+  ],
+  "expected_diff": {
+    "must_contain": [
+      "TRACE_COMPARE_FAIL",
+      "first_diff_index=4",
+      "cpp_norm: ('WRITE_ACCEPT', '0', '7', '0x10000008', '3', '0', '0x0badf00d')",
+      "rtl_norm: ('WRITE_RESP', '0', '7', '0')"
+    ]
+  },
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": "0x40000000",
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 6,
+      "type": "write_req",
+      "master": 0,
+      "addr": "0x10000004",
+      "size": 3,
+      "id": 7,
+      "bypass": 0,
+      "hold_until_accept": 1,
+      "wdata_words": [
+        "0xcafebabe",
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ],
+      "wstrb_bytes": [
+        1, 1, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ]
+    },
+    {
+      "cycle": 12,
+      "type": "write_req",
+      "master": 0,
+      "addr": "0x10000008",
+      "size": 3,
+      "id": 7,
+      "bypass": 0,
+      "hold_until_accept": 1,
+      "wdata_words": [
+        "0x0badf00d",
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ],
+      "wstrb_bytes": [
+        1, 1, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      ]
+    },
+    {
+      "cycle": 18,
+      "type": "axi_b",
+      "valid": 1,
+      "id": 0,
+      "resp": 0
+    },
+    {
+      "cycle": 36,
+      "type": "axi_b",
+      "valid": 1,
+      "id": 0,
+      "resp": 0
+    }
+  ]
+}
