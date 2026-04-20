@@ -123,6 +123,19 @@ python3 tools/equiv/run_random_smoke.py --count 8 --root-seed 20260420
 
 - `tools/equiv/out/random_smoke/`
 
+如果要把多组 root-seed 固化成一轮扩展随机矩阵，可直接运行：
+
+```bash
+python3 tools/equiv/run_random_matrix.py \
+  --count 32 \
+  --root-seed 20260423 \
+  --root-seed 20260424
+```
+
+这条脚本会逐组调用 `run_random_smoke.py`，并把矩阵级摘要写到：
+
+- `tools/equiv/out/random_matrix/`
+
 当前默认通过的 seed：
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
