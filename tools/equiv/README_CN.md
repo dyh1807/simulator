@@ -54,7 +54,10 @@ MVP 当前覆盖：
 这些能力当前主要用于：
 
 - `mode1_bypass_rw`
+- `mode1_bypass_read_id_reuse_serial`
 - `mode1_fill_then_bypass_hit`
+- `mode1_mmio_write`
+- `mode1_mmio_write_id_reuse_serial`
 - `mode2_aligned_write`
 - `mode2_window_local_write`
 
@@ -102,12 +105,21 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 当前默认通过的 seed：
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
+- `tests/equiv/seeds/mode1_bypass_read_id_reuse_serial.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`
+- `tests/equiv/seeds/mode1_mmio_write_id_reuse_serial.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 - `tests/equiv/seeds/mode2_window_local_write.json`
+
+当前还显式覆盖了共同合同内的 **serial ID reuse**：
+
+- bypass read：同 master、同 `id`，第一笔 `READ_RESP` 完成后再发第二笔
+- MMIO write：同 master、同 `id`，第一笔 `WRITE_RESP/B` 完成后再发第二笔
+
+仍然没有纳入默认 PASS 集的，是 **overlapping same-master same-ID reuse**。
 
 当前还有一条**策略化** seed：
 

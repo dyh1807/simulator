@@ -1,0 +1,74 @@
+{
+  "name": "mode1_bypass_read_id_reuse_serial",
+  "warmup_cycles": 8300,
+  "tail_cycles": 12,
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": 0,
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "read_req",
+      "master": 0,
+      "addr": "0x80001000",
+      "size": 3,
+      "id": 3,
+      "bypass": 1,
+      "hold_until_accept": 1
+    },
+    {
+      "cycle": 12,
+      "type": "axi_r",
+      "valid": 1,
+      "id": 0,
+      "resp": 0,
+      "last": 1,
+      "data_words": [
+        "0x10101010",
+        "0x11111111",
+        "0x12121212",
+        "0x13131313",
+        "0x14141414",
+        "0x15151515",
+        "0x16161616",
+        "0x17171717"
+      ]
+    },
+    {
+      "cycle": 24,
+      "type": "read_req",
+      "master": 0,
+      "addr": "0x80001040",
+      "size": 3,
+      "id": 3,
+      "bypass": 1,
+      "hold_until_accept": 1
+    },
+    {
+      "cycle": 36,
+      "type": "axi_r",
+      "valid": 1,
+      "id": 0,
+      "resp": 0,
+      "last": 1,
+      "data_words": [
+        "0x20202020",
+        "0x21212121",
+        "0x22222222",
+        "0x23232323",
+        "0x24242424",
+        "0x25252525",
+        "0x26262626",
+        "0x27272727"
+      ]
+    }
+  ]
+}

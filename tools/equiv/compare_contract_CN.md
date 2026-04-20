@@ -108,12 +108,30 @@
 当前这项政策还没有冻结成共同语义。
 在 compare harness 里，暂时通过 stimulus 约束避免生成对应 case。
 
+不过，当前已经把**串行复用**纳入共同合同：
+
+- 同 master、同 `id`
+- 第一笔事务已经完成并从上游可见接口退休
+- 然后再发第二笔事务
+
+当前默认 PASS 集已经覆盖：
+
+- `mode1_bypass_read_id_reuse_serial`
+- `mode1_mmio_write_id_reuse_serial`
+
+仍然排除在共同合同外的是：
+
+- overlapping same-master same-read-ID reuse
+- overlapping same-master same-write-ID reuse
+
 ## 当前通过的 MVP seed
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
+- `tests/equiv/seeds/mode1_bypass_read_id_reuse_serial.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`
+- `tests/equiv/seeds/mode1_mmio_write_id_reuse_serial.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 - `tests/equiv/seeds/mode2_window_local_write.json`

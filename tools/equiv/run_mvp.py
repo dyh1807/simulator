@@ -56,9 +56,11 @@ def main():
 
     seeds = args.seed or [
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_bypass_rw.json"),
+        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_bypass_read_id_reuse_serial.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_line_idle_accept.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_fill_then_bypass_hit.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write.json"),
+        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write_id_reuse_serial.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode_transition_flush_write_block.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode2_aligned_write.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode2_window_local_write.json"),
