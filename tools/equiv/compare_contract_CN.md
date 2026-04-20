@@ -32,6 +32,173 @@
 
 内部 mode-transition flush 不计入 `MAINT_ACCEPT` compare。
 
+## 事件语义表
+
+下面这张表说明当前 trace 里每类事件的**具体含义**。这些定义比“比哪些字段”更基础。
+
+### `MODE_ACTIVE`
+
+表示：
+
+- 当前 DUT / C++ reference 的**活动模式**已经处于某个 `(mode, offset)` 组合
+
+它不是“上游请求了 mode 切换”，而是：
+
+- 切换已经在本模型里生效
+
+所以它用来比较：
+
+- 两边对 mode/offset 生效边界的理解是否一致
+
+### `READ_ACCEPT`
+
+表示：
+
+- 某个上游 `read_req` 在这一拍被 interconnect/subsystem **正式接受**
+
+含义是：
+
+- 这笔 read 请求已经进入模型内部 owner / pending 流程
+- 之后如果无异常，应在未来某个时刻看到对应 `READ_RESP`
+
+它不是“`valid` 拉高”，而是：
+
+- 真正发生了 accept handshake
+
+### `WRITE_ACCEPT`
+
+表示：
+
+- 某个上游 `write_req` 在这一拍被 **正式接受**
+
+含义是：
+
+- 这笔 write 请求已经进入内部 owner / pending 流程
+- 之后如果无异常，应在未来某个时刻看到对应 `WRITE_RESP`
+
+同样，它不是“`valid` 拉高”，而是实际 accept。
+
+### `READ_RESP`
+
+表示：
+
+- 某个上游 read response 在这一拍对 master **可见并被消费**
+
+当前规范化后只比较：
+
+- `master`
+- `id`
+- `d0`
+
+所以它表示的是：
+
+- “这笔 read 的返回结果对上游已经成立”
+
+而不是比较底层所有 beat 细节。
+
+### `WRITE_RESP`
+
+表示：
+
+- 某个上游 write response 在这一拍对 master **可见并被消费**
+
+当前比较：
+
+- `master`
+- `id`
+- `code`
+
+它表示的是：
+
+- 这笔 write 的完成响应已经对上游成立
+
+### `MAINT_ACCEPT`
+
+表示：
+
+- 一笔**stimulus 显式请求** 的 maintenance 操作在这一拍被接受
+
+当前只针对：
+
+- `invalidate_all`
+- `invalidate_line`
+
+它不包括：
+
+- 内部 mode-transition flush
+
+因此它表示的是：
+
+- “外部显式 maintenance 请求是否被接受、何时被接受”
+
+### `AXI_AR_HS`
+
+表示：
+
+- 下游 AXI 侧真实发生了一次 `ARVALID && ARREADY`
+
+当前规范化只比较 `addr`，所以它表达的是：
+
+- 对哪个地址发起了一个 read issue
+
+而不是完整 raw AXI 读事务参数。
+
+### `AXI_AW_HS`
+
+表示：
+
+- 下游 AXI 侧真实发生了一次 `AWVALID && AWREADY`
+
+当前规范化只比较 `addr`，所以它表达的是：
+
+- 对哪个地址发起了一个 write-address issue
+
+### `AXI_W_HS`
+
+表示：
+
+- 下游 AXI 侧真实发生了一次 `WVALID && WREADY`
+
+当前规范化比较：
+
+- `d0`
+- `last`
+
+它表达的是：
+
+- 一拍写数据是否真的被下游接受
+- 是否是该写事务的最后一拍
+
+### `FINAL_MEM`
+
+表示：
+
+- 仿真结束时，对某个 DDR sample 地址的最终观察值
+
+字段含义：
+
+- `addr`: sample 地址
+- `known`: 该地址值是否已被 harness 确认
+- `val`: 最终值
+
+它不是全 DDR 镜像，只是 sample 化末态。
+
+### `FINAL_MMIO`
+
+表示：
+
+- 仿真结束时，对某个 MMIO sample 地址的最终观察值
+
+字段含义同 `FINAL_MEM`，只是作用域是 MMIO。
+
+### `FINAL_MAPPED`
+
+表示：
+
+- 仿真结束时，对某个 mode2 mapped-window sample 地址的最终观察值
+
+字段含义同 `FINAL_MEM`，只是作用域是 local mapped window。
+
 ## 当前未纳入比较的项
 
 当前 MVP 明确不比较：
