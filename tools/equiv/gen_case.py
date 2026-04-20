@@ -6,6 +6,7 @@ from pathlib import Path
 NUM_READ_MASTERS = 4
 NUM_WRITE_MASTERS = 2
 READ_BEAT_WORDS = 8
+LINE_WORDS = 16
 WRITE_WORDS = 16
 WRITE_STRB_BYTES = 64
 
@@ -38,6 +39,8 @@ def zero_frame(defaults):
         "axi_rresp": parse_int(defaults.get("axi_rresp", 0)),
         "axi_rlast": parse_int(defaults.get("axi_rlast", 0)),
         "axi_rdata_words": [parse_int(x) for x in defaults.get("axi_rdata_words", [0] * READ_BEAT_WORDS)] + [0] * READ_BEAT_WORDS,
+        "mem_read_line_resp_valid": parse_int(defaults.get("mem_read_line_resp_valid", 0)),
+        "mem_read_line_resp_words": [parse_int(x) for x in defaults.get("mem_read_line_resp_words", [0] * LINE_WORDS)] + [0] * LINE_WORDS,
         "read_req": [
             {"valid": 0, "addr": 0, "size": 0, "id": 0, "bypass": 0, "hold_until_accept": 0}
             for _ in range(NUM_READ_MASTERS)
@@ -112,6 +115,10 @@ def apply_event(frame, event):
         frame["axi_rlast"] = parse_int(event.get("last", 1))
         words = [parse_int(x) for x in event.get("data_words", [])]
         frame["axi_rdata_words"] = (words + [0] * READ_BEAT_WORDS)[:READ_BEAT_WORDS]
+    elif t == "mem_read_line_resp":
+        frame["mem_read_line_resp_valid"] = parse_int(event.get("valid", 1))
+        words = [parse_int(x) for x in event.get("data_words", [])]
+        frame["mem_read_line_resp_words"] = (words + [0] * LINE_WORDS)[:LINE_WORDS]
     else:
         raise ValueError(f"unsupported event type: {t}")
 
@@ -153,6 +160,8 @@ def emit_header(frames, out_path):
     lines.append("  bool axi_bvalid; uint8_t axi_bid; uint8_t axi_bresp;")
     lines.append("  bool axi_rvalid; uint8_t axi_rid; uint8_t axi_rresp; bool axi_rlast;")
     lines.append("  std::array<uint32_t, 8> axi_rdata_words;")
+    lines.append("  bool mem_read_line_resp_valid;")
+    lines.append("  std::array<uint32_t, 16> mem_read_line_resp_words;")
     lines.append("  std::array<ReadReq, 4> read_req;")
     lines.append("  std::array<WriteReq, 2> write_req;")
     lines.append("};")
@@ -172,6 +181,9 @@ def emit_header(frames, out_path):
                 "}"
             )
         rbeat = ", ".join(f"0x{x:08x}u" for x in frame["axi_rdata_words"][:READ_BEAT_WORDS])
+        line_words = ", ".join(
+            f"0x{x:08x}u" for x in frame["mem_read_line_resp_words"][:LINE_WORDS]
+        )
         lines.append(
             "  Frame{" +
             f"{frame['mode_req']}, 0x{frame['llc_mapped_offset_req']:08x}u, {int(frame['invalidate_all_valid'])}, "
@@ -180,7 +192,8 @@ def emit_header(frames, out_path):
             f"{int(frame['axi_arready'])}, {int(frame['axi_awready'])}, {int(frame['axi_wready'])}, "
             f"{int(frame['axi_bvalid'])}, {frame['axi_bid']}, {frame['axi_bresp']}, "
             f"{int(frame['axi_rvalid'])}, {frame['axi_rid']}, {frame['axi_rresp']}, {int(frame['axi_rlast'])}, "
-            f"{{{rbeat}}}, {{{', '.join(rr)}}}, {{{', '.join(wr)}}}" +
+            f"{{{rbeat}}}, {int(frame['mem_read_line_resp_valid'])}, {{{line_words}}}, "
+            f"{{{', '.join(rr)}}}, {{{', '.join(wr)}}}" +
             "},"
         )
     lines.append("};")
@@ -209,6 +222,8 @@ def emit_verilog(frames, out_path):
     lines.append("reg [1:0] stim_axi_rresp [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg stim_axi_rlast [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [255:0] stim_axi_rdata [0:EQUIV_NUM_CYCLES-1];")
+    lines.append("reg stim_mem_read_line_resp_valid [0:EQUIV_NUM_CYCLES-1];")
+    lines.append("reg [511:0] stim_mem_read_line_resp_data [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [3:0] stim_read_req_valid [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [127:0] stim_read_req_addr [0:EQUIV_NUM_CYCLES-1];")
     lines.append("reg [31:0] stim_read_req_size [0:EQUIV_NUM_CYCLES-1];")
@@ -244,6 +259,8 @@ def emit_verilog(frames, out_path):
     lines.append("    stim_axi_rresp[equiv_init_idx] = 2'd0;")
     lines.append("    stim_axi_rlast[equiv_init_idx] = 1'b0;")
     lines.append("    stim_axi_rdata[equiv_init_idx] = 256'd0;")
+    lines.append("    stim_mem_read_line_resp_valid[equiv_init_idx] = 1'b0;")
+    lines.append("    stim_mem_read_line_resp_data[equiv_init_idx] = 512'd0;")
     lines.append("    stim_read_req_valid[equiv_init_idx] = 4'd0;")
     lines.append("    stim_read_req_addr[equiv_init_idx] = 128'd0;")
     lines.append("    stim_read_req_size[equiv_init_idx] = 32'd0;")
@@ -278,6 +295,8 @@ def emit_verilog(frames, out_path):
         lines.append(f"  stim_axi_rresp[{i}] = 2'h{frame['axi_rresp']:x};")
         lines.append(f"  stim_axi_rlast[{i}] = 1'b{int(frame['axi_rlast'])};")
         lines.append(f"  stim_axi_rdata[{i}] = {flatten_words(frame['axi_rdata_words'][:READ_BEAT_WORDS], 256)};")
+        lines.append(f"  stim_mem_read_line_resp_valid[{i}] = 1'b{int(frame['mem_read_line_resp_valid'])};")
+        lines.append(f"  stim_mem_read_line_resp_data[{i}] = {flatten_words(frame['mem_read_line_resp_words'][:LINE_WORDS], 512)};")
         read_valid = 0
         read_addr_words = []
         read_size = 0

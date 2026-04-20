@@ -47,6 +47,7 @@
 - 不生成 overlapping same-master same-write-ID case
 - 不生成依赖 `invalidate_line` accept policy 差异的 case
 - 不生成依赖 parent host queued lookup hidden contract 的 case
+- cacheable line fill 优先使用 `mem_read_line_resp`，而不是跨模型直接复用 raw `axi_r` beat
 
 换句话说，当前 MVP 先验证：
 
@@ -78,6 +79,7 @@
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
+- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 
@@ -89,18 +91,32 @@
 ## 当前探索性用例
 
 - `tests/equiv/seeds/invalidate_all_idle_accept.json`
-- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 
 这些用例目前**不纳入默认 PASS 集**。它们正在暴露新的差异：
 
 - `invalidate_all_idle_accept`
-  - C++ 在空闲窗口下会给 `MAINT_ACCEPT`
-  - RTL 当前在同样 stimulus 下没有给出对应 `MAINT_ACCEPT`
+  - C++ 在持续拉高请求下现在只给一次 `MAINT_ACCEPT`
+  - RTL 当前在同样 stimulus 下仍没有对应 `MAINT_ACCEPT`
 
-- RTL 已经表现出 `cacheable fill -> first READ_RESP -> same-line bypass hit`
-- C++ reference 当前在相同时序下没有产出第一次 `READ_RESP`
+这条差异现在已经收敛成 **maintenance accept policy** 问题，不再是 harness 对 pulse/level 语义处理不当。
 
-后续需要先把这条差异定位清楚，再决定是修 reference、修 RTL，还是进一步收紧 stimulus / compare contract。
+## `mem_read_line_resp` 抽象
+
+`mem_read_line_resp` 表示：
+
+- 对“当前最老的 pending LLC read”返回一整条 line 的数据
+
+它不会在 seed 中显式编码 raw `ARLEN/ARSIZE/RID/RLAST/RDATA` 的 beat 细节，而是由两侧 runner 各自展开：
+
+- C++ runner：按 C++ interconnect 当前的下游 beat 宽度生成合法 `R` 流
+- RTL replay bench：按 DUT 当前实际握手到的 `ARLEN/ARSIZE` 生成合法 `R` 流
+
+引入这个抽象的原因是：
+
+- C++ 当前的下游读 beat 粒度与 RTL 不同
+- 直接共享 raw `axi_r` beat 会把“返回建模差异”误报成“缓存语义差异”
+
+在 `mode1_fill_then_bypass_hit` 中，这个抽象已经证明能把同 line resident-fill / bypass-hit 场景稳定压进共同合同子集。
 
 ## 下一阶段计划约束
 

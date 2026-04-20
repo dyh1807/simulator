@@ -1,7 +1,7 @@
 {
   "name": "mode1_fill_then_bypass_hit",
   "warmup_cycles": 8300,
-  "tail_cycles": 40,
+  "tail_cycles": 48,
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": 0,
@@ -26,12 +26,7 @@
     },
     {
       "cycle": 12,
-      "type": "axi_r",
-      "duration": 8,
-      "valid": 1,
-      "id": 0,
-      "resp": 0,
-      "last": 1,
+      "type": "mem_read_line_resp",
       "data_words": [
         "0x01020304",
         "0x11121314",
@@ -40,11 +35,19 @@
         "0x41424344",
         "0x51525354",
         "0x61626364",
-        "0x71727374"
+        "0x71727374",
+        "0x81828384",
+        "0x91929394",
+        "0xa1a2a3a4",
+        "0xb1b2b3b4",
+        "0xc1c2c3c4",
+        "0xd1d2d3d4",
+        "0xe1e2e3e4",
+        "0xf1f2f3f4"
       ]
     },
     {
-      "cycle": 28,
+      "cycle": 36,
       "type": "read_req",
       "master": 0,
       "addr": "0x80006000",

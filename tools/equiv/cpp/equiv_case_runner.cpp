@@ -59,6 +59,14 @@ struct HeldWriteReq {
   equiv_case::WriteReq req{};
 };
 
+struct GeneratedMemReadLineResp {
+  bool active = false;
+  uint8_t rid = 0;
+  uint8_t total_beats = 0;
+  uint8_t beat_idx = 0;
+  std::array<uint32_t, 16> line_words{};
+};
+
 uint32_t hash_read_words(const axi_interconnect::WideReadData_t &data) {
   uint32_t h = 0x811C9DC5u;
   for (int i = 0; i < 8; ++i) {
@@ -101,6 +109,70 @@ uint32_t hash_axi_strb(const sim_ddr::axi_strb_t &strb) {
     h = ((h << 3) | (h >> 29)) ^ nib ^ i;
   }
   return h;
+}
+
+int find_oldest_pending_llc_read(const AXI_Interconnect &interconnect) {
+  for (size_t idx = 0; idx < interconnect.r_pending.size(); ++idx) {
+    const auto &txn = interconnect.r_pending[idx];
+    if (txn.to_llc && txn.beats_done < txn.total_beats) {
+      return static_cast<int>(idx);
+    }
+  }
+  return -1;
+}
+
+void start_generated_mem_read_line_resp(
+    AXI_Interconnect &interconnect, const equiv_case::Frame &frame,
+    GeneratedMemReadLineResp &gen_resp) {
+  if (!frame.mem_read_line_resp_valid || gen_resp.active) {
+    return;
+  }
+  const int pending_idx = find_oldest_pending_llc_read(interconnect);
+  if (pending_idx < 0) {
+    return;
+  }
+  const auto &txn = interconnect.r_pending[static_cast<size_t>(pending_idx)];
+  gen_resp.active = true;
+  gen_resp.rid = txn.axi_id;
+  gen_resp.total_beats = txn.total_beats;
+  gen_resp.beat_idx = 0;
+  gen_resp.line_words = frame.mem_read_line_resp_words;
+}
+
+void drive_generated_mem_read_line_resp(
+    AXI_Interconnect &interconnect, const GeneratedMemReadLineResp &gen_resp) {
+  if (!gen_resp.active) {
+    return;
+  }
+  interconnect.axi_io.r.rvalid = true;
+  interconnect.axi_io.r.rid = gen_resp.rid;
+  interconnect.axi_io.r.rresp = sim_ddr::AXI_RESP_OKAY;
+  interconnect.axi_io.r.rlast = (gen_resp.beat_idx + 1u) >= gen_resp.total_beats;
+  interconnect.axi_io.r.rdata = 0;
+
+  const uint32_t beat_word_count = sim_ddr::SIM_DDR_BEAT_BYTES / 4u;
+  const uint32_t base = static_cast<uint32_t>(gen_resp.beat_idx) * beat_word_count;
+  for (uint32_t word = 0; word < beat_word_count; ++word) {
+    const uint32_t idx = base + word;
+    const uint32_t value =
+        idx < gen_resp.line_words.size() ? gen_resp.line_words[idx] : 0u;
+    axi_compat::set_u32(interconnect.axi_io.r.rdata, word, value);
+  }
+}
+
+void advance_generated_mem_read_line_resp(
+    const AXI_Interconnect &interconnect, GeneratedMemReadLineResp &gen_resp) {
+  if (!gen_resp.active) {
+    return;
+  }
+  if (!(interconnect.axi_io.r.rvalid && interconnect.axi_io.r.rready)) {
+    return;
+  }
+  if ((gen_resp.beat_idx + 1u) >= gen_resp.total_beats) {
+    gen_resp = {};
+    return;
+  }
+  gen_resp.beat_idx++;
 }
 
 void apply_frame(AXI_Interconnect &interconnect, FakeLlcTables &tables,
@@ -197,6 +269,7 @@ int main(int argc, char **argv) {
   tables.init(cfg);
   HeldReadReq held_read[axi_interconnect::NUM_READ_MASTERS];
   HeldWriteReq held_write[axi_interconnect::NUM_WRITE_MASTERS];
+  GeneratedMemReadLineResp gen_mem_read_resp;
   bool prev_read_resp_valid[axi_interconnect::NUM_READ_MASTERS] = {};
   uint8_t prev_read_resp_id[axi_interconnect::NUM_READ_MASTERS] = {};
   uint32_t prev_read_resp_d0[axi_interconnect::NUM_READ_MASTERS] = {};
@@ -211,6 +284,8 @@ int main(int argc, char **argv) {
     const auto &frame = equiv_case::kFrames[cycle];
     const int trace_cycle = cycle + 1;
     apply_frame(interconnect, tables, frame, held_read, held_write);
+    start_generated_mem_read_line_resp(interconnect, frame, gen_mem_read_resp);
+    drive_generated_mem_read_line_resp(interconnect, gen_mem_read_resp);
     interconnect.comb_outputs();
     interconnect.comb_inputs();
 
@@ -321,6 +396,7 @@ int main(int argc, char **argv) {
     }
 
     tables.seq(interconnect.get_llc_table_out());
+    advance_generated_mem_read_line_resp(interconnect, gen_mem_read_resp);
     interconnect.seq();
     ++sim_time;
   }

@@ -42,6 +42,7 @@ MVP 当前覆盖：
 
 - `warmup_cycles`
 - `hold_until_accept`
+- `mem_read_line_resp`
 
 其中 `warmup_cycles` 用来吸收 RTL 顶层 reset 后的 invalidate sweep / reconfig busy 初始化窗口。
 
@@ -65,29 +66,26 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
+- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
 
 当前还有一条**探索性** seed：
 
 - `tests/equiv/seeds/invalidate_all_idle_accept.json`
-- `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 
 这些用例当前会暴露新的 C++/RTL 行为差异：
 
 - `invalidate_all_idle_accept`
-  - C++ 在空闲窗口下给出 `MAINT_ACCEPT`
-  - RTL 当前没有在同样 stimulus 下产出对应 `MAINT_ACCEPT`
+  - C++ 现在会对持续拉高的 `invalidate_all` 只给一次 `MAINT_ACCEPT`
+  - RTL 在同样 stimulus 下仍没有对应 `MAINT_ACCEPT`
+  - 这说明当前剩下的是 **accept policy / sweep timing** 差异，不再是 pulse/level 或重复 accept 的 bug
 
-- RTL 在 cacheable fill 完成后会先返回第一次 `READ_RESP`，随后同 line 的 bypass read 走 resident hit
-- C++ reference 当前没有在同样时序下给出第一次 `READ_RESP`
+`mode1_fill_then_bypass_hit` 现在已经进入默认 PASS 集。为了让 cacheable fill 的下游返回在 C++/RTL 两侧都走“共同抽象”，harness 额外提供了：
 
-这条差异当前更像是 **line-fill 下游读返回建模仍不抽象统一**：
+- `mem_read_line_resp`
 
-- C++ reference 仍按较细粒度的下游读 beat 语义推进
-- RTL replay bench 当前直接喂 raw AXI `R` beat
-
-所以这条用例暂时更适合作为下一阶段的“shared memory-return model”驱动目标，而不是先纳入默认 PASS 集。
+它表示“给当前最老的 pending LLC read 返回一整条 line 数据”，由 C++ runner 和 RTL replay bench 各自按本模型的 AXI beat 宽度自动展开成合法的下游 `R` 流，而不是直接把 raw `axi_r` beat 跨模型复用。
 
 合同边界见：
 
