@@ -60,6 +60,7 @@ def main():
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_fill_then_bypass_hit.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode_transition_flush_write_block.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode2_aligned_write.json"),
+        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode2_window_local_write.json"),
     ]
 
     for seed in seeds:

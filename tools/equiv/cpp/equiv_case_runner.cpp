@@ -79,6 +79,8 @@ struct PendingWriteOrder {
   uint32_t addr = 0;
 };
 
+constexpr uint32_t kMappedWindowBytes = 4u * 1024u * 1024u;
+
 template <size_t N>
 void apply_line_to_samples(const uint32_t base_addr,
                            const std::array<uint32_t, 16> &line_words,
@@ -123,6 +125,50 @@ void apply_write_beat_to_samples(const uint32_t beat_addr,
     known[idx] = true;
     values[idx] = merged;
   }
+}
+
+bool mapped_sample_value(const FakeLlcTables &tables, uint32_t active_mode,
+                         uint32_t active_offset, uint32_t addr,
+                         uint32_t *value_out) {
+  if (active_mode != 2u) {
+    return false;
+  }
+  if (addr < active_offset || addr >= (active_offset + kMappedWindowBytes)) {
+    return false;
+  }
+  const auto &cfg = tables.config;
+  if (cfg.line_bytes == 0 || cfg.ways == 0 || cfg.set_count() == 0) {
+    return false;
+  }
+  const uint32_t local_addr = addr - active_offset;
+  const uint32_t line_addr = (local_addr / cfg.line_bytes) * cfg.line_bytes;
+  const uint32_t line_idx = line_addr / cfg.line_bytes;
+  const uint32_t set = line_idx % cfg.set_count();
+  const uint32_t way = line_idx / cfg.set_count();
+  if (way >= cfg.ways || set >= tables.valid_sets.size() ||
+      set >= tables.data_sets.size()) {
+    return false;
+  }
+  const auto &valid_row = tables.valid_sets[set];
+  const size_t byte_idx = static_cast<size_t>(way >> 3);
+  const uint8_t bit_mask = static_cast<uint8_t>(1u << (way & 0x7u));
+  if (byte_idx >= valid_row.size() ||
+      (valid_row.data()[byte_idx] & bit_mask) == 0) {
+    return false;
+  }
+  const auto &data_row = tables.data_sets[set];
+  const uint32_t word_idx = (local_addr & (cfg.line_bytes - 1u)) >> 2;
+  const size_t base = static_cast<size_t>(way) * cfg.line_bytes +
+                      static_cast<size_t>(word_idx) * sizeof(uint32_t);
+  if ((base + 4u) > data_row.size()) {
+    return false;
+  }
+  uint32_t value = 0;
+  for (uint32_t b = 0; b < 4u; ++b) {
+    value |= static_cast<uint32_t>(data_row.data()[base + b]) << (b * 8u);
+  }
+  *value_out = value;
+  return true;
 }
 
 uint32_t hash_read_words(const axi_interconnect::WideReadData_t &data) {
@@ -330,6 +376,8 @@ int main(int argc, char **argv) {
   GeneratedMemReadLineResp gen_mem_read_resp;
   std::array<bool, equiv_case::kNumFinalMemSamples> final_mem_known{};
   std::array<uint32_t, equiv_case::kNumFinalMemSamples> final_mem_values{};
+  std::array<bool, equiv_case::kNumFinalMappedSamples> final_mapped_known{};
+  std::array<uint32_t, equiv_case::kNumFinalMappedSamples> final_mapped_values{};
   bool final_mem_write_pending = false;
   uint32_t final_mem_write_addr = 0;
   uint8_t final_mem_write_beat_idx = 0;
@@ -544,6 +592,19 @@ int main(int argc, char **argv) {
                  equiv_case::kFinalMemSampleAddrs[idx],
                  final_mem_known[idx] ? 1u : 0u,
                  final_mem_values[idx]);
+  }
+  for (int idx = 0; idx < equiv_case::kNumFinalMappedSamples; ++idx) {
+    uint32_t value = 0;
+    const bool known =
+        mapped_sample_value(tables, interconnect.runtime_mode_,
+                            interconnect.llc_mapped_offset_,
+                            equiv_case::kFinalMappedSampleAddrs[idx], &value);
+    final_mapped_known[idx] = known;
+    final_mapped_values[idx] = value;
+    std::fprintf(fp, "%d FINAL_MAPPED addr=0x%08x known=%u val=0x%08x\n",
+                 equiv_case::kNumCycles + 1,
+                 equiv_case::kFinalMappedSampleAddrs[idx],
+                 known ? 1u : 0u, value);
   }
 
   std::fclose(fp);

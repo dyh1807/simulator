@@ -1,0 +1,47 @@
+{
+  "name": "mode2_window_local_write",
+  "warmup_cycles": 8300,
+  "tail_cycles": 32,
+  "final_mapped_samples": [
+    "0x40001000"
+  ],
+  "defaults": {
+    "mode_req": 1,
+    "llc_mapped_offset_req": "0x40000000",
+    "read_resp_ready_mask": 15,
+    "write_resp_ready_mask": 3,
+    "axi_arready": 1,
+    "axi_awready": 1,
+    "axi_wready": 1,
+    "axi_bvalid": 0,
+    "axi_rvalid": 0
+  },
+  "events": [
+    {
+      "cycle": 1,
+      "type": "set_mode",
+      "mode": 2
+    },
+    {
+      "cycle": 6,
+      "type": "write_req",
+      "master": 0,
+      "addr": "0x40001000",
+      "size": 3,
+      "id": 5,
+      "bypass": 0,
+      "hold_until_accept": 1,
+      "wdata_words": [
+        "0x89abcdef",
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      ],
+      "wstrb_bytes": [
+        1,1,1,1,
+        0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+      ]
+    }
+  ]
+}

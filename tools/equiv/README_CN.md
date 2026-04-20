@@ -30,6 +30,8 @@ MVP 当前覆盖：
 - `AXI_AW_HS`
 - `AXI_W_HS`
 - `MODE_ACTIVE`
+- `FINAL_MEM`
+- `FINAL_MAPPED`
 
 当前不比较：
 
@@ -42,13 +44,21 @@ MVP 当前覆盖：
 - runner / RTL replay 会根据 `mem_read_line_resp` 与下游 `AW/W` 握手维护 shadow memory
 - 仿真结束时会输出 `FINAL_MEM`
 
+当前也已经支持 **final mapped-window sample state** compare：
+
+- seed 可以通过 `final_mapped_samples` 指定一组 mode2 local-window 地址
+- harness 会在收尾时直接读取 resident generic store / valid RAM 的最终值
+- 仿真结束时输出：
+  - `FINAL_MAPPED`
+
 这些能力当前主要用于：
 
 - `mode1_bypass_rw`
 - `mode1_fill_then_bypass_hit`
 - `mode2_aligned_write`
+- `mode2_window_local_write`
 
-更完整的 final MMIO / mapped-window state compare 仍留在后续阶段扩展。
+更完整的 final MMIO state compare 仍留在后续阶段扩展。
 
 当前 stimulus 额外支持：
 
@@ -56,6 +66,7 @@ MVP 当前覆盖：
 - `hold_until_accept`
 - `mem_read_line_resp`
 - `final_mem_samples`
+- `final_mapped_samples`
 
 其中 `warmup_cycles` 用来吸收 RTL 顶层 reset 后的 invalidate sweep / reconfig busy 初始化窗口。
 
@@ -89,6 +100,7 @@ python3 tools/equiv/run_mvp.py --seed tests/equiv/seeds/mode1_bypass_rw.json
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
+- `tests/equiv/seeds/mode2_window_local_write.json`
 
 当前还有一条**策略化** seed：
 

@@ -15,6 +15,7 @@
 - `AXI_AW_HS`
 - `AXI_W_HS`
 - `FINAL_MEM`
+- `FINAL_MAPPED`
 - `MODE_ACTIVE`
 
 这意味着：
@@ -52,8 +53,19 @@
 因此，仍未纳入比较的是：
 
 - final MMIO state
-- final mapped-window state
 - 非 sample 化的全 DDR 镜像状态
+
+当前也已经支持 **final mapped-window sample state** compare：
+
+- seed 可通过 `final_mapped_samples` 指定一组 mode2 local-window 地址
+- harness 会在收尾时直接读取最终 resident store / valid RAM 状态
+- 仿真结束时输出：
+  - `FINAL_MAPPED addr=... known=... val=...`
+
+因此，仍未纳入比较的是：
+
+- final MMIO state
+- 非 sample 化的全 mapped-window / DDR 镜像状态
 
 ## 当前环境约束
 
@@ -98,6 +110,7 @@
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
+- `tests/equiv/seeds/mode2_window_local_write.json`
 
 这些 seed 的目标是：
 
@@ -201,6 +214,8 @@
 - `AXI_W_HS`
   当前只比较 `d0/last`
 - `FINAL_MEM`
+  比较 `addr/known/val`
+- `FINAL_MAPPED`
   比较 `addr/known/val`
 
 换句话说，当前 MVP 已经把下游 AXI issue 纳入 compare，但还没有把所有 raw AXI 字段都冻结成强等价项。
