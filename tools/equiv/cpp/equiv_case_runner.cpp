@@ -67,6 +67,52 @@ struct GeneratedMemReadLineResp {
   std::array<uint32_t, 16> line_words{};
 };
 
+template <size_t N>
+void apply_line_to_samples(const uint32_t base_addr,
+                           const std::array<uint32_t, 16> &line_words,
+                           std::array<bool, N> &known,
+                           std::array<uint32_t, N> &values) {
+  for (size_t idx = 0; idx < N; ++idx) {
+    const uint32_t sample_addr = equiv_case::kFinalMemSampleAddrs[idx];
+    if (sample_addr < base_addr || sample_addr >= (base_addr + 64u)) {
+      continue;
+    }
+    const uint32_t word_idx = (sample_addr - base_addr) >> 2;
+    if (word_idx < line_words.size()) {
+      known[idx] = true;
+      values[idx] = line_words[word_idx];
+    }
+  }
+}
+
+template <size_t N>
+void apply_write_beat_to_samples(const uint32_t beat_addr,
+                                 const sim_ddr::axi_data_t &wdata,
+                                 const sim_ddr::axi_strb_t &wstrb,
+                                 std::array<bool, N> &known,
+                                 std::array<uint32_t, N> &values) {
+  for (size_t idx = 0; idx < N; ++idx) {
+    const uint32_t sample_addr = equiv_case::kFinalMemSampleAddrs[idx];
+    if (sample_addr < beat_addr ||
+        sample_addr >= (beat_addr + sim_ddr::SIM_DDR_BEAT_BYTES)) {
+      continue;
+    }
+    uint32_t merged = known[idx] ? values[idx] : 0u;
+    const uint32_t byte_off = sample_addr - beat_addr;
+    for (uint32_t b = 0; b < 4u; ++b) {
+      if (!axi_compat::test_bit(wstrb, byte_off + b)) {
+        continue;
+      }
+      const uint8_t new_byte =
+          static_cast<uint8_t>(axi_compat::get_byte(wdata, byte_off + b));
+      merged &= ~(0xffu << (b * 8u));
+      merged |= static_cast<uint32_t>(new_byte) << (b * 8u);
+    }
+    known[idx] = true;
+    values[idx] = merged;
+  }
+}
+
 uint32_t hash_read_words(const axi_interconnect::WideReadData_t &data) {
   uint32_t h = 0x811C9DC5u;
   for (int i = 0; i < 8; ++i) {
@@ -270,6 +316,11 @@ int main(int argc, char **argv) {
   HeldReadReq held_read[axi_interconnect::NUM_READ_MASTERS];
   HeldWriteReq held_write[axi_interconnect::NUM_WRITE_MASTERS];
   GeneratedMemReadLineResp gen_mem_read_resp;
+  std::array<bool, equiv_case::kNumFinalMemSamples> final_mem_known{};
+  std::array<uint32_t, equiv_case::kNumFinalMemSamples> final_mem_values{};
+  bool final_mem_write_pending = false;
+  uint32_t final_mem_write_addr = 0;
+  uint8_t final_mem_write_beat_idx = 0;
   bool prev_read_resp_valid[axi_interconnect::NUM_READ_MASTERS] = {};
   uint8_t prev_read_resp_id[axi_interconnect::NUM_READ_MASTERS] = {};
   uint32_t prev_read_resp_d0[axi_interconnect::NUM_READ_MASTERS] = {};
@@ -285,6 +336,14 @@ int main(int argc, char **argv) {
     const int trace_cycle = cycle + 1;
     apply_frame(interconnect, tables, frame, held_read, held_write);
     start_generated_mem_read_line_resp(interconnect, frame, gen_mem_read_resp);
+    if (gen_mem_read_resp.active && frame.mem_read_line_resp_valid) {
+      const int pending_idx = find_oldest_pending_llc_read(interconnect);
+      if (pending_idx >= 0) {
+        const auto &txn = interconnect.r_pending[static_cast<size_t>(pending_idx)];
+        apply_line_to_samples(txn.addr, gen_mem_read_resp.line_words,
+                              final_mem_known, final_mem_values);
+      }
+    }
     drive_generated_mem_read_line_resp(interconnect, gen_mem_read_resp);
     interconnect.comb_outputs();
     interconnect.comb_inputs();
@@ -368,6 +427,9 @@ int main(int argc, char **argv) {
                    static_cast<unsigned>(interconnect.axi_io.ar.arburst));
     }
     if (interconnect.axi_io.aw.awvalid && interconnect.axi_io.aw.awready) {
+      final_mem_write_pending = true;
+      final_mem_write_addr = interconnect.axi_io.aw.awaddr;
+      final_mem_write_beat_idx = 0;
       std::fprintf(fp,
                    "%d AXI_AW_HS id=%u addr=0x%08x len=%u size=%u burst=%u\n",
                    trace_cycle,
@@ -378,6 +440,20 @@ int main(int argc, char **argv) {
                    static_cast<unsigned>(interconnect.axi_io.aw.awburst));
     }
     if (interconnect.axi_io.w.wvalid && interconnect.axi_io.w.wready) {
+      if (final_mem_write_pending) {
+        const uint32_t beat_addr =
+            final_mem_write_addr +
+            static_cast<uint32_t>(final_mem_write_beat_idx) * sim_ddr::SIM_DDR_BEAT_BYTES;
+        apply_write_beat_to_samples(beat_addr, interconnect.axi_io.w.wdata,
+                                    interconnect.axi_io.w.wstrb,
+                                    final_mem_known, final_mem_values);
+        if (interconnect.axi_io.w.wlast) {
+          final_mem_write_pending = false;
+          final_mem_write_beat_idx = 0;
+        } else {
+          final_mem_write_beat_idx++;
+        }
+      }
       std::fprintf(fp,
                    "%d AXI_W_HS hash=0x%08x d0=0x%08x strbhash=0x%08x last=%u\n",
                    trace_cycle,
@@ -399,6 +475,14 @@ int main(int argc, char **argv) {
     advance_generated_mem_read_line_resp(interconnect, gen_mem_read_resp);
     interconnect.seq();
     ++sim_time;
+  }
+
+  for (int idx = 0; idx < equiv_case::kNumFinalMemSamples; ++idx) {
+    std::fprintf(fp, "%d FINAL_MEM addr=0x%08x known=%u val=0x%08x\n",
+                 equiv_case::kNumCycles + 1,
+                 equiv_case::kFinalMemSampleAddrs[idx],
+                 final_mem_known[idx] ? 1u : 0u,
+                 final_mem_values[idx]);
   }
 
   std::fclose(fp);

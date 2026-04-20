@@ -14,6 +14,7 @@
 - `AXI_AR_HS`
 - `AXI_AW_HS`
 - `AXI_W_HS`
+- `FINAL_MEM`
 - `MODE_ACTIVE`
 
 这意味着：
@@ -34,10 +35,25 @@
 当前 MVP 明确不比较：
 
 - lower AXI 原始 `id/size/burst/strb hash`
-- final DDR / MMIO / mapped-window memory state
+- final MMIO / mapped-window memory state
 - 内部 table / queue / pending slot 状态
 
-这些属于下一阶段扩展项。
+当前已经支持 **final DDR sample state** compare：
+
+- seed 可通过 `final_mem_samples` 指定一组 DDR 地址
+- harness 会根据：
+  - `mem_read_line_resp`
+  - `AXI_AW_HS`
+  - `AXI_W_HS`
+  维护 sample 级 shadow memory
+- 仿真结束时输出：
+  - `FINAL_MEM addr=... known=... val=...`
+
+因此，仍未纳入比较的是：
+
+- final MMIO state
+- final mapped-window state
+- 非 sample 化的全 DDR 镜像状态
 
 ## 当前环境约束
 
@@ -179,5 +195,7 @@
   当前只比较 `addr`
 - `AXI_W_HS`
   当前只比较 `d0/last`
+- `FINAL_MEM`
+  比较 `addr/known/val`
 
 换句话说，当前 MVP 已经把下游 AXI issue 纳入 compare，但还没有把所有 raw AXI 字段都冻结成强等价项。

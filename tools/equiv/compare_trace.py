@@ -46,6 +46,8 @@ def canonicalize(event):
         return (etype, f["addr"])
     if etype == "AXI_W_HS":
         return (etype, f["d0"], f["last"])
+    if etype == "FINAL_MEM":
+        return (etype, f["addr"], f["known"], f["val"])
     return (etype, tuple(sorted(f.items())))
 
 

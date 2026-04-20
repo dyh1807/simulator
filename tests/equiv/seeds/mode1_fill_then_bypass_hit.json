@@ -2,6 +2,9 @@
   "name": "mode1_fill_then_bypass_hit",
   "warmup_cycles": 8300,
   "tail_cycles": 48,
+  "final_mem_samples": [
+    "0x80006000"
+  ],
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": 0,

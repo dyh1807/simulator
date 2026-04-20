@@ -2,6 +2,9 @@
   "name": "mode2_aligned_write",
   "warmup_cycles": 8300,
   "tail_cycles": 24,
+  "final_mem_samples": [
+    "0x80004000"
+  ],
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": "0x40000000",

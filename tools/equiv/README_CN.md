@@ -34,9 +34,21 @@ MVP 当前覆盖：
 当前不比较：
 
 - raw `axi_id/size/burst/strb hash`
-- final DDR/MMIO state
+- final MMIO state
 
-这些会在后续阶段扩展。
+当前已经支持 **final DDR sample state** compare：
+
+- seed 可以通过 `final_mem_samples` 指定一组 DDR 地址
+- runner / RTL replay 会根据 `mem_read_line_resp` 与下游 `AW/W` 握手维护 shadow memory
+- 仿真结束时会输出 `FINAL_MEM`
+
+这些能力当前主要用于：
+
+- `mode1_bypass_rw`
+- `mode1_fill_then_bypass_hit`
+- `mode2_aligned_write`
+
+更完整的 final MMIO / mapped-window state compare 仍留在后续阶段扩展。
 
 当前 stimulus 额外支持：
 
