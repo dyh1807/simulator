@@ -313,8 +313,26 @@
 - C++ 更接近 `line-local` accept
 - RTL 当前更接近 `full compat-local drain`
 
-在 compare harness 里，这一项暂时通过 **不生成相关冲突场景** 规避。
-后续如果要把这类 case 纳入，需要显式引入 policy 参数，例如：
+当前已纳入一条 expected-diff：
+
+- `invalidate_line_during_other_write`
+  - 场景：另一条 line 的 write 仍在 compat-local inflight 阶段，但目标 `invalidate_line`
+    本行并无 write hazard
+  - 当前稳定差异：
+    - C++ 先给 `MAINT_ACCEPT op=invalidate_line`
+    - RTL 先给前一笔 write 的 `WRITE_RESP`
+  - compare 预期表现为：
+    - `TRACE_COMPARE_FAIL`
+    - `first_diff_index=4`
+    - `cpp_norm: ('MAINT_ACCEPT', 'invalidate_line', '0x80001000')`
+    - `rtl_norm: ('WRITE_RESP', '0', '7', '0')`
+
+这正对应：
+
+- C++：更接近 `line-local` accept
+- RTL：更接近 `full compat-local drain`
+
+后续如果要把这类 case 从 expected-diff 收敛回 PASS，需要显式冻结 policy，例如：
 
 - `invalidate_line_accept_policy = line_local`
 - `invalidate_line_accept_policy = full_drain`
