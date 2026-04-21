@@ -245,7 +245,7 @@
 
 - 顶层事件前允许存在 `warmup_cycles`
 - 不生成 overlapping same-master same-write-ID case
-- 允许串行 reuse，但不生成 overlapping same-master same-read-ID case
+- 允许串行 reuse，但随机生成器默认不生成 same-master same-ID overlap
 - 不生成依赖 `invalidate_line` accept policy 差异的 case
 - 不生成依赖 parent host queued lookup hidden contract 的 case
 - cacheable line fill 优先使用 `mem_read_line_resp`，而不是跨模型直接复用 raw `axi_r` beat
@@ -334,24 +334,22 @@
 - `mode1_mmio_write_id_reuse_serial`
 - `mode1_mmio_write_id_reuse_overlap`
 
-读路径当前仍然只把**串行复用**纳入共同合同：
+读路径这条差异也已经收敛。
 
-- 同 master、同 `id`
-- 第一笔事务已经完成并从上游可见接口退休
-- 然后再发第二笔事务
+当前共同合同是：
+
+- 对同 master、同 read `id` 的新请求，必须等旧 read 从上游可见接口退休后才允许再次 accept
 
 当前默认 PASS 集已经覆盖：
 
 - `mode1_bypass_read_id_reuse_serial`
-
-仍然排除在共同合同外的是：
-
-- overlapping same-master same-read-ID reuse
+- `mode1_bypass_read_id_reuse_overlap`
 
 ## 当前通过的 MVP seed
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode1_bypass_read_id_reuse_serial.json`
+- `tests/equiv/seeds/mode1_bypass_read_id_reuse_overlap.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`

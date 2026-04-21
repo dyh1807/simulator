@@ -159,6 +159,7 @@ python3 tools/equiv/run_regression_suite.py \
 
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode1_bypass_read_id_reuse_serial.json`
+- `tests/equiv/seeds/mode1_bypass_read_id_reuse_overlap.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/invalidate_line_during_other_write.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
@@ -174,12 +175,15 @@ python3 tools/equiv/run_regression_suite.py \
 - bypass read：同 master、同 `id`，第一笔 `READ_RESP` 完成后再发第二笔
 - MMIO write：同 master、同 `id`，第一笔 `WRITE_RESP/B` 完成后再发第二笔
 
-仍然没有纳入默认 PASS 集的，是 **overlapping same-master same-ID reuse**。
+当前也已经覆盖了两条 overlap ID reuse 合同：
+
+- bypass read：同 master、同 `id`，第二笔请求在第一笔 `READ_RESP` 前就开始保持，直到旧事务退休后再 accept
+- MMIO write：同 master、同 `id`，第二笔请求在第一笔 `WRITE_RESP/B` 前就开始保持，直到旧事务退休后再 accept
 
 随机 smoke 当前也沿用同样限制：
 
 - 允许 **serial** ID reuse
-- 不生成 overlapping same-master same-ID reuse
+- 不生成 same-master same-ID overlap
 - 不生成同地址 `AR/AW` overlap
 - 只拼接当前已经冻结到共同合同内的操作模板
 - 如需包含 mode2 写模板，只会放在 seed 尾部，不再在它后面继续拼接新 op
