@@ -58,7 +58,6 @@ def main():
     rtl_root = submodule_root / "rtl"
     seeds = args.seed or [
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_all_idle_accept.json"),
-        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_line_during_other_write.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write_id_reuse_overlap.json"),
     ]
 

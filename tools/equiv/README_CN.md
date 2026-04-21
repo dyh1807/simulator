@@ -159,6 +159,7 @@ python3 tools/equiv/run_regression_suite.py \
 - `tests/equiv/seeds/mode1_bypass_rw.json`
 - `tests/equiv/seeds/mode1_bypass_read_id_reuse_serial.json`
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
+- `tests/equiv/seeds/invalidate_line_during_other_write.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`
 - `tests/equiv/seeds/mode1_mmio_write_id_reuse_serial.json`
@@ -208,7 +209,6 @@ seed 里声明的已知差异签名。
 当前默认纳入的 expected-diff 用例：
 
 - `invalidate_all_idle_accept`
-- `invalidate_line_during_other_write`
 - `mode1_mmio_write_id_reuse_overlap`
 
 `mode1_fill_then_bypass_hit` 现在已经进入默认 PASS 集。为了让 cacheable fill 的下游返回在 C++/RTL 两侧都走“共同抽象”，harness 额外提供了：

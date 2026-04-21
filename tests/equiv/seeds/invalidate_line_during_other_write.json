@@ -2,14 +2,6 @@
   "name": "invalidate_line_during_other_write",
   "warmup_cycles": 8300,
   "tail_cycles": 24,
-  "expected_diff": {
-    "must_contain": [
-      "TRACE_COMPARE_FAIL",
-      "first_diff_index=4",
-      "cpp_norm: ('MAINT_ACCEPT', 'invalidate_line', '0x80001000')",
-      "rtl_norm: ('WRITE_RESP', '0', '7', '0')"
-    ]
-  },
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": "0x40000000",

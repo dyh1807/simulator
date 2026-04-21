@@ -58,6 +58,7 @@ def main():
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_bypass_rw.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_bypass_read_id_reuse_serial.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_line_idle_accept.json"),
+        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_line_during_other_write.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_fill_then_bypass_hit.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write.json"),
         str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write_id_reuse_serial.json"),
