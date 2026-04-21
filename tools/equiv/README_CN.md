@@ -148,6 +148,7 @@ python3 tools/equiv/run_regression_suite.py \
 
 - `run_mvp.py`
 - `run_expected_diff.py`
+- `run_maintenance_contracts.py`
 - `run_random_matrix.py`
 
 摘要会写到：
@@ -162,6 +163,7 @@ python3 tools/equiv/run_regression_suite.py \
 - `tests/equiv/seeds/invalidate_line_during_other_write.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`
+- `tests/equiv/seeds/mode1_mmio_write_id_reuse_overlap.json`
 - `tests/equiv/seeds/mode1_mmio_write_id_reuse_serial.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
@@ -183,33 +185,14 @@ python3 tools/equiv/run_regression_suite.py \
 - 如需包含 mode2 写模板，只会放在 seed 尾部，不再在它后面继续拼接新 op
 - 虽然会引入 master/ready/backpressure 抖动，但仍然保证不会跨出当前 contract
 
-当前还有一条**策略化** seed：
+`invalidate_all` 目前不放在 shared-stimulus 默认 PASS 集里。原因不是还有 policy 差异，而是这条 maintenance 合同更适合用 dedicated contract regression 去验证：
 
-- `tests/equiv/seeds/invalidate_all_idle_accept.json`
-
-这条用例当前暴露的是已确认的 policy 差异：
-
-- `invalidate_all_idle_accept`
-  - C++ 现在会对持续拉高的 `invalidate_all` 只给一次 `MAINT_ACCEPT`
-  - RTL 在同样 stimulus 下仍没有对应 `MAINT_ACCEPT`
-  - 这说明当前剩下的是 **accept policy / sweep timing** 差异，不再是 pulse/level 或重复 accept 的 bug
-  - 该 seed 在 JSON 内通过 `compare_policy.ignore_maint_accept_ops=["invalidate_all"]`
-    显式把这项 accept pulse 排除在共同合同外
-
-同一条 seed 现在也带 `expected_diff` 元数据，因此可以单独作为
-**expected-diff regression** 运行：
-
-```bash
-python3 tools/equiv/run_expected_diff.py
-```
-
-这条回归不会忽略差异，而是要求 compare 失败，并且失败形态必须匹配
-seed 里声明的已知差异签名。
+- C++：`axi_interconnect_llc_axi4_test.cpp`
+- RTL：`tb_axi_llc_subsystem_invalidate_all_contract.v`
 
 当前默认纳入的 expected-diff 用例：
 
-- `invalidate_all_idle_accept`
-- `mode1_mmio_write_id_reuse_overlap`
+- 当前没有默认 expected-diff 用例
 
 `mode1_fill_then_bypass_hit` 现在已经进入默认 PASS 集。为了让 cacheable fill 的下游返回在 C++/RTL 两侧都走“共同抽象”，harness 额外提供了：
 

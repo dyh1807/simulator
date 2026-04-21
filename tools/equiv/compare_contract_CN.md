@@ -274,24 +274,7 @@
 
 当前纳入的例子：
 
-- `invalidate_all_idle_accept`
-  - C++：空闲窗口下会产生一次 `MAINT_ACCEPT op=invalidate_all`
-  - RTL：同样 stimulus 下没有对应 `MAINT_ACCEPT`
-  - 因此 compare 预期表现为：
-    - `TRACE_COMPARE_FAIL`
-    - `length_mismatch cpp=2 rtl=1`
-    - `cpp_extra_norm: ('MAINT_ACCEPT', 'invalidate_all', None)`
-
-- `mode1_mmio_write_id_reuse_overlap`
-  - 场景：同 master、同 write `id=7` 的第二笔 MMIO write 在第一笔 `WRITE_RESP` 退休前就再次发起
-  - 当前稳定差异：
-    - C++ 会先接受第二笔 write
-    - RTL 会先给出第一笔 `WRITE_RESP`
-  - 因此 compare 预期表现为：
-    - `TRACE_COMPARE_FAIL`
-    - `first_diff_index=4`
-    - `cpp_norm: ('WRITE_ACCEPT', '0', '7', '0x10000008', '3', '0', '0x0badf00d')`
-    - `rtl_norm: ('WRITE_RESP', '0', '7', '0')`
+- 当前没有默认 expected-diff 用例
 
 - bypass read
 - MMIO write
@@ -305,6 +288,20 @@
 其中 mode2 写模板如果被选中，只会出现在 seed 尾部；随机 smoke 不再依赖“mode2 写未完全退休时还能继续安全发后续 op”这类尚未冻结的组合语义。
 
 ## 已知合同差异的处理策略
+
+### `invalidate_all`
+
+这条 maintenance 合同不再作为 shared-stimulus 的默认 PASS/expected-diff 项。
+
+原因是：
+
+- 当前 shared-stimulus 的 `MAINT_ACCEPT` 事件抽象还不够稳，容易把 top-level maintenance 边界和真正的 invalidate_all 合同混在一起
+- 这条语义现在改用 dedicated contract regression 验证，而不是继续在 event-normalized 对拍里强比较
+
+当前要求是：
+
+- C++ 侧必须通过 `axi_interconnect_llc_axi4_test.cpp` 里的 invalidate_all 合同
+- RTL 侧必须通过 `tb_axi_llc_subsystem_invalidate_all_contract.v`
 
 ### `invalidate_line`
 
@@ -326,10 +323,18 @@
 
 ### same-master same-write-ID reuse
 
-当前这项政策还没有冻结成共同语义。
-在 compare harness 里，暂时通过 stimulus 约束避免生成对应 case。
+写路径这条差异已经收敛。
 
-不过，当前已经把**串行复用**纳入共同合同：
+当前共同合同是：
+
+- 对同 master、同 write `id` 的新请求，必须等旧 write 从上游可见接口退休后才允许再次 accept
+
+当前默认 PASS 集已经覆盖：
+
+- `mode1_mmio_write_id_reuse_serial`
+- `mode1_mmio_write_id_reuse_overlap`
+
+读路径当前仍然只把**串行复用**纳入共同合同：
 
 - 同 master、同 `id`
 - 第一笔事务已经完成并从上游可见接口退休
@@ -338,12 +343,10 @@
 当前默认 PASS 集已经覆盖：
 
 - `mode1_bypass_read_id_reuse_serial`
-- `mode1_mmio_write_id_reuse_serial`
 
 仍然排除在共同合同外的是：
 
 - overlapping same-master same-read-ID reuse
-- overlapping same-master same-write-ID reuse
 
 ## 当前通过的 MVP seed
 
@@ -352,6 +355,7 @@
 - `tests/equiv/seeds/invalidate_line_idle_accept.json`
 - `tests/equiv/seeds/mode1_fill_then_bypass_hit.json`
 - `tests/equiv/seeds/mode1_mmio_write.json`
+- `tests/equiv/seeds/mode1_mmio_write_id_reuse_overlap.json`
 - `tests/equiv/seeds/mode1_mmio_write_id_reuse_serial.json`
 - `tests/equiv/seeds/mode_transition_flush_write_block.json`
 - `tests/equiv/seeds/mode2_aligned_write.json`
@@ -362,35 +366,13 @@
 - 先证明 shared-stimulus + C++ runner + RTL replay + comparator 这条链路可运行
 - 并在当前共同合同子集内产出一致结果
 
-## 当前探索性用例
-
-- `tests/equiv/seeds/invalidate_all_idle_accept.json`
-
-这些用例目前**不纳入默认 PASS 集**。它们正在暴露新的差异：
-
-- `invalidate_all_idle_accept`
-  - C++ 在持续拉高请求下现在只给一次 `MAINT_ACCEPT`
-  - RTL 当前在同样 stimulus 下仍没有对应 `MAINT_ACCEPT`
-
-这条差异现在已经收敛成 **maintenance accept policy** 问题，不再是 harness 对 pulse/level 语义处理不当。
-
 ## Compare policy 参数
 
 当某条 seed 需要显式表达“双方都允许，但 accept/latency 政策不同”的差异时，可以在 seed JSON 中提供：
 
 - `compare_policy.ignore_maint_accept_ops`
 
-当前已使用的例子：
-
-- `invalidate_all_idle_accept.json`
-  - `ignore_maint_accept_ops = ["invalidate_all"]`
-
-这表示：
-
-- 该 seed 仍然用于验证其它上游/下游事件顺序
-- 但不会把 `invalidate_all` 的 `MAINT_ACCEPT` 脉冲是否出现、何时出现，当成共同合同的一部分
-
-这样做的前提是：这条差异已经被确认是**accept policy 差异**，而不是功能 bug。
+当前没有默认 seed 依赖这个参数。它保留给未来确实需要“保留 policy 差异但继续比较其它事件”的场景。
 
 ## `mem_read_line_resp` 抽象
 

@@ -53,7 +53,7 @@
 - `hold_until_accept`
 
 表示该 event 连续作用多少个 cycle。默认是 `1`。
-`hold_until_accept` 目前只对 `read_req` / `write_req` 有意义，表示请求一旦启动，就保持到第一次被 `*_ACCEPT` 为止。
+`hold_until_accept` 目前只对 `read_req` / `write_req` 有意义，表示请求一旦启动，就保持到第一次被对应的 `*_ACCEPT` 为止。
 
 ## 说明
 

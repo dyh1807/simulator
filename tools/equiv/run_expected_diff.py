@@ -56,10 +56,10 @@ def main():
 
     submodule_root = Path(args.submodule_root).resolve()
     rtl_root = submodule_root / "rtl"
-    seeds = args.seed or [
-        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "invalidate_all_idle_accept.json"),
-        str(REPO_ROOT / "tests" / "equiv" / "seeds" / "mode1_mmio_write_id_reuse_overlap.json"),
-    ]
+    seeds = args.seed or []
+    if not seeds:
+        print("no expected-diff seeds configured")
+        return
 
     for seed in seeds:
         seed_path = Path(seed).resolve()

@@ -25,6 +25,7 @@ def main():
     )
     ap.add_argument("--skip-pass", action="store_true")
     ap.add_argument("--skip-expected-diff", action="store_true")
+    ap.add_argument("--skip-maintenance-contracts", action="store_true")
     ap.add_argument("--skip-random-matrix", action="store_true")
     ap.add_argument("--matrix-count", type=int, default=16)
     ap.add_argument(
@@ -39,7 +40,12 @@ def main():
 
     submodule_root = Path(args.submodule_root).resolve()
     matrix_root_seeds = args.matrix_root_seeds or [20260423]
-    suite_id = f"pass_{int(not args.skip_pass)}_xdiff_{int(not args.skip_expected_diff)}_matrix_{int(not args.skip_random_matrix)}"
+    suite_id = (
+        f"pass_{int(not args.skip_pass)}"
+        f"_xdiff_{int(not args.skip_expected_diff)}"
+        f"_maint_{int(not args.skip_maintenance_contracts)}"
+        f"_matrix_{int(not args.skip_random_matrix)}"
+    )
     run_dir = OUT_ROOT / suite_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -48,6 +54,7 @@ def main():
         "submodule_root": str(submodule_root),
         "skip_pass": args.skip_pass,
         "skip_expected_diff": args.skip_expected_diff,
+        "skip_maintenance_contracts": args.skip_maintenance_contracts,
         "skip_random_matrix": args.skip_random_matrix,
         "matrix_count": args.matrix_count,
         "matrix_root_seeds": matrix_root_seeds,
@@ -80,6 +87,17 @@ def main():
         )
         summary["steps"].append({"name": "expected_diff_regression", "status": "PASS"})
 
+    if not args.skip_maintenance_contracts:
+        run(
+            [
+                "python3",
+                str(TOOLS_DIR / "run_maintenance_contracts.py"),
+            ]
+        )
+        summary["steps"].append(
+            {"name": "maintenance_contract_regression", "status": "PASS"}
+        )
+
     if not args.skip_random_matrix:
         cmd = [
             "python3",
@@ -111,6 +129,7 @@ def main():
                 f"submodule_root={submodule_root}",
                 f"skip_pass={args.skip_pass}",
                 f"skip_expected_diff={args.skip_expected_diff}",
+                f"skip_maintenance_contracts={args.skip_maintenance_contracts}",
                 f"skip_random_matrix={args.skip_random_matrix}",
                 f"matrix_count={args.matrix_count}",
                 "matrix_root_seeds=" + ",".join(str(x) for x in matrix_root_seeds),

@@ -6,14 +6,6 @@
     "0x10000004",
     "0x10000008"
   ],
-  "expected_diff": {
-    "must_contain": [
-      "TRACE_COMPARE_FAIL",
-      "first_diff_index=4",
-      "cpp_norm: ('WRITE_ACCEPT', '0', '7', '0x10000008', '3', '0', '0x0badf00d')",
-      "rtl_norm: ('WRITE_RESP', '0', '7', '0')"
-    ]
-  },
   "defaults": {
     "mode_req": 1,
     "llc_mapped_offset_req": "0x40000000",
