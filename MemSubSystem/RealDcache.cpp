@@ -1,9 +1,14 @@
 #include "RealDcache.h"
 #include "PhysMemory.h"
+#include <algorithm>
+#include <cstdlib>
 #include <oracle.h>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace {
 constexpr const char *kColorReset     = "\033[0m";
@@ -47,6 +52,331 @@ void pending_miss_add(PendingMissLine *pending_miss_lines,
     pending_miss_count++;
 }
 
+bool mode2_repeat_stats_enabled() {
+    static int cached = -1;
+    if (cached >= 0) {
+        return cached != 0;
+    }
+    const char *raw = std::getenv("MODE2_NOFILL_REPEAT_STATS");
+    cached = (raw != nullptr && *raw != '\0' && std::strcmp(raw, "0") != 0) ? 1 : 0;
+    return cached != 0;
+}
+
+struct Mode2DcacheRepeatStats {
+    uint64_t load_accesses = 0;
+    uint64_t store_accesses = 0;
+    uint64_t actual_cache_hit_served = 0;
+    std::unordered_map<uint32_t, uint64_t> load_addr_counts;
+    std::unordered_map<uint32_t, uint64_t> store_addr_counts;
+};
+
+Mode2DcacheRepeatStats &mode2_dcache_repeat_stats() {
+    static Mode2DcacheRepeatStats *stats = new Mode2DcacheRepeatStats();
+    return *stats;
+}
+
+void note_mode2_dcache_load(uint32_t addr) {
+    if (!mode2_repeat_stats_enabled()) {
+        return;
+    }
+    auto &stats = mode2_dcache_repeat_stats();
+    stats.load_accesses++;
+    stats.load_addr_counts[addr]++;
+}
+
+void note_mode2_dcache_store(uint32_t addr) {
+    if (!mode2_repeat_stats_enabled()) {
+        return;
+    }
+    auto &stats = mode2_dcache_repeat_stats();
+    stats.store_accesses++;
+    stats.store_addr_counts[addr]++;
+}
+
+}
+
+void dcache_debug_dump_mode2_repeat_stats() {
+    if (!mode2_repeat_stats_enabled()) {
+        return;
+    }
+    auto &stats = mode2_dcache_repeat_stats();
+    auto dump_top = [](const char *tag,
+                       const std::unordered_map<uint32_t, uint64_t> &counts) {
+        std::vector<std::pair<uint32_t, uint64_t>> repeated;
+        repeated.reserve(counts.size());
+        for (const auto &kv : counts) {
+            if (kv.second > 1) {
+                repeated.push_back(kv);
+            }
+        }
+        std::sort(repeated.begin(), repeated.end(),
+                  [](const auto &a, const auto &b) {
+                      if (a.second != b.second) return a.second > b.second;
+                      return a.first < b.first;
+                  });
+        std::printf("[LOCAL-TEST][MODE2_NOFILL][DCACHE][%s] unique=%zu repeated=%zu\n",
+                    tag, counts.size(), repeated.size());
+        const size_t limit = std::min<size_t>(8, repeated.size());
+        for (size_t i = 0; i < limit; ++i) {
+            std::printf("[LOCAL-TEST][MODE2_NOFILL][DCACHE][%s] top%zu addr=0x%08x count=%llu\n",
+                        tag, i, repeated[i].first,
+                        static_cast<unsigned long long>(repeated[i].second));
+        }
+    };
+
+    std::printf("[LOCAL-TEST][MODE2_NOFILL][DCACHE] load_accesses=%llu store_accesses=%llu actual_cache_hit_served=%llu\n",
+                static_cast<unsigned long long>(stats.load_accesses),
+                static_cast<unsigned long long>(stats.store_accesses),
+                static_cast<unsigned long long>(stats.actual_cache_hit_served));
+    dump_top("LOAD", stats.load_addr_counts);
+    dump_top("STORE", stats.store_addr_counts);
+}
+
+void RealDcache::clear_mode2_direct_axi_outputs() {
+    if (mode2_axi_read_out != nullptr) {
+        *mode2_axi_read_out = {};
+        mode2_axi_read_out->resp_ready = true;
+    }
+    if (mode2_axi_write_out != nullptr) {
+        *mode2_axi_write_out = {};
+        mode2_axi_write_out->resp_ready = true;
+    }
+}
+
+void RealDcache::mode2_stage2_direct_comb() {
+    dcache2lsu->resp_ports.clear();
+    dcache2lsu->resp_ports.replay_resp = ReplayResp();
+    for (auto &pending_write : pending_writes_) {
+        pending_write = {};
+    }
+    for (auto &lru_update : lru_updates_) {
+        lru_update = {};
+    }
+    if (dcache2mshr != nullptr) {
+        *dcache2mshr = {};
+    }
+    if (dcache2wb != nullptr) {
+        *dcache2wb = {};
+    }
+    clear_mode2_direct_axi_outputs();
+
+    mode2_slot_nxt_ = mode2_slot_cur_;
+    mode2_slot_clear_nxt_ = false;
+
+    const Mode2DirectSlot &slot = mode2_slot_cur_;
+    if (slot.valid && !slot.read_issued && mode2_axi_read_out != nullptr) {
+        mode2_axi_read_out->req_valid = true;
+        mode2_axi_read_out->req_addr = slot.line_addr;
+        mode2_axi_read_out->req_total_size =
+            static_cast<uint8_t>(DCACHE_LINE_BYTES - 1u);
+        mode2_axi_read_out->req_id = kMode2DirectReqId;
+    }
+    if (slot.valid && slot.is_store && slot.read_done && !slot.write_issued &&
+        mode2_axi_write_out != nullptr) {
+        mode2_axi_write_out->req_valid = true;
+        mode2_axi_write_out->req_addr = slot.line_addr;
+        mode2_axi_write_out->req_total_size =
+            static_cast<uint8_t>(DCACHE_LINE_BYTES - 1u);
+        mode2_axi_write_out->req_id = kMode2DirectReqId;
+        mode2_axi_write_out->req_wstrb =
+            (DCACHE_LINE_BYTES >= 64)
+                ? ~0ull
+                : ((1ull << DCACHE_LINE_BYTES) - 1ull);
+        for (int w = 0; w < DCACHE_LINE_WORDS; ++w) {
+            mode2_axi_write_out->req_wdata[w] = slot.line_data[w];
+        }
+    }
+
+    for (int i = 0; i < LSU_LDU_COUNT; i++) {
+        const S1S2Reg::LoadSlot &req = s1s2_cur.loads[i];
+        LoadResp &resp = dcache2lsu->resp_ports.load_resps[i];
+        if (!req.valid) {
+            continue;
+        }
+        if (ctx != nullptr) {
+            ctx->perf.l1d_req_all++;
+        }
+        const bool is_replay_req =
+            begin_req_track(false, req.req_id, req.uop.rob_idx, req.uop.rob_flag);
+        if (ctx != nullptr) {
+            if (is_replay_req) {
+                ctx->perf.l1d_req_replay++;
+            } else {
+                ctx->perf.l1d_req_initial++;
+                ctx->perf.dcache_access_num++;
+            }
+        }
+
+        if (req.replayed) {
+            resp.valid = true;
+            resp.replay = 3;
+            resp.req_id = req.req_id;
+            resp.uop = req.uop;
+            continue;
+        }
+
+        uint32_t special_val = 0;
+        MicroOp special_uop = req.uop;
+        if (special_load_addr(req.addr, special_val, special_uop)) {
+            resp.valid = true;
+            resp.replay = 0;
+            resp.req_id = req.req_id;
+            resp.uop = special_uop;
+            resp.data = special_val;
+            end_req_track(false, req.req_id, req.uop.rob_idx, req.uop.rob_flag);
+            continue;
+        }
+
+        const uint32_t line_addr = req.addr & ~(DCACHE_LINE_BYTES - 1u);
+        const uint32_t word_off = decode(req.addr).word_off;
+
+        if (!slot.valid) {
+            mode2_slot_nxt_ = {};
+            mode2_slot_nxt_.valid = true;
+            mode2_slot_nxt_.is_store = false;
+            mode2_slot_nxt_.line_addr = line_addr;
+            mode2_slot_nxt_.req_addr = req.addr;
+            mode2_slot_nxt_.word_off = word_off;
+            mode2_slot_nxt_.req_id = req.req_id;
+            mode2_slot_nxt_.load_uop = req.uop;
+            if (ctx != nullptr) {
+                ctx->perf.dcache_miss_num++;
+            }
+            continue;
+        }
+
+        if (!cache_line_match(slot.line_addr, req.addr)) {
+            resp.valid = true;
+            // Mode-2 no-fill direct path owns only one transient slot.
+            // Requests to a different line are waiting for the slot to
+            // become free, not for a matching line fill.
+            resp.replay = 1;
+            resp.req_id = req.req_id;
+            resp.uop = req.uop;
+            if (ctx != nullptr) {
+                ctx->perf.l1d_replay_mshr_full++;
+                ctx->perf.l1d_replay_mshr_full_load++;
+            }
+            continue;
+        }
+
+        if (!slot.read_done || slot.is_store) {
+            resp.valid = true;
+            // Same-line requests still wait on the single transient slot.
+            // Re-issue them when the slot becomes free instead of using the
+            // line-fill wakeup contract.
+            resp.replay = 1;
+            resp.req_id = req.req_id;
+            resp.uop = req.uop;
+            if (ctx != nullptr) {
+                ctx->perf.l1d_replay_mshr_full++;
+                ctx->perf.l1d_replay_mshr_full_load++;
+            }
+            continue;
+        }
+
+        // Owner load completion is delivered asynchronously from the slot
+        // once data is available; do not require the request to replay.
+    }
+
+    for (int i = 0; i < LSU_STA_COUNT; i++) {
+        const S1S2Reg::StoreSlot &req = s1s2_cur.stores[i];
+        StoreResp &resp = dcache2lsu->resp_ports.store_resps[i];
+        if (!req.valid) {
+            continue;
+        }
+        if (ctx != nullptr) {
+            ctx->perf.l1d_req_all++;
+        }
+        const bool is_replay_req =
+            begin_req_track(true, req.req_id, req.uop.rob_idx, req.uop.rob_flag);
+        if (ctx != nullptr) {
+            if (is_replay_req) {
+                ctx->perf.l1d_req_replay++;
+            } else {
+                ctx->perf.l1d_req_initial++;
+                ctx->perf.dcache_access_num++;
+            }
+        }
+
+        if (req.replayed) {
+            resp.valid = true;
+            resp.replay = 3;
+            resp.req_id = req.req_id;
+            continue;
+        }
+
+        const uint32_t line_addr = req.addr & ~(DCACHE_LINE_BYTES - 1u);
+        const uint32_t word_off = decode(req.addr).word_off;
+
+        if (!slot.valid) {
+            mode2_slot_nxt_ = {};
+            mode2_slot_nxt_.valid = true;
+            mode2_slot_nxt_.is_store = true;
+            mode2_slot_nxt_.line_addr = line_addr;
+            mode2_slot_nxt_.req_addr = req.addr;
+            mode2_slot_nxt_.word_off = word_off;
+            mode2_slot_nxt_.req_id = req.req_id;
+            mode2_slot_nxt_.store_uop = req.uop;
+            mode2_slot_nxt_.store_data = req.data;
+            mode2_slot_nxt_.store_strb = req.strb;
+            resp.valid = true;
+            resp.replay = 0;
+            resp.req_id = req.req_id;
+            resp.is_cache_miss = true;
+            end_req_track(true, req.req_id, req.uop.rob_idx, req.uop.rob_flag);
+            if (ctx != nullptr) {
+                ctx->perf.dcache_miss_num++;
+            }
+            continue;
+        }
+
+        if (!cache_line_match(slot.line_addr, req.addr) || !slot.is_store ||
+            !slot.write_done) {
+            resp.valid = true;
+            resp.replay = 1;
+            resp.req_id = req.req_id;
+            if (ctx != nullptr) {
+                ctx->perf.l1d_replay_mshr_full++;
+                ctx->perf.l1d_replay_mshr_full_store++;
+            }
+            continue;
+        }
+
+        resp.valid = true;
+        resp.replay = 0;
+        resp.req_id = req.req_id;
+        resp.is_cache_miss = true;
+        end_req_track(true, req.req_id, req.uop.rob_idx, req.uop.rob_flag);
+    }
+
+    if (slot.valid && !slot.is_store && slot.read_done) {
+        for (int i = 0; i < LSU_LDU_COUNT; i++) {
+            auto &resp = dcache2lsu->resp_ports.load_resps[i];
+            if (resp.valid) {
+                continue;
+            }
+            resp.valid = true;
+            resp.replay = 0;
+            resp.req_id = slot.req_id;
+            resp.uop = slot.load_uop;
+            resp.data = slot.line_data[slot.word_off];
+            end_req_track(false, slot.req_id, slot.load_uop.rob_idx,
+                          slot.load_uop.rob_flag);
+            mode2_slot_clear_nxt_ = true;
+            break;
+        }
+    }
+    if (!slot.valid) {
+        dcache2lsu->resp_ports.replay_resp.replay = 0;
+        dcache2lsu->resp_ports.replay_resp.replay_addr = 0;
+        dcache2lsu->resp_ports.replay_resp.free_slots = 1;
+    } else if ((!slot.is_store && slot.read_done) ||
+               (slot.is_store && slot.write_done)) {
+        dcache2lsu->resp_ports.replay_resp.replay = 0;
+        dcache2lsu->resp_ports.replay_resp.replay_addr = 0;
+        dcache2lsu->resp_ports.replay_resp.free_slots = 1;
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -59,6 +389,9 @@ void RealDcache::init() {
     init_dcache();
     s1s2_cur = {};
     s1s2_nxt = {};
+    mode2_slot_cur_ = {};
+    mode2_slot_nxt_ = {};
+    mode2_slot_clear_nxt_ = false;
     for (auto &pending_write : pending_writes_) {
         pending_write = {};
     }
@@ -123,6 +456,7 @@ void RealDcache::end_req_track(bool is_store, size_t req_id, uint32_t rob_idx,
             return;
         }
     }
+
 }
 
 bool RealDcache::special_load_addr(uint32_t addr,uint32_t &mem_val,MicroOp &uop){
@@ -139,21 +473,30 @@ RealDcache::CoherentQueryResult
 RealDcache::query_coherent_word(uint32_t addr, uint32_t &data) const {
     const AddrFields f = decode(addr);
     static constexpr uint8_t kFullWordStrb = 0x0Fu;
+    const bool no_fill_mode = mode2_no_fill_active();
 
-    for (int w = 0; w < DCACHE_WAYS; w++) {
-        if (!valid_array[f.set_idx][w] || tag_array[f.set_idx][w] != f.tag) {
-            continue;
-        }
-        data = data_array[f.set_idx][w][f.word_off];
-        for (int p = 0; p < LSU_STA_COUNT; p++) {
-            const auto &pw = pending_writes_[p];
-            if (!pw.valid || pw.set_idx != f.set_idx ||
-                pw.way_idx != static_cast<uint32_t>(w) ||
-                pw.word_off != f.word_off) {
+    if (!no_fill_mode) {
+        for (int w = 0; w < DCACHE_WAYS; w++) {
+            if (!valid_array[f.set_idx][w] || tag_array[f.set_idx][w] != f.tag) {
                 continue;
             }
-            apply_strobe(data, pw.data, pw.strb);
+            data = data_array[f.set_idx][w][f.word_off];
+            for (int p = 0; p < LSU_STA_COUNT; p++) {
+                const auto &pw = pending_writes_[p];
+                if (!pw.valid || pw.set_idx != f.set_idx ||
+                    pw.way_idx != static_cast<uint32_t>(w) ||
+                    pw.word_off != f.word_off) {
+                    continue;
+                }
+                apply_strobe(data, pw.data, pw.strb);
+            }
+            return CoherentQueryResult::Hit;
         }
+    }
+
+    if (mode2_slot_cur_.valid && mode2_slot_cur_.read_done &&
+        cache_line_match(mode2_slot_cur_.line_addr, addr)) {
+        data = mode2_slot_cur_.line_data[f.word_off];
         return CoherentQueryResult::Hit;
     }
 
@@ -191,6 +534,25 @@ RealDcache::query_coherent_word(uint32_t addr, uint32_t &data) const {
     return CoherentQueryResult::Miss;
 }
 
+void RealDcache::dump_mode2_direct_state(FILE *out) const {
+    if (out == nullptr) {
+        return;
+    }
+    const auto &slot = mode2_slot_cur_;
+    std::fprintf(out,
+                 "[DCACHE MODE2 SLOT] valid=%d is_store=%d read_issued=%d "
+                 "read_done=%d write_issued=%d write_done=%d "
+                 "line=0x%08x req_addr=0x%08x word_off=%u req_id=%zu "
+                 "store_data=0x%08x store_strb=0x%x line0=0x%08x\n",
+                 static_cast<int>(slot.valid), static_cast<int>(slot.is_store),
+                 static_cast<int>(slot.read_issued),
+                 static_cast<int>(slot.read_done),
+                 static_cast<int>(slot.write_issued),
+                 static_cast<int>(slot.write_done), slot.line_addr,
+                 slot.req_addr, slot.word_off, slot.req_id, slot.store_data,
+                 static_cast<unsigned>(slot.store_strb), slot.line_data[0]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Stage 1 — called from comb().
 //
@@ -199,6 +561,7 @@ RealDcache::query_coherent_word(uint32_t addr, uint32_t &data) const {
 // ─────────────────────────────────────────────────────────────────────────────
 void RealDcache::stage1_comb() {
     s1s2_nxt = {};
+    const bool no_fill_mode = mode2_no_fill_active();
 
     bool mshr_fill = mshr2dcache->fill.valid;
     AddrFields mshr_f = decode(mshr2dcache->fill.addr);
@@ -214,6 +577,9 @@ void RealDcache::stage1_comb() {
     for (int i = 0; i < LSU_LDU_COUNT; i++) {
         const LoadReq &req = lsu2dcache->req_ports.load_ports[i];
         reqs[i].valid = req.valid;
+        if (no_fill_mode && req.valid) {
+            note_mode2_dcache_load(req.addr);
+        }
         if (req.valid)
             reqs[i].f.bank = decode(req.addr).bank;
         reqs[i].f =  decode(req.addr);
@@ -222,6 +588,9 @@ void RealDcache::stage1_comb() {
         const StoreReq &req = lsu2dcache->req_ports.store_ports[i];
         int idx = LSU_LDU_COUNT + i;
         reqs[idx].valid = req.valid;
+        if (no_fill_mode && req.valid) {
+            note_mode2_dcache_store(req.addr);
+        }
         reqs[idx].f = decode(req.addr);
     }
 
@@ -359,6 +728,12 @@ void RealDcache::stage2_comb() {
     int pending_miss_count = 0;
     PendingMissLine same_cycle_store_alloc_lines[LSU_STA_COUNT] = {};
     int same_cycle_store_alloc_count = 0;
+    const bool no_fill_mode = mode2_no_fill_active();
+
+    if (no_fill_mode) {
+        mode2_stage2_direct_comb();
+        return;
+    }
 
     {
         uint32_t store_probe_free_entries = mshr_free_entries;
@@ -377,6 +752,9 @@ void RealDcache::stage2_comb() {
                     hit_way = w;
                     break;
                 }
+            }
+            if (no_fill_mode) {
+                hit_way = -1;
             }
 
             const bool wb_merge_valid = wb2dcache->merge_resp[i].valid;
@@ -405,6 +783,7 @@ void RealDcache::stage2_comb() {
     // ── Load ports ────────────────────────────────────────────────────────────
     for (int i = 0; i < LSU_LDU_COUNT; i++) {
         dcache2mshr->load_reqs[i].valid = false; // Default to no load request; set to true on load miss
+        dcache2mshr->load_no_fill[i] = false;
         const S1S2Reg::LoadSlot &slot = s1s2_cur.loads[i];
         LoadResp &resp = dcache2lsu->resp_ports.load_resps[i];
 
@@ -464,6 +843,9 @@ void RealDcache::stage2_comb() {
                 break;
             }
         }
+        if (no_fill_mode) {
+            hit_way = -1;
+        }
         const bool mshr_fill_match =
             mshr2dcache->fill.valid && mshr_f.set_idx == slot.set_idx &&
             mshr_f.tag == tag_expected;
@@ -516,6 +898,9 @@ void RealDcache::stage2_comb() {
         }
         else if (hit_way >= 0 ) {
             // ── Cache Hit ────────────────────────────────────────────────────
+            if (no_fill_mode && mode2_repeat_stats_enabled()) {
+                mode2_dcache_repeat_stats().actual_cache_hit_served++;
+            }
             resp.valid  = true;
             resp.replay = 0;
             resp.data   = slot.data_snap[hit_way][f.word_off];
@@ -565,6 +950,7 @@ void RealDcache::stage2_comb() {
             }
             else{
                 dcache2mshr->load_reqs[i].valid = true;
+                dcache2mshr->load_no_fill[i] = no_fill_mode;
                 dcache2mshr->load_reqs[i].addr  = slot.addr;
                 dcache2mshr->load_reqs[i].uop   = slot.uop;
                 dcache2mshr->load_reqs[i].req_id = slot.req_id;
@@ -597,6 +983,7 @@ void RealDcache::stage2_comb() {
     // ── Store ports ───────────────────────────────────────────────────────────
     for (int i = 0; i < LSU_STA_COUNT; i++) {
         dcache2mshr->store_reqs[i].valid = false; // Default to no store request; set to true on store miss
+        dcache2mshr->store_no_fill[i] = false;
         dcache2mshr->store_hit_updates[i].valid = false;
         const S1S2Reg::StoreSlot &slot = s1s2_cur.stores[i];
         StoreResp &resp = dcache2lsu->resp_ports.store_resps[i];
@@ -642,9 +1029,15 @@ void RealDcache::stage2_comb() {
                 break;
             }
         }
+        if (no_fill_mode) {
+            hit_way = -1;
+        }
 
         if (hit_way >= 0) {
             // ── Store Hit ────────────────────────────────────────────────────
+            if (no_fill_mode && mode2_repeat_stats_enabled()) {
+                mode2_dcache_repeat_stats().actual_cache_hit_served++;
+            }
 
             // The line has been reallocated in DCache, but an older eviction of
             // the same line is already on the AXI write path and can no longer
@@ -752,6 +1145,7 @@ void RealDcache::stage2_comb() {
                                            tag_expected) ||
                      slot.mshr_hit || find_mshr_entry(slot.set_idx, tag_expected)) {
                 dcache2mshr->store_reqs[i].valid = true;
+                dcache2mshr->store_no_fill[i] = no_fill_mode;
                 dcache2mshr->store_reqs[i].addr  = slot.addr;
                 dcache2mshr->store_reqs[i].data  = slot.data;
                 dcache2mshr->store_reqs[i].strb  = slot.strb;
@@ -778,6 +1172,7 @@ void RealDcache::stage2_comb() {
             }
             else {
                 dcache2mshr->store_reqs[i].valid = true;
+                dcache2mshr->store_no_fill[i] = no_fill_mode;
                 dcache2mshr->store_reqs[i].addr  = slot.addr;
                 dcache2mshr->store_reqs[i].data  = slot.data;
                 dcache2mshr->store_reqs[i].strb  = slot.strb;
@@ -848,7 +1243,7 @@ void RealDcache::seq() {
 
 
     // 2. Apply store hits.
-    if (mshr2dcache->fill.valid) {
+    if (mshr2dcache->fill.valid && !mshr2dcache->fill.no_fill) {
         write_dcache_line(decode(mshr2dcache->fill.addr).set_idx,
                           mshr2dcache->fill.way,
                           decode(mshr2dcache->fill.addr).tag,
@@ -865,5 +1260,46 @@ void RealDcache::seq() {
         if (!u.valid || u.way < 0) continue;
         lru_reset(u.set_idx, static_cast<uint32_t>(u.way));
     }
+
+    Mode2DirectSlot next_mode2 = mode2_slot_nxt_;
+    if (!mode2_no_fill_active()) {
+        next_mode2 = {};
+    } else {
+        if (mode2_slot_cur_.valid && !mode2_slot_cur_.read_issued &&
+            mode2_axi_read_in != nullptr && mode2_axi_read_in->req_accepted) {
+            next_mode2.read_issued = true;
+        }
+        if (mode2_slot_cur_.valid && mode2_slot_cur_.read_issued &&
+            !mode2_slot_cur_.read_done && mode2_axi_read_in != nullptr &&
+            mode2_axi_read_in->resp_valid) {
+            std::memcpy(next_mode2.line_data, mode2_axi_read_in->resp_data,
+                        sizeof(next_mode2.line_data));
+            next_mode2.read_done = true;
+            if (mode2_slot_cur_.is_store) {
+                apply_strobe(next_mode2.line_data[mode2_slot_cur_.word_off],
+                             mode2_slot_cur_.store_data,
+                             mode2_slot_cur_.store_strb);
+            }
+        }
+        if (mode2_slot_cur_.valid && mode2_slot_cur_.is_store &&
+            mode2_slot_cur_.read_done && !mode2_slot_cur_.write_issued &&
+            mode2_axi_write_in != nullptr && mode2_axi_write_in->req_accepted) {
+            next_mode2.write_issued = true;
+        }
+        if (mode2_slot_cur_.valid && mode2_slot_cur_.is_store &&
+            mode2_slot_cur_.write_issued && !mode2_slot_cur_.write_done &&
+            mode2_axi_write_in != nullptr && mode2_axi_write_in->resp_valid) {
+            next_mode2.write_done = true;
+        }
+        if (next_mode2.valid && next_mode2.is_store && next_mode2.write_done) {
+            next_mode2 = {};
+        }
+    }
+    if (mode2_slot_clear_nxt_) {
+        next_mode2 = {};
+    }
+    mode2_slot_cur_ = next_mode2;
+    mode2_slot_nxt_ = next_mode2;
+    mode2_slot_clear_nxt_ = false;
 
 }

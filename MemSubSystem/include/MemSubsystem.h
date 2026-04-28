@@ -72,6 +72,9 @@ public:
   void dump_debug_state(FILE *out) const;
   axi_interconnect::ReadMasterPort_t *icache_read_port();
   void set_internal_axi_runtime_active(bool active);
+  void set_runtime_llc_mode(uint8_t mode) {
+    runtime_llc_mode_ = static_cast<uint8_t>(mode & 0x3u);
+  }
   void set_ptw_coherent_source(AbstractLsu *lsu) {
     ptw_coherent_source_ = lsu;
     ptw_block.bind_coherent_source(lsu);
@@ -81,6 +84,7 @@ public:
   const axi_interconnect::AXI_LLC_LookupIn_t &llc_lookup_in() const;
   void llc_seq(const axi_interconnect::AXI_LLC_TableOut_t &table_out,
                const axi_interconnect::AXI_LLCPerfCounters_t &perf);
+  bool debug_preload_mode2_window_from_memory(uint32_t size_bytes);
 
   MemDcacheImpl  &get_dcache()  { return dcache_; }
   MSHR        &get_mshr()    { return mshr_; }
@@ -105,6 +109,7 @@ private:
 
   std::unique_ptr<AxiKitRuntime> axi_kit_runtime;
   bool internal_axi_runtime_active_ = true;
+  uint8_t runtime_llc_mode_ = 1u;
 
   static constexpr size_t kPtwClientCount =
       static_cast<size_t>(PtwClient::NUM_CLIENTS);

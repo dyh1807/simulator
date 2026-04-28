@@ -119,6 +119,7 @@ struct ICache_regs_t {
   reg<1> req_valid_r = false;
   reg<32> req_pc_r = 0;
   reg<7> req_index_r = 0;
+  reg<1> req_no_fill_r = false;
   // Registered frontend acceptance state.
   reg<1> ifu_req_ready_r = true;
 
@@ -142,6 +143,7 @@ struct ICache_regs_t {
   reg<1> lookup_pending_r = false;
   reg<7> lookup_index_r = 0;
   reg<32> lookup_pc_r = 0;
+  reg<1> lookup_no_fill_r = false;
 };
 
 // Generalized-IO note:
@@ -168,6 +170,7 @@ struct ICache_in_t {
   wire<1> ifu_resp_ready = true;  // actually always true in current design
   wire<1> refetch = false;        // Refetch signal from Top
   wire<1> flush = false;          // fence.i flush signal from Top
+  wire<2> llc_mode = 1;          // Shared LLC runtime mode broadcast
 
   // Input from MMU (Memory Management Unit)
   wire<20> ppn = 0;    // Physical Page Number
@@ -327,6 +330,8 @@ private:
   void capture_lookup_meta_result(uint32_t compare_tag, bool compare_valid);
   void capture_lookup_data_result();
 };
+
+void icache_debug_dump_mode2_repeat_stats();
 
 }; // namespace icache_module_n
 

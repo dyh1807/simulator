@@ -1,6 +1,7 @@
 #include "MemSubsystem.h"
 #include "config.h"
 #include "icache/GenericTable.h"
+#include "PhysMemory.h"
 #include <cinttypes>
 #include <memory>
 #include <cstdio>
@@ -268,6 +269,93 @@ struct AxiLlcTableRuntime {
       lookup_queued_valid = false;
       lookup_queued_index = 0;
     }
+  }
+
+  bool preload_mode2_window_from_memory(uint32_t mapped_offset,
+                                        uint32_t size_bytes) {
+    if (!enabled || !config.valid() ||
+        config.line_bytes == 0 || config.set_count() == 0) {
+      return false;
+    }
+
+    const uint32_t window_bytes = std::min<uint32_t>(size_bytes, 4u << 20);
+    const uint32_t row_bytes = config.ways * config.line_bytes;
+    const uint32_t valid_row_bytes =
+        axi_interconnect::AXI_LLC::valid_row_bytes(config);
+    valid.reset();
+
+    for (uint32_t local_line_base = 0; local_line_base < window_bytes;
+         local_line_base += config.line_bytes) {
+      const uint32_t line_idx = local_line_base / config.line_bytes;
+      const uint32_t set = line_idx % config.set_count();
+      const uint32_t way = line_idx / config.set_count();
+      if (way >= config.ways) {
+        break;
+      }
+
+      DynamicTableWriteReq data_write;
+      data_write.enable = true;
+      data_write.address = set;
+      data_write.payload.reset(row_bytes);
+      data_write.chunk_enable.assign(row_bytes, 0);
+      const size_t row_base = static_cast<size_t>(way) * config.line_bytes;
+      for (uint32_t word_off = 0; word_off < config.line_bytes; word_off += 4) {
+        const uint32_t paddr = mapped_offset + local_line_base + word_off;
+        const uint32_t word = pmem_read(paddr);
+        std::memcpy(data_write.payload.data() + row_base + word_off, &word, 4);
+      }
+      std::fill(data_write.chunk_enable.begin() + row_base,
+                data_write.chunk_enable.begin() + row_base + config.line_bytes,
+                1);
+      data.seq({}, data_write);
+
+      DynamicTableWriteReq meta_write;
+      meta_write.enable = true;
+      meta_write.address = set;
+      meta_write.payload.reset(config.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES);
+      meta_write.chunk_enable.assign(config.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES, 0);
+      DynamicTablePayload current_meta_row;
+      current_meta_row.reset(config.ways * axi_interconnect::AXI_LLC_META_ENTRY_BYTES);
+      (void)meta.debug_read_row(set, current_meta_row);
+      meta_write.payload.bytes = current_meta_row.bytes;
+      axi_interconnect::AXI_LLCMetaEntry_t meta_entry{};
+      meta_entry.tag = axi_interconnect::AXI_LLC::tag_of(config, mapped_offset + local_line_base);
+      meta_entry.flags = 0;
+      axi_interconnect::AXI_LLC_Bytes_t encoded_meta;
+      axi_interconnect::AXI_LLC::encode_meta(meta_entry, encoded_meta);
+      const size_t meta_base = static_cast<size_t>(way) * axi_interconnect::AXI_LLC_META_ENTRY_BYTES;
+      std::memcpy(meta_write.payload.bytes.data() + meta_base,
+                  encoded_meta.bytes.data(),
+                  axi_interconnect::AXI_LLC_META_ENTRY_BYTES);
+      std::fill(meta_write.chunk_enable.begin() + meta_base,
+                meta_write.chunk_enable.begin() + meta_base +
+                    axi_interconnect::AXI_LLC_META_ENTRY_BYTES,
+                1);
+      meta.seq({}, meta_write);
+
+      DynamicTableWriteReq valid_write;
+      valid_write.enable = true;
+      valid_write.address = set;
+      valid_write.payload.reset(valid_row_bytes);
+      valid_write.chunk_enable.assign(valid_row_bytes, 0);
+      DynamicTablePayload current_valid_row;
+      current_valid_row.reset(valid_row_bytes);
+      (void)valid.debug_read_row(set, current_valid_row);
+      valid_write.payload.bytes = current_valid_row.bytes;
+      const uint32_t byte_idx = way >> 3;
+      const uint8_t bit_mask = static_cast<uint8_t>(1u << (way & 0x7u));
+      valid_write.payload.bytes[byte_idx] =
+          static_cast<uint8_t>(valid_write.payload.bytes[byte_idx] | bit_mask);
+      valid_write.chunk_enable[byte_idx] = 1;
+      valid.seq({}, valid_write);
+    }
+
+    lookup_pending_valid = false;
+    lookup_pending_index = 0;
+    lookup_delay_left = 0;
+    lookup_queued_valid = false;
+    lookup_queued_index = 0;
+    return true;
   }
 };
 
@@ -551,6 +639,23 @@ void MemSubsystem::llc_seq(
 #endif
 }
 
+bool MemSubsystem::debug_preload_mode2_window_from_memory(uint32_t size_bytes) {
+#if AXI_KIT_RUNTIME_ENABLED
+  if (axi_kit_runtime == nullptr) {
+    return false;
+  }
+  auto &interconnect = axi_kit_runtime->interconnect;
+  if (interconnect.active_mode() != 2u) {
+    return false;
+  }
+  return axi_kit_runtime->llc_tables.preload_mode2_window_from_memory(
+      interconnect.active_llc_mapped_offset(), size_bytes);
+#else
+  (void)size_bytes;
+  return false;
+#endif
+}
+
 axi_interconnect::ReadMasterPort_t *MemSubsystem::icache_read_port() {
 #if AXI_KIT_RUNTIME_ENABLED
   if (axi_kit_runtime == nullptr || !internal_axi_runtime_active_) {
@@ -607,6 +712,10 @@ void MemSubsystem::init() {
   // Internal WriteBuffer ↔ DCache wires.
   dcache_.wb2dcache   = &wb_.out.wbdcache;       // WB output → DCache input
   dcache_.dcache2wb   = &wb_.in.dcachewb;        // DCache output → WB input
+  dcache_.mode2_axi_read_in = &mshr_axi_in;
+  dcache_.mode2_axi_read_out = &mshr_axi_out;
+  dcache_.mode2_axi_write_in = &wb_axi_in;
+  dcache_.mode2_axi_write_out = &wb_axi_out;
   dcache_.bind_context(ctx);
   mshr_.bind_context(ctx);
   wb_.bind_context(ctx);
@@ -734,6 +843,75 @@ void MemSubsystem::dump_debug_state(FILE *out) const {
   if (out == nullptr) {
     return;
   }
+  std::fprintf(out,
+               "[MEM DEBUG][CACHE] runtime_llc_mode=%u "
+               "mshr_count=%u wb_count=%u wb_head=%u wb_tail=%u wb_send=%u\n",
+               static_cast<unsigned>(runtime_llc_mode_),
+               static_cast<unsigned>(mshr_.cur.mshr_count),
+               static_cast<unsigned>(wb_.cur.count),
+               static_cast<unsigned>(wb_.cur.head),
+               static_cast<unsigned>(wb_.cur.tail),
+               static_cast<unsigned>(wb_.cur.send));
+  dcache_.dump_mode2_direct_state(out);
+  std::fprintf(out,
+               "[MEM DEBUG][AXI] mshr_in(req_ready=%d acc=%d acc_id=%u "
+               "resp_valid=%d resp_id=%u) "
+               "mshr_out(req_valid=%d req_addr=0x%08x req_id=%u resp_ready=%d) "
+               "wb_in(req_ready=%d acc=%d resp_valid=%d) "
+               "wb_out(req_valid=%d req_addr=0x%08x resp_ready=%d)\n",
+               static_cast<int>(mshr_axi_in.req_ready),
+               static_cast<int>(mshr_axi_in.req_accepted),
+               static_cast<unsigned>(mshr_axi_in.req_accepted_id),
+               static_cast<int>(mshr_axi_in.resp_valid),
+               static_cast<unsigned>(mshr_axi_in.resp_id),
+               static_cast<int>(mshr_axi_out.req_valid),
+               static_cast<unsigned>(mshr_axi_out.req_addr),
+               static_cast<unsigned>(mshr_axi_out.req_id),
+               static_cast<int>(mshr_axi_out.resp_ready),
+               static_cast<int>(wb_axi_in.req_ready),
+               static_cast<int>(wb_axi_in.req_accepted),
+               static_cast<int>(wb_axi_in.resp_valid),
+               static_cast<int>(wb_axi_out.req_valid),
+               static_cast<unsigned>(wb_axi_out.req_addr),
+               static_cast<int>(wb_axi_out.resp_ready));
+  for (int i = 0; i < LSU_LDU_COUNT; i++) {
+    const auto &r = dcache_resp_raw_.resp_ports.load_resps[i];
+    if (!r.valid) continue;
+    std::fprintf(out,
+                 "[MEM DEBUG][RAW LOAD RESP] port=%d replay=%u req_id=%zu data=0x%08x rob=%u\n",
+                 i, static_cast<unsigned>(r.replay), r.req_id, r.data,
+                 r.uop.rob_idx);
+  }
+  for (int i = 0; i < LSU_STA_COUNT; i++) {
+    const auto &r = dcache_resp_raw_.resp_ports.store_resps[i];
+    if (!r.valid) continue;
+    std::fprintf(out,
+                 "[MEM DEBUG][RAW STORE RESP] port=%d replay=%u req_id=%zu miss=%d\n",
+                 i, static_cast<unsigned>(r.replay), r.req_id,
+                 static_cast<int>(r.is_cache_miss));
+  }
+  for (int i = 0; i < DCACHE_MSHR_ENTRIES; i++) {
+    const auto &e = mshr_entries[i];
+    if (!e.valid) {
+      continue;
+    }
+    std::fprintf(out,
+                 "[MEM DEBUG][MSHR] idx=%d issued=%d fill=%d no_fill=%d "
+                 "set=%u tag=0x%x merged_dirty=%d line=0x%08x\n",
+                 i, static_cast<int>(e.issued), static_cast<int>(e.fill),
+                 static_cast<int>(e.no_fill), e.index, e.tag,
+                 static_cast<int>(e.merged_store_dirty),
+                 get_addr(e.index, e.tag, 0));
+  }
+  for (int i = 0; i < DCACHE_WB_ENTRIES; i++) {
+    const auto &e = write_buffer[i];
+    if (!e.valid) {
+      continue;
+    }
+    std::fprintf(out,
+                 "[MEM DEBUG][WB] idx=%d send=%d addr=0x%08x data0=0x%08x\n",
+                 i, static_cast<int>(e.send), e.addr, e.data[0]);
+  }
   const auto ptw = ptw_block.debug_state();
   std::fprintf(out,
                "[MEM DEBUG][PTW] walk_active=%d state=%u owner=%u "
@@ -855,32 +1033,43 @@ void MemSubsystem::comb() {
   dcache_req_mux_ = read_arb_block.comb_result().dcache_req;
   dcache_resp_raw_ = {};
 
+  dcache_.set_llc_mode(runtime_llc_mode_);
+
+  const bool mode2_direct_dcache = (runtime_llc_mode_ == 2u);
+
   // Feed current-cycle AXI feedback before any comb phase that consumes it.
   mshr_.in.axi_in = mshr_axi_in;
   wb_.in.axi_in   = wb_axi_in;
 
-  // RealDcache::stage2_comb() consumes current-cycle MSHR/WB comb outputs.
-  // Order:
-  // 1. WB comb_outputs exposes ready from the current WB view.
-  // 2. MSHR comb_outputs uses that ready to decide whether an AXI read response
-  //    may retire this cycle.
-  // 3. DCache stage1 snapshots the new requests into s1s2_nxt.
-  // 4. DCache emits WB bypass/merge queries for s1s2_cur, the requests that
-  //    stage2 will actually evaluate in this cycle.
-  // 5. WB comb_inputs consumes those queries immediately.
-  // 6. WB comb_outputs is refreshed so DCache stage2 sees same-cycle bypass.
-  wb_.comb_outputs();
-  mshr_.in.wbmshr = wb_.out.wbmshr;
-  mshr_.comb_outputs();
-  dcache_.stage1_comb();
-  dcache_.prepare_wb_queries_for_stage2();
+  if (!mode2_direct_dcache) {
+    // RealDcache::stage2_comb() consumes current-cycle MSHR/WB comb outputs.
+    // Order:
+    // 1. WB comb_outputs exposes ready from the current WB view.
+    // 2. MSHR comb_outputs uses that ready to decide whether an AXI read response
+    //    may retire this cycle.
+    // 3. DCache stage1 snapshots the new requests into s1s2_nxt.
+    // 4. DCache emits WB bypass/merge queries for s1s2_cur, the requests that
+    //    stage2 will actually evaluate in this cycle.
+    // 5. WB comb_inputs consumes those queries immediately.
+    // 6. WB comb_outputs is refreshed so DCache stage2 sees same-cycle bypass.
+    wb_.comb_outputs();
+    mshr_.in.wbmshr = wb_.out.wbmshr;
+    mshr_.comb_outputs();
+    dcache_.stage1_comb();
+    dcache_.prepare_wb_queries_for_stage2();
 
-  wb_.in.mshrwb   = mshr_.out.mshrwb;  // eviction push from MSHR current comb
-  wb_.comb_inputs();
-  wb_.comb_outputs();
-  mshr_.in.wbmshr = wb_.out.wbmshr;
+    wb_.in.mshrwb   = mshr_.out.mshrwb;  // eviction push from MSHR current comb
+    wb_.comb_inputs();
+    wb_.comb_outputs();
+    mshr_.in.wbmshr = wb_.out.wbmshr;
 
-  dcache_.stage2_comb();
+    dcache_.stage2_comb();
+  } else {
+    mshr_.out = {};
+    wb_.out = {};
+    dcache_.stage1_comb();
+    dcache_.stage2_comb();
+  }
   if (read_arb_block.comb_result().granted) {
     switch (read_arb_block.comb_result().granted_owner) {
     case MemReadArbBlock::Owner::PTW_DTLB:
@@ -904,8 +1093,10 @@ void MemSubsystem::comb() {
     }
   }
 
-  const replay_resp replay_bcast =
-      replay_resp::from_io(mshr_.out.replay_resp);
+  const replay_resp replay_bcast = mode2_direct_dcache
+                                       ? replay_resp::from_io(
+                                             dcache_resp_raw_.resp_ports.replay_resp)
+                                       : replay_resp::from_io(mshr_.out.replay_resp);
 
   resp_route_block.eval_comb(&dcache_resp_raw_,
                              read_arb_block.comb_result().issued_tags,
@@ -1018,20 +1209,26 @@ void MemSubsystem::comb() {
   // Export MSHR replay wakeup to LSU. RealDcache::comb() clears resp ports
   // every cycle, so this must be written after dcache_.comb().
   if (dcache2lsu != nullptr) {
-    dcache2lsu->resp_ports.replay_resp = mshr_.out.replay_resp;
+    dcache2lsu->resp_ports.replay_resp =
+        mode2_direct_dcache ? dcache_resp_raw_.resp_ports.replay_resp
+                            : mshr_.out.replay_resp;
   }
 
   // Phase 3a: run MSHR comb_inputs (may accept AXI R, allocate entries, and
   // prepare next-cycle registered fill / eviction outputs).
-  mshr_.comb_inputs();
+  if (!mode2_direct_dcache) {
+    mshr_.comb_inputs();
+  }
 
   peripheral_axi_.in.read = peripheral_axi_read_in;
   peripheral_axi_.in.write = peripheral_axi_write_in;
   peripheral_axi_.comb_outputs();
   peripheral_axi_.comb_inputs();
 
-  mshr_axi_out = mshr_.out.axi_out;
-  wb_axi_out = wb_.out.axi_out;
+  if (!mode2_direct_dcache) {
+    mshr_axi_out = mshr_.out.axi_out;
+    wb_axi_out = wb_.out.axi_out;
+  }
   peripheral_axi_read_out = peripheral_axi_.out.read;
   peripheral_axi_write_out = peripheral_axi_.out.write;
 
@@ -1078,8 +1275,10 @@ void MemSubsystem::comb() {
 
 void MemSubsystem::seq() {
   dcache_.seq();
-  mshr_.seq();
-  wb_.seq();
+  if (runtime_llc_mode_ != 2u) {
+    mshr_.seq();
+    wb_.seq();
+  }
   peripheral_axi_.seq();
   read_arb_block.update_seq();
   resp_route_block.update_seq();

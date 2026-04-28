@@ -9,6 +9,23 @@
 #include <iostream>
 
 namespace {
+uint64_t rob_deadlock_limit() {
+  static bool initialized = false;
+  static uint64_t value = 50000;
+  if (!initialized) {
+    initialized = true;
+    const char *raw = std::getenv("ROB_DEADLOCK_STALL_CYCLES");
+    if (raw != nullptr && *raw != '\0') {
+      char *end = nullptr;
+      const unsigned long long parsed = std::strtoull(raw, &end, 0);
+      if (end != raw && parsed > 0) {
+        value = static_cast<uint64_t>(parsed);
+      }
+    }
+  }
+  return value;
+}
+
 inline bool rob_is_store(const RobStoredInst &uop) {
   return uop.tma.mem_commit_is_store;
 }
@@ -403,7 +420,7 @@ void Rob::comb_commit() {
   out.rob2dis->rob_flag = enq_flag;
 
   stall_cycle++;
-  if (stall_cycle > 50000) {
+  if (static_cast<uint64_t>(stall_cycle) > rob_deadlock_limit()) {
     cout << dec << ctx->perf.cycle << endl;
     cout << "卡死了" << endl;
 
@@ -435,8 +452,12 @@ void Rob::comb_commit() {
       ctx->cpu->back.lsu->dump_debug_state();
       std::fprintf(stderr, "[ROB DEADLOCK] dumping MemSubsystem state\n");
       ctx->cpu->mem_subsystem.dump_debug_state(stderr);
+      std::fprintf(stderr, "[ROB DEADLOCK] dumping AXI interconnect state\n");
+      ctx->cpu->axi_interconnect.debug_print();
+      std::fprintf(stderr, "[ROB DEADLOCK] dumping AXI DDR state\n");
+      ctx->cpu->axi_ddr.print_state();
     }
-    Assert(0 && "ROB Deadlock detected (stall_cycle > 50000)");
+    Assert(0 && "ROB Deadlock detected (stall_cycle > ROB_DEADLOCK_STALL_CYCLES)");
     exit(1);
   }
 }

@@ -4,6 +4,7 @@
 #include "host_profile.h"
 #include "predecode.h"
 #include "predecode_checker.h"
+#include "SimCpu.h"
 #include "train_IO.h"
 #include <RISCV.h>
 #include <cassert>
@@ -76,6 +77,13 @@ static double front_stats_pct(uint64_t num, uint64_t den) {
     return 0.0;
   }
   return (static_cast<double>(num) * 100.0) / static_cast<double>(den);
+}
+
+static uint8_t front_current_llc_mode() {
+  if (front_ctx == nullptr || front_ctx->cpu == nullptr) {
+    return 1u;
+  }
+  return front_ctx->cpu->axi_interconnect.active_mode();
 }
 
 static double front_stats_ratio(uint64_t num, uint64_t den) {
@@ -1045,6 +1053,7 @@ void front_comb_calc(const struct front_top_in &inp, const FrontReadData &rd,
         icache_in.refetch = global_refetch;
         icache_in.itlb_flush = in->itlb_flush;
         icache_in.fence_i = in->fence_i;
+        icache_in.llc_mode = front_current_llc_mode();
         icache_in.invalidate_req = false;
         icache_in.csr_status = in->csr_status;
         icache_peek_ready(&icache_in, &icache_out);
@@ -1314,6 +1323,7 @@ void front_comb_calc(const struct front_top_in &inp, const FrontReadData &rd,
         icache_in.refetch = global_refetch;
         icache_in.itlb_flush = in->itlb_flush;
         icache_in.fence_i = in->fence_i;
+        icache_in.llc_mode = front_current_llc_mode();
         icache_in.invalidate_req = false;
         icache_in.csr_status = in->csr_status;
         icache_in.run_comb_only = false;
@@ -1672,6 +1682,7 @@ void front_comb_calc(const struct front_top_in &inp, const FrontReadData &rd,
         if (do_predecode_flush) {
             struct icache_in invalidate_req_in;
             memset(&invalidate_req_in, 0, sizeof(invalidate_req_in));
+            invalidate_req_in.llc_mode = front_current_llc_mode();
             invalidate_req_in.invalidate_req = true;
             invalidate_req_in.csr_status = in->csr_status;
             icache_comb_calc(&invalidate_req_in, &icache_out);

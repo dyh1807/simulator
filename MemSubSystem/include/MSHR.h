@@ -30,6 +30,7 @@ struct MSHR_STATE{
     // in the next cycle.
     bool fill_valid;
     bool fill_dirty;
+    bool fill_no_fill;
     uint32_t fill_way;
     uint32_t fill_data[DCACHE_LINE_WORDS];
 
@@ -85,7 +86,7 @@ public:
     MSHR_StateMachine state = MSHR_IDLE;
 
     void init();
-    int entries_add(int set_idx,int tag);
+    int entries_add(int set_idx,int tag, bool no_fill);
 
     // Phase 1: compute lookup results, full flag, and fill delivery from cur.
     // Must be called BEFORE stage2_comb() so lookup results are ready.

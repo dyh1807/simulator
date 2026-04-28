@@ -1,7 +1,9 @@
 #include "SimCpu.h"
 #include "PhysMemory.h"
+#include "RealDcache.h"
 #include "config.h"
 #include "diff.h"
+#include "front-end/icache/include/icache_module.h"
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -70,6 +72,36 @@ SimCpu cpu;
 namespace {
 volatile std::sig_atomic_t g_sigint_requested = 0;
 
+bool read_env_u64_local(const char *name, uint64_t &value) {
+  const char *raw = std::getenv(name);
+  if (raw == nullptr || *raw == '\0') {
+    return false;
+  }
+  char *end = nullptr;
+  unsigned long long parsed = std::strtoull(raw, &end, 0);
+  if (end == raw || (end != nullptr && *end != '\0')) {
+    return false;
+  }
+  value = static_cast<uint64_t>(parsed);
+  return true;
+}
+
+void maybe_preload_mode2_local_window_for_test() {
+  uint64_t preload_bytes = 0;
+  if (!read_env_u64_local("AXI_MODE2_PRELOAD_WINDOW_BYTES", preload_bytes) ||
+      preload_bytes == 0) {
+    return;
+  }
+  const bool ok = cpu.mem_subsystem.debug_preload_mode2_window_from_memory(
+      static_cast<uint32_t>(preload_bytes));
+  std::printf(
+      "[LOCAL-TEST][MODE2_PRELOAD] bytes=0x%llx active_mode=%u active_offset=0x%08x result=%s\n",
+      static_cast<unsigned long long>(preload_bytes),
+      static_cast<unsigned>(cpu.axi_interconnect.active_mode()),
+      static_cast<unsigned>(cpu.axi_interconnect.active_llc_mapped_offset()),
+      ok ? "ok" : "skip");
+}
+
 void handle_sigint(int signo) {
   if (signo != SIGINT) {
     return;
@@ -120,6 +152,8 @@ void exit_handler() {
   std::cout << "\033[38;5;34m-----------------------------\033[0m" << std::endl;
   std::cout << "Simulation Exited. Printing Perf Stats..." << std::endl;
   cpu.ctx.perf.perf_print();
+  icache_module_n::icache_debug_dump_mode2_repeat_stats();
+  dcache_debug_dump_mode2_repeat_stats();
   std::cout << "\033[38;5;34m-----------------------------\033[0m" << std::endl;
 }
 
@@ -278,6 +312,7 @@ int main(int argc, char *argv[]) {
     std::cout << "[Mode] RUN: Loading Binary Image..." << std::endl;
     std::cout << "[File] " << config.target_file << std::endl;
     cpu.back.load_image(config.target_file);
+    maybe_preload_mode2_local_window_for_test();
   } else if (config.mode == SimConfig::CKPT) {
     std::cout << "[Mode] CKPT: Restoring from Snapshot..." << std::endl;
     std::cout << "[File] " << config.target_file << std::endl;
@@ -335,6 +370,7 @@ int main(int argc, char *argv[]) {
               << config.fast_forward_count << " cycles..." << std::endl;
 
     cpu.back.load_image(config.target_file);
+    maybe_preload_mode2_local_window_for_test();
     ref_cpu.uart_print = true;
     ref_cpu.ref_only = true;
 
@@ -356,6 +392,7 @@ int main(int argc, char *argv[]) {
     std::cout << "[Mode] REF_ONLY: Reference Model Validation" << std::endl;
     std::cout << "[File] " << config.target_file << std::endl;
     cpu.back.load_image(config.target_file);
+    maybe_preload_mode2_local_window_for_test();
     ref_cpu.uart_print = true;
     ref_cpu.ref_only = true;
 

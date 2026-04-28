@@ -177,6 +177,61 @@ RealLsu::RealLsu(SimContext *ctx) : AbstractLsu(ctx) {
   init();
 }
 
+void RealLsu::dump_debug_state() const {
+  const auto &state = cur;
+  std::fprintf(stderr,
+               "[LSU DEBUG] ldq_count=%d committed_stq=%u speculative_stq=%u "
+               "finished_loads=%u finished_sta=%u pending_sta_addr=%u\n",
+               ldq_count, static_cast<unsigned>(committed_stq_count),
+               static_cast<unsigned>(speculative_stq_count),
+               static_cast<unsigned>(finished_loads_count),
+               static_cast<unsigned>(finished_sta_reqs_count),
+               static_cast<unsigned>(pending_sta_addr_reqs_count));
+  for (int i = 0; i < LDQ_SIZE; i++) {
+    const auto &e = ldq[i];
+    if (!e.valid) {
+      continue;
+    }
+    std::fprintf(stderr,
+                 "[LSU DEBUG][LDQ] idx=%d sent=%d waiting=%d state=%u replay=%u "
+                 "killed=%d mmio=%d ready_delay=%u resp_wait=%u addr=0x%08x rob=%u flag=%u inst_idx=%lld\n",
+                 i, static_cast<int>(e.sent), static_cast<int>(e.waiting_resp),
+                 static_cast<unsigned>(e.load_state),
+                 static_cast<unsigned>(e.replay_priority),
+                 static_cast<int>(e.killed), static_cast<int>(e.is_mmio_wait),
+                 static_cast<unsigned>(e.ready_delay),
+                 static_cast<unsigned>(e.resp_wait_cycles), e.uop.diag_val,
+                 e.uop.rob_idx, e.uop.rob_flag,
+                 static_cast<long long>(e.uop.dbg.inst_idx));
+  }
+  for (int i = 0; i < STQ_SIZE; i++) {
+    const auto &e = committed_stq[i].entry;
+    if (!e.valid) {
+      continue;
+    }
+    std::fprintf(stderr,
+                 "[LSU DEBUG][CSTQ] idx=%d send=%d done=%d replay=%u "
+                 "addr_valid=%d data_valid=%d paddr=0x%08x rob=%u flag=%u\n",
+                 i, static_cast<int>(e.send), static_cast<int>(e.done),
+                 static_cast<unsigned>(e.replay),
+                 static_cast<int>(e.addr_valid), static_cast<int>(e.data_valid),
+                 e.p_addr, e.rob_idx, e.rob_flag);
+  }
+  for (int i = 0; i < STQ_SIZE; i++) {
+    const auto &e = speculative_stq[i].entry;
+    if (!e.valid) {
+      continue;
+    }
+    std::fprintf(stderr,
+                 "[LSU DEBUG][SSTQ] idx=%d send=%d done=%d replay=%u "
+                 "addr_valid=%d data_valid=%d paddr=0x%08x rob=%u flag=%u\n",
+                 i, static_cast<int>(e.send), static_cast<int>(e.done),
+                 static_cast<unsigned>(e.replay),
+                 static_cast<int>(e.addr_valid), static_cast<int>(e.data_valid),
+                 e.p_addr, e.rob_idx, e.rob_flag);
+  }
+}
+
 RealLsu::StoreTag RealLsu::make_store_tag(int idx, bool flag) const {
 #if CONFIG_REAL_LSU_RANDOM_TEST
   idx = ((idx % STQ_SIZE) + STQ_SIZE) % STQ_SIZE;

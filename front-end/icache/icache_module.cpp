@@ -1,6 +1,12 @@
 #include "include/icache_module.h"
 #include "config.h"
 
+#include <algorithm>
+#include <cstdlib>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 using namespace icache_module_n;
 
 namespace {
@@ -131,7 +137,68 @@ inline int alloc_free_txid(const ICache_regs_t &regs) {
   }
   return -1;
 }
+
+inline bool icache_mode2_no_fill_enabled(const ICache_in_t &in) {
+  return static_cast<uint8_t>(in.llc_mode & 0x3) == 2u;
+}
+
+bool mode2_repeat_stats_enabled() {
+  static int cached = -1;
+  if (cached >= 0) {
+    return cached != 0;
+  }
+  const char *raw = std::getenv("MODE2_NOFILL_REPEAT_STATS");
+  cached = (raw != nullptr && *raw != '\0' && std::strcmp(raw, "0") != 0) ? 1 : 0;
+  return cached != 0;
+}
+
+struct Mode2IcacheRepeatStats {
+  uint64_t mem_req_accepts = 0;
+  std::unordered_map<uint32_t, uint64_t> line_counts;
+};
+
+Mode2IcacheRepeatStats &mode2_icache_repeat_stats() {
+  static Mode2IcacheRepeatStats *stats = new Mode2IcacheRepeatStats();
+  return *stats;
+}
+
+void note_mode2_icache_req(uint32_t line_addr) {
+  if (!mode2_repeat_stats_enabled()) {
+    return;
+  }
+  auto &stats = mode2_icache_repeat_stats();
+  stats.mem_req_accepts++;
+  stats.line_counts[line_addr]++;
+}
 } // namespace
+
+void icache_module_n::icache_debug_dump_mode2_repeat_stats() {
+  if (!mode2_repeat_stats_enabled()) {
+    return;
+  }
+  auto &stats = mode2_icache_repeat_stats();
+  std::vector<std::pair<uint32_t, uint64_t>> repeated;
+  repeated.reserve(stats.line_counts.size());
+  for (const auto &kv : stats.line_counts) {
+    if (kv.second > 1) {
+      repeated.push_back(kv);
+    }
+  }
+  std::sort(repeated.begin(), repeated.end(),
+            [](const auto &a, const auto &b) {
+              if (a.second != b.second) return a.second > b.second;
+              return a.first < b.first;
+            });
+  std::printf("[LOCAL-TEST][MODE2_NOFILL][ICACHE] req_accepts=%llu unique_lines=%zu repeated_lines=%zu\n",
+              static_cast<unsigned long long>(stats.mem_req_accepts),
+              stats.line_counts.size(), repeated.size());
+  const size_t limit = std::min<size_t>(8, repeated.size());
+  for (size_t i = 0; i < limit; ++i) {
+    std::printf("[LOCAL-TEST][MODE2_NOFILL][ICACHE] top%zu line=0x%08x count=%llu\n",
+                i, repeated[i].first,
+                static_cast<unsigned long long>(repeated[i].second));
+  }
+}
 
 ICache::ICache() {
   reset();
@@ -158,6 +225,7 @@ ICache::ICache() {
   io.regs.req_valid_r = false;
   io.regs.req_pc_r = 0;
   io.regs.req_index_r = 0;
+  io.regs.req_no_fill_r = false;
   req_ready_w = true;
 
   io.regs.lookup_pending_r = false;
@@ -166,6 +234,7 @@ ICache::ICache() {
   lookup_index_next = 0;
   io.regs.lookup_pc_r = 0;
   lookup_pc_next = 0;
+  io.regs.lookup_no_fill_r = false;
   sram_load_fire = false;
 }
 
@@ -191,6 +260,7 @@ void ICache::reset() {
   io.regs.req_valid_r = false;
   io.regs.req_pc_r = 0;
   io.regs.req_index_r = 0;
+  io.regs.req_no_fill_r = false;
   req_ready_w = true;
 
   io.regs.lookup_pending_r = false;
@@ -199,6 +269,7 @@ void ICache::reset() {
   lookup_index_next = 0;
   io.regs.lookup_pc_r = 0;
   lookup_pc_next = 0;
+  io.regs.lookup_no_fill_r = false;
   sram_load_fire = false;
 
 }
@@ -311,9 +382,13 @@ void ICache::lookup(uint32_t index) {
   lookup_pending_next = io.regs.lookup_pending_r;
   lookup_index_next = io.regs.lookup_index_r;
   lookup_pc_next = io.regs.lookup_pc_r;
+  bool lookup_no_fill_next = io.regs.lookup_no_fill_r;
   sram_load_fire = false;
   uint32_t load_pc = io.regs.lookup_pending_r ? io.regs.lookup_pc_r : io.in.pc;
   uint32_t load_index = index;
+  bool load_no_fill =
+      io.regs.lookup_pending_r ? io.regs.lookup_no_fill_r
+                               : icache_mode2_no_fill_enabled(io.in);
   bool req_valid_next = io.regs.req_valid_r;
 
   if (kill_pipe) {
@@ -324,6 +399,7 @@ void ICache::lookup(uint32_t index) {
     io.reg_write.lookup_pending_r = false;
     io.reg_write.lookup_index_r = 0;
     io.reg_write.lookup_pc_r = 0;
+    io.reg_write.lookup_no_fill_r = false;
     io.reg_write.ifu_req_ready_r = false;
     return;
   }
@@ -334,6 +410,7 @@ void ICache::lookup(uint32_t index) {
     io.reg_write.lookup_pending_r = false;
     io.reg_write.lookup_index_r = 0;
     io.reg_write.lookup_pc_r = 0;
+    io.reg_write.lookup_no_fill_r = false;
     io.out.mmu_req_valid = false;
     io.reg_write.ifu_req_ready_r = !fast_bypass_from_pending;
     return;
@@ -349,6 +426,7 @@ void ICache::lookup(uint32_t index) {
       lookup_pending_next = true;
       lookup_index_next = index;
       lookup_pc_next = io.in.pc;
+      lookup_no_fill_next = icache_mode2_no_fill_enabled(io.in);
       if (io.lookup_in.meta_resp_valid) {
         sram_load_fire = true;
         lookup_pending_next = false;
@@ -386,12 +464,15 @@ void ICache::lookup(uint32_t index) {
   io.reg_write.lookup_pending_r = use_external_lookup ? lookup_pending_next : false;
   io.reg_write.lookup_index_r = use_external_lookup ? lookup_index_next : 0;
   io.reg_write.lookup_pc_r = use_external_lookup ? lookup_pc_next : 0;
+  io.reg_write.lookup_no_fill_r =
+      use_external_lookup ? lookup_no_fill_next : false;
   io.reg_write.ifu_req_ready_r =
       req_ready_w && !lookup_pending_next && !req_valid_next;
 
   if (sram_load_fire && !kill_pipe) {
     io.reg_write.req_pc_r = load_pc;
     io.reg_write.req_index_r = load_index;
+    io.reg_write.req_no_fill_r = load_no_fill;
   }
 
   io.out.mmu_req_valid = false;
@@ -475,6 +556,7 @@ void ICache::eval_state_machine() {
     // registered request slot is empty.
     if (!lookup_latency_enabled() && !io.regs.req_valid_r && io.in.ifu_req_valid &&
         io.in.ppn_valid) {
+      const bool incoming_no_fill = icache_mode2_no_fill_enabled(io.in);
       io.out.ifu_resp_pc = io.in.pc;
       if (io.in.page_fault) {
         for (uint32_t word = 0; word < word_num; ++word) {
@@ -495,7 +577,7 @@ void ICache::eval_state_machine() {
       uint32_t index = (io.in.pc >> offset_bits) & (set_num - 1u);
       capture_lookup_meta_result(io.in.ppn & 0xFFFFF, /*compare_valid=*/true);
       capture_lookup_data_result();
-      if (lookup_hit_valid_w && lookup_data_ready_w) {
+      if (!incoming_no_fill && lookup_hit_valid_w && lookup_data_ready_w) {
         for (uint32_t word = 0; word < word_num; ++word) {
           io.out.rd_data[word] = lookup_hit_data_w[word];
         }
@@ -510,7 +592,7 @@ void ICache::eval_state_machine() {
         fast_bypass_fire = true;
         state_next = IDLE;
         break;
-      } else if (lookup_hit_valid_w) {
+      } else if (!incoming_no_fill && lookup_hit_valid_w) {
         io.out.lookup_data_req_valid = true;
         io.out.lookup_data_req_index = index;
         io.out.lookup_data_req_way = lookup_hit_way_w;
@@ -522,6 +604,7 @@ void ICache::eval_state_machine() {
     }
 
     if (io.regs.req_valid_r && io.in.ppn_valid) {
+      const bool req_no_fill = io.regs.req_no_fill_r;
       if (io.in.page_fault) {
         for (uint32_t word = 0; word < word_num; ++word) {
           io.out.rd_data[word] = 0;
@@ -545,9 +628,10 @@ void ICache::eval_state_machine() {
 
       capture_lookup_meta_result(io.in.ppn & 0xFFFFF, /*compare_valid=*/true);
       capture_lookup_data_result();
-      io.out.ifu_resp_valid = lookup_hit_valid_w && lookup_data_ready_w;
-      req_ready_w = lookup_hit_valid_w && lookup_data_ready_w;
-      if (lookup_hit_valid_w && lookup_data_ready_w) {
+      io.out.ifu_resp_valid =
+          !req_no_fill && lookup_hit_valid_w && lookup_data_ready_w;
+      req_ready_w = !req_no_fill && lookup_hit_valid_w && lookup_data_ready_w;
+      if (!req_no_fill && lookup_hit_valid_w && lookup_data_ready_w) {
         for (uint32_t word = 0; word < word_num; ++word) {
           io.out.rd_data[word] = lookup_hit_data_w[word];
         }
@@ -557,7 +641,7 @@ void ICache::eval_state_machine() {
                                   io.out.rd_data);
         }
         state_next = IDLE;
-      } else if (lookup_hit_valid_w) {
+      } else if (!req_no_fill && lookup_hit_valid_w) {
         io.out.lookup_data_req_valid = true;
         io.out.lookup_data_req_index = io.regs.req_index_r;
         io.out.lookup_data_req_way = lookup_hit_way_w;
@@ -691,6 +775,9 @@ void ICache::eval_state_machine() {
         io.out.mem_req_valid = false;
         mem_axi_state_next = AXI_BUSY;
         io.reg_write.txid_inflight_r[io.regs.miss_txid_r & 0xF] = true;
+        if (io.regs.req_no_fill_r) {
+          note_mode2_icache_req(io.out.mem_req_addr);
+        }
         perf_state_next.axi_read_active = true;
         perf_state_next.axi_read_start_cycle =
             static_cast<uint64_t>(sim_time);
@@ -740,7 +827,7 @@ void ICache::eval_state_machine() {
         perf_state_next.axi_read_active = false;
         perf_state_next.axi_read_start_cycle = 0;
 
-        if (!io.in.flush) {
+        if (!io.in.flush && !io.regs.req_no_fill_r) {
           io.table_write.we = true;
           io.table_write.index = io.regs.req_index_r;
           io.table_write.way = replace_idx_next;

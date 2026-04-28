@@ -52,6 +52,7 @@ extern uint8_t  lru_state[DCACHE_SETS][DCACHE_WAYS];
 struct MSHR_FILL{
     bool valid;
     bool dirty;
+    bool no_fill;
     uint32_t way;
     uint32_t addr;
     uint32_t data[DCACHE_LINE_WORDS];
@@ -64,7 +65,9 @@ struct MSHRDcacheIO {
 
 struct DcacheMSHRIO {
     LoadReq load_reqs[LSU_LDU_COUNT];
+    bool load_no_fill[LSU_LDU_COUNT] = {};
     StoreReq store_reqs[LSU_STA_COUNT];
+    bool store_no_fill[LSU_STA_COUNT] = {};
     struct StoreHitUpdate {
         bool valid = false;
         uint32_t set_idx = 0;
@@ -140,6 +143,7 @@ struct MSHREntry {
     bool valid;
     bool issued;
     bool fill;
+    bool no_fill;
     uint32_t index;
     uint32_t tag;
     bool merged_store_dirty;

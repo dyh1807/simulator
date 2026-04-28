@@ -291,6 +291,8 @@ template <typename HW, typename ReadPort> struct TrueIcacheRuntime {
   PtwMemPort *ptw_mem_port = nullptr;
   PtwWalkPort *ptw_walk_port = nullptr;
   axi_interconnect::ReadMasterPort_t *mem_read_port = nullptr;
+  bool llc_mode_seen = false;
+  uint8_t last_llc_mode = 1;
 };
 
 template <typename HW, typename ReadPort>
@@ -310,6 +312,8 @@ struct SimpleIcacheRuntime {
   uint32_t pending_fetch_addr = 0;
   bool pend_on_retry_comb = false;
   bool resp_fire_comb = false;
+  bool llc_mode_seen = false;
+  uint8_t last_llc_mode = 1;
 };
 
 SimpleIcacheRuntime &simple_icache_runtime() {
@@ -435,7 +439,13 @@ public:
     clear_primary_outputs(out);
     clear_secondary_outputs(out);
     clear_perf_outputs(out);
-    bool hold_for_recovery = in->itlb_flush || in->fence_i || in->invalidate_req;
+    const auto &runtime = true_icache_runtime<HW, ReadPort>();
+    const bool mode_change_invalidate =
+        runtime.llc_mode_seen &&
+        ((static_cast<uint8_t>(in->llc_mode & 0x3)) != runtime.last_llc_mode);
+    bool hold_for_recovery =
+        in->itlb_flush || in->fence_i || in->invalidate_req ||
+        mode_change_invalidate;
     out->icache_read_ready = in->reset ? true : comb_visible_ready(hold_for_recovery);
   }
 
@@ -458,7 +468,7 @@ public:
     }
     std::printf(
         "[DEADLOCK][FRONT][ICACHE_HW] type=true req_valid=%d fetch_addr=0x%08x "
-        "refetch=%d inv=%d fence_i=%d itlb_flush=%d hold_recovery=%d "
+        "refetch=%d inv=%d fence_i=%d itlb_flush=%d llc_mode=%u hold_recovery=%d "
         "last_mem{ready=%d acc=%d acc_id=%u resp_v=%d resp_id=%u w0=0x%08x w7=0x%08x}\n",
         static_cast<int>(in && in->icache_read_valid),
         static_cast<unsigned>(in ? in->fetch_address : 0u),
@@ -466,6 +476,7 @@ public:
         static_cast<int>(in && in->invalidate_req),
         static_cast<int>(in && in->fence_i),
         static_cast<int>(in && in->itlb_flush),
+        static_cast<unsigned>(in ? (in->llc_mode & 0x3) : 0u),
         static_cast<int>(hold_for_recovery),
         static_cast<int>(mem.req_ready),
         static_cast<int>(mem.req_accepted),
@@ -525,6 +536,8 @@ public:
       DEBUG_LOG("[icache] reset\n");
       icache_hw.reset();
       read_port.reset();
+      runtime.llc_mode_seen = false;
+      runtime.last_llc_mode = 1;
       ICacheMmuReqView reset_mmu_req;
       reset_mmu_req.context_flush = true;
       (void)comb_mmu_view(runtime, ctx, reset_mmu_req);
@@ -534,10 +547,17 @@ public:
 
     // satp write itself must not implicitly flush TrueICache translation state.
     // The architectural shootdown path is explicit SFENCE.VMA -> itlb_flush.
+    const uint8_t llc_mode = static_cast<uint8_t>(in->llc_mode & 0x3);
+    const bool mode_change_invalidate =
+        runtime.llc_mode_seen && (llc_mode != runtime.last_llc_mode);
     bool translation_context_flush = in->itlb_flush;
-    bool cache_invalidate = in->fence_i;
-    bool cancel_pending_req = in->refetch || in->invalidate_req || in->fence_i;
-    bool hold_for_recovery = in->itlb_flush || in->fence_i || in->invalidate_req;
+    bool cache_invalidate = in->fence_i || mode_change_invalidate;
+    bool cancel_pending_req =
+        in->refetch || in->invalidate_req || in->fence_i ||
+        mode_change_invalidate;
+    bool hold_for_recovery =
+        in->itlb_flush || in->fence_i || in->invalidate_req ||
+        mode_change_invalidate;
 
     MemReadView mem = read_port.comb_view();
     const bool req_valid = in->icache_read_valid;
@@ -547,6 +567,7 @@ public:
 
     icache_hw.io.in.refetch = cancel_pending_req;
     icache_hw.io.in.flush = cache_invalidate;
+    icache_hw.io.in.llc_mode = llc_mode;
     icache_hw.io.in.pc = req_pc;
     icache_hw.io.in.ifu_req_valid = req_valid;
     icache_hw.io.in.ifu_resp_ready = true;
@@ -699,6 +720,8 @@ public:
     if (runtime.mmu_model != nullptr) {
       runtime.mmu_model->seq();
     }
+    runtime.llc_mode_seen = true;
+    runtime.last_llc_mode = static_cast<uint8_t>(in->llc_mode & 0x3);
   }
 
 private:

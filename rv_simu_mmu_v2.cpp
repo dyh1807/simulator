@@ -577,6 +577,7 @@ void SimCpu::cycle() {
 
   {
     FRONTEND_HOST_PROFILE_SCOPE(SimMemComb);
+    mem_subsystem.set_runtime_llc_mode(axi_interconnect.active_mode());
     mem_subsystem.comb();
   }
 

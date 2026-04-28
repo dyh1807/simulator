@@ -6,11 +6,48 @@
 #include <cstdio>
 #include <cstring>
 
+#ifndef CONFIG_AXI_LLC_DEBUG_LOG
+#define CONFIG_AXI_LLC_DEBUG_LOG 0
+#endif
+
+#ifndef CONFIG_AXI_LLC_RESP_TRACE_BEGIN
+#define CONFIG_AXI_LLC_RESP_TRACE_BEGIN 0LL
+#endif
+
+#ifndef CONFIG_AXI_LLC_RESP_TRACE_END
+#define CONFIG_AXI_LLC_RESP_TRACE_END 0LL
+#endif
+
+#ifndef CONFIG_AXI_LLC_FOCUS_LINE0
+#define CONFIG_AXI_LLC_FOCUS_LINE0 0u
+#endif
+
+#ifndef CONFIG_AXI_LLC_FOCUS_LINE1
+#define CONFIG_AXI_LLC_FOCUS_LINE1 0u
+#endif
+
 MSHREntry mshr_entries_nxt[DCACHE_MSHR_ENTRIES];
 
 namespace {
 static constexpr uint8_t kCacheLineReqTotalSize =
     static_cast<uint8_t>(DCACHE_LINE_BYTES - 1u);
+
+bool mshr_focus_line(uint32_t line_addr) {
+    if (CONFIG_AXI_LLC_DEBUG_LOG == 0) {
+        return false;
+    }
+    return (CONFIG_AXI_LLC_FOCUS_LINE0 != 0u &&
+            line_addr == static_cast<uint32_t>(CONFIG_AXI_LLC_FOCUS_LINE0)) ||
+           (CONFIG_AXI_LLC_FOCUS_LINE1 != 0u &&
+            line_addr == static_cast<uint32_t>(CONFIG_AXI_LLC_FOCUS_LINE1));
+}
+
+bool mshr_resp_trace_active() {
+    return CONFIG_AXI_LLC_DEBUG_LOG != 0 &&
+           CONFIG_AXI_LLC_RESP_TRACE_END >= CONFIG_AXI_LLC_RESP_TRACE_BEGIN &&
+           sim_time >= static_cast<long long>(CONFIG_AXI_LLC_RESP_TRACE_BEGIN) &&
+           sim_time <= static_cast<long long>(CONFIG_AXI_LLC_RESP_TRACE_END);
+}
 
 bool victim_has_same_cycle_store_hit(const DcacheMSHRIO &dcachemshr,
                                      uint32_t set_idx, uint32_t way_idx) {
@@ -94,6 +131,7 @@ void MSHR::comb_outputs()
     // Registered fill output (from previous cycle comb_inputs()).
     out.mshr2dcache.fill.valid = cur.fill_valid;
     out.mshr2dcache.fill.dirty = cur.fill_dirty;
+    out.mshr2dcache.fill.no_fill = cur.fill_no_fill;
     out.mshr2dcache.fill.way = cur.fill_way;
     out.mshr2dcache.fill.addr = cur.fill_addr;
     std::memcpy(out.mshr2dcache.fill.data, cur.fill_data,
@@ -129,7 +167,7 @@ void MSHR::comb_outputs()
 
 }
 
-int MSHR::entries_add(int set_idx, int tag)
+int MSHR::entries_add(int set_idx, int tag, bool no_fill)
 {   
     if(nxt.mshr_count >= DCACHE_MSHR_ENTRIES){
         Assert(0 && "MSHR full");
@@ -149,6 +187,7 @@ int MSHR::entries_add(int set_idx, int tag)
     mshr_entries_nxt[alloc_idx].fill = false;
     mshr_entries_nxt[alloc_idx].index = set_idx;
     mshr_entries_nxt[alloc_idx].tag = tag;
+    mshr_entries_nxt[alloc_idx].no_fill = no_fill;
     mshr_entries_nxt[alloc_idx].merged_store_dirty = false;
     std::memset(mshr_entries_nxt[alloc_idx].merged_store_data, 0,
                 sizeof(mshr_entries_nxt[alloc_idx].merged_store_data));
@@ -169,6 +208,7 @@ void MSHR::comb_inputs()
     nxt.fill = false;
     nxt.fill_valid = false;
     nxt.fill_dirty = false;
+    nxt.fill_no_fill = false;
     nxt.fill_way = 0;
     std::memset(nxt.fill_data, 0, sizeof(nxt.fill_data));
     nxt.wb_valid = false;
@@ -180,7 +220,11 @@ void MSHR::comb_inputs()
     // asserted so the interconnect can retire the duplicated live copy on the
     // following cycle. Once hold is still occupied in a later cycle and we
     // still cannot consume it, deassert ready to block subsequent responses.
-    out.axi_out.resp_ready = !cur.axi_resp_hold_valid;
+    const bool live_duplicate_of_hold =
+        cur.axi_resp_hold_valid && in.axi_in.resp_valid &&
+        in.axi_in.resp_id == cur.axi_resp_hold_id;
+    out.axi_out.resp_ready =
+        !cur.axi_resp_hold_valid || live_duplicate_of_hold;
 
     // ── Process alloc and secondary requests ─────────────────────────────────
     for (int i = 0; i < LSU_LDU_COUNT; i++)
@@ -188,7 +232,8 @@ void MSHR::comb_inputs()
         const LoadReq &req = in.dcachemshr.load_reqs[i];
         if (!req.valid)
             continue;
-        entries_add(decode(req.addr).set_idx, decode(req.addr).tag);
+        entries_add(decode(req.addr).set_idx, decode(req.addr).tag,
+                    in.dcachemshr.load_no_fill[i]);
     }
 
     for (int i = 0; i < LSU_STA_COUNT; i++)
@@ -199,8 +244,12 @@ void MSHR::comb_inputs()
         const AddrFields f = decode(req.addr);
         int entry_idx = find_next_entry_idx(f.set_idx, f.tag);
         if (entry_idx < 0) {
-            entry_idx = entries_add(f.set_idx, f.tag);
+            entry_idx = entries_add(f.set_idx, f.tag,
+                                    in.dcachemshr.store_no_fill[i]);
         }
+        mshr_entries_nxt[entry_idx].no_fill =
+            mshr_entries_nxt[entry_idx].no_fill ||
+            in.dcachemshr.store_no_fill[i];
         merge_store_into_entry(mshr_entries_nxt[entry_idx], req);
     }
 
@@ -215,20 +264,58 @@ void MSHR::comb_inputs()
         if (resp_id < DCACHE_MSHR_ENTRIES)
         {
             const MSHREntry &e_cur = mshr_entries[resp_id];
+            const uint32_t debug_line =
+                e_cur.valid ? get_addr(e_cur.index, e_cur.tag, 0) : 0u;
+            if (mshr_resp_trace_active() && in.axi_in.resp_valid) {
+                std::printf(
+                    "[MSHR][RESP-IN] cyc=%lld resp_id=%u line=0x%08x "
+                    "valid=%d issued=%d fill=%d hold=%d ready_out=%d\n",
+                    (long long)sim_time, static_cast<unsigned>(resp_id),
+                    debug_line, static_cast<int>(e_cur.valid),
+                    static_cast<int>(e_cur.issued), static_cast<int>(e_cur.fill),
+                    static_cast<int>(cur.axi_resp_hold_valid),
+                    static_cast<int>(out.axi_out.resp_ready));
+            }
+            if (mshr_focus_line(debug_line)) {
+                std::printf(
+                    "[MSHR][RESP-SEEN] cyc=%lld resp_id=%u line=0x%08x "
+                    "valid=%d issued=%d fill=%d hold=%d live=%d dup=%d "
+                    "wb_ready=%d\n",
+                    (long long)sim_time, static_cast<unsigned>(resp_id),
+                    debug_line, static_cast<int>(e_cur.valid),
+                    static_cast<int>(e_cur.issued), static_cast<int>(e_cur.fill),
+                    static_cast<int>(cur.axi_resp_hold_valid),
+                    static_cast<int>(in.axi_in.resp_valid),
+                    static_cast<int>(live_duplicate_of_hold),
+                    static_cast<int>(in.wbmshr.ready));
+            }
             if (e_cur.valid && e_cur.issued && !e_cur.fill)
             {
                 const uint32_t fill_set = mshr_entries[resp_id].index;
                 const uint32_t fill_tag = mshr_entries[resp_id].tag;
+                const uint32_t fill_line_addr = get_addr(fill_set, fill_tag, 0);
                 const uint32_t lru_idx = choose_lru_victim(fill_set);
                 const uint32_t victim_tag = tag_array[fill_set][lru_idx];
+                const bool no_fill_req = mshr_entries_nxt[resp_id].no_fill;
                 const bool same_cycle_store_hit =
                     victim_has_same_cycle_store_hit(in.dcachemshr, fill_set,
                                                     lru_idx);
                 bool need_wb_evict =
-                    dirty_array[fill_set][lru_idx] || same_cycle_store_hit;
+                    !no_fill_req &&
+                    (dirty_array[fill_set][lru_idx] || same_cycle_store_hit);
                 bool can_consume_resp = (!need_wb_evict) || in.wbmshr.ready;
                 if (!can_consume_resp)
                 {
+                    if (mshr_focus_line(fill_line_addr)) {
+                        std::printf(
+                            "[MSHR][RESP-BLOCK] cyc=%lld resp_id=%u line=0x%08x "
+                            "need_wb=%d wb_ready=%d hold=%d dup=%d\n",
+                            (long long)sim_time, static_cast<unsigned>(resp_id),
+                            fill_line_addr, static_cast<int>(need_wb_evict),
+                            static_cast<int>(in.wbmshr.ready),
+                            static_cast<int>(cur.axi_resp_hold_valid),
+                            static_cast<int>(live_duplicate_of_hold));
+                    }
                     if (!cur.axi_resp_hold_valid)
                     {
                         nxt.axi_resp_hold_valid = true;
@@ -243,14 +330,44 @@ void MSHR::comb_inputs()
                     }
                     else
                     {
-                        out.axi_out.resp_ready = false;
+                        if (live_duplicate_of_hold) {
+                            if (std::memcmp(cur.axi_resp_hold_data,
+                                            in.axi_in.resp_data,
+                                            sizeof(cur.axi_resp_hold_data)) != 0) {
+                                LSU_MEM_DBG_PRINTF(
+                                    "[MSHR RESP HOLD DUP MISMATCH] cyc=%lld resp_id=%u\n",
+                                    (long long)sim_time,
+                                    static_cast<unsigned>(resp_id));
+                                Assert(false && "MSHR held response differs from live duplicate");
+                            }
+                            // The held copy is already durable. Keep ready high
+                            // only to retire the duplicated live response that
+                            // LLC keeps visible for one fresh cycle.
+                            out.axi_out.resp_ready = true;
+                        } else {
+                            out.axi_out.resp_ready = false;
+                        }
                     }
                 }
                 else
                 {
                     nxt.axi_resp_hold_valid = false;
-                    out.axi_out.resp_ready = true;
-                    const uint32_t fill_line_addr = get_addr(fill_set, fill_tag, 0);
+                    // If this cycle consumed a held response while a different
+                    // live response is also present, do not acknowledge the live
+                    // response. It has not been inspected yet and must remain
+                    // visible for the next cycle.
+                    out.axi_out.resp_ready =
+                        !using_held_resp || !in.axi_in.resp_valid ||
+                        live_duplicate_of_hold;
+                    if (mshr_focus_line(fill_line_addr)) {
+                        std::printf(
+                            "[MSHR][RESP-CONSUME] cyc=%lld resp_id=%u line=0x%08x "
+                            "need_wb=%d no_fill=%d merged_dirty=%d\n",
+                            (long long)sim_time, static_cast<unsigned>(resp_id),
+                            fill_line_addr, static_cast<int>(need_wb_evict),
+                            static_cast<int>(no_fill_req),
+                            static_cast<int>(mshr_entries_nxt[resp_id].merged_store_dirty));
+                    }
                     if (need_wb_evict)
                     {
                         nxt.wb_valid = true;
@@ -309,6 +426,7 @@ void MSHR::comb_inputs()
                     const MSHREntry &e_fill = mshr_entries_nxt[resp_id];
                     nxt.fill_valid = true;
                     nxt.fill_dirty = e_fill.merged_store_dirty;
+                    nxt.fill_no_fill = e_fill.no_fill;
                     nxt.fill_way = lru_idx;
                     nxt.fill_addr = fill_line_addr;
                     for (int w = 0; w < DCACHE_LINE_WORDS; w++)
@@ -318,6 +436,13 @@ void MSHR::comb_inputs()
                             apply_strobe(nxt.fill_data[w],
                                          e_fill.merged_store_data[w],
                                          e_fill.merged_store_strb[w]);
+                        }
+                    }
+                    if (e_fill.no_fill && e_fill.merged_store_dirty) {
+                        nxt.wb_valid = true;
+                        nxt.wb_addr = fill_line_addr;
+                        for (int w = 0; w < DCACHE_LINE_WORDS; w++) {
+                            nxt.wb_data[w] = nxt.fill_data[w];
                         }
                     }
                     // AXI read-path check: under direct-memory mode, returned

@@ -131,6 +131,10 @@ struct icache_in {
   wire1_t refetch;
   wire1_t itlb_flush;
   wire1_t fence_i;
+  // Shared LLC/submodule runtime mode broadcast.
+  // This is an internal frontend-local control input, not an i-cache<->submodule
+  // request/response protocol change.
+  wire2_t llc_mode;
   // cancel in-flight/front-end-visible request state only; keep cache contents
   wire1_t invalidate_req;
   // from BPU

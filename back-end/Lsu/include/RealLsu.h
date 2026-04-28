@@ -124,6 +124,7 @@ public:
   void comb_load_res() override;
   void comb_flush() override;
   void seq() override;
+  void dump_debug_state() const override;
 
   StqEntry get_stq_entry(int stq_idx, bool stq_flag) override;
 

@@ -91,11 +91,13 @@ public:
     };
 
     void bind_context(SimContext *c) { ctx = c; }
+    void set_llc_mode(uint8_t mode) { llc_mode_ = static_cast<uint8_t>(mode & 0x3u); }
     void init() override;
     void comb() override;
     void seq()  override;
     CoherentQueryResult query_coherent_word(uint32_t addr,
                                             uint32_t &data) const;
+    void dump_mode2_direct_state(FILE *out) const;
 
     // IO ports — set by the owning module (e.g. MemSubsystem) before init().
     LsuDcacheIO  *lsu2dcache  = nullptr;  // LSU → DCache requests
@@ -104,6 +106,10 @@ public:
     DcacheMSHRIO *dcache2mshr = nullptr;  // DCache miss alloc → MSHR
     DcacheWBIO   *dcache2wb   = nullptr;  // DCache bypass/merge req → WB
     WBDcacheIO   *wb2dcache   = nullptr;  // WB bypass/merge resp → DCache
+    MshrAxiIn    *mode2_axi_read_in = nullptr;
+    MshrAxiOut   *mode2_axi_read_out = nullptr;
+    WbAxiIn      *mode2_axi_write_in = nullptr;
+    WbAxiOut     *mode2_axi_write_out = nullptr;
 
     // Stage 1: decode incoming requests, detect bank conflicts, snapshot SRAMs.
     void stage1_comb();
@@ -117,6 +123,28 @@ public:
     void stage2_comb();
 private:
     SimContext *ctx = nullptr;
+    uint8_t llc_mode_ = 1;
+
+    bool mode2_no_fill_active() const { return (llc_mode_ & 0x3u) == 2u; }
+    static constexpr uint8_t kMode2DirectReqId = 0;
+
+    struct Mode2DirectSlot {
+        bool valid = false;
+        bool is_store = false;
+        bool read_issued = false;
+        bool read_done = false;
+        bool write_issued = false;
+        bool write_done = false;
+        uint32_t line_addr = 0;
+        uint32_t req_addr = 0;
+        uint32_t word_off = 0;
+        size_t req_id = 0;
+        MicroOp load_uop = {};
+        StqEntry store_uop = {};
+        uint32_t store_data = 0;
+        uint8_t store_strb = 0;
+        uint32_t line_data[DCACHE_LINE_WORDS] = {};
+    };
 
     struct ReqTrack {
         bool valid = false;
@@ -129,6 +157,9 @@ private:
     static constexpr int kReqTrackSize = 256;
     ReqTrack req_track_[kReqTrackSize]{};
     int req_track_rr_ = 0;
+    Mode2DirectSlot mode2_slot_cur_{};
+    Mode2DirectSlot mode2_slot_nxt_{};
+    bool mode2_slot_clear_nxt_ = false;
 
 
     // // Sub-modules
@@ -159,4 +190,8 @@ private:
                          uint32_t rob_flag);
     void end_req_track(bool is_store, size_t req_id, uint32_t rob_idx,
                        uint32_t rob_flag);
+    void clear_mode2_direct_axi_outputs();
+    void mode2_stage2_direct_comb();
 };
+
+void dcache_debug_dump_mode2_repeat_stats();
