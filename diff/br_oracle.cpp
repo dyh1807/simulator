@@ -92,7 +92,7 @@ void init_oracle(int img_size) {
   while (!oracle_timer_queue.empty()) {
     oracle_timer_queue.pop();
   }
-  oracle.init(0);
+  oracle.init(RESET_PC);
   oracle.dut_pf_check_enable = false;
   std::memcpy(oracle.memory, pmem_ram_ptr(), img_size);
   oracle.store_word(0x10000004, pmem_read(0x10000004));

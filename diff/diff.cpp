@@ -85,7 +85,7 @@ void dump_code_line_snapshot(const char *tag, uint32_t pc) {
 
 // relocate the init_difftest function to avoid multiple definition error
 void init_difftest(int img_size) {
-  ref_cpu.init(0);
+  ref_cpu.init(RESET_PC);
   std::memcpy(ref_cpu.memory, pmem_ram_ptr(), img_size);
   seed_ref_io_from_backing();
 }

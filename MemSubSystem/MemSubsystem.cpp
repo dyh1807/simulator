@@ -24,6 +24,43 @@ using InterconnectImpl = axi_interconnect::AXI_Interconnect;
 using DdrImpl = sim_ddr::SimDDR;
 using RouterImpl = axi_interconnect::AXI_Router_AXI4;
 using MmioImpl = mmio::MMIO_Bus_AXI4;
+
+void sample_axi_slave_outputs(sim_ddr::SimDDR_IO_t &master,
+                              const sim_ddr::SimDDR_IO_t &slave) {
+  master.ar.arready = slave.ar.arready;
+  master.aw.awready = slave.aw.awready;
+  master.w.wready = slave.w.wready;
+  master.r.rvalid = slave.r.rvalid;
+  master.r.rid = slave.r.rid;
+  master.r.rdata = slave.r.rdata;
+  master.r.rresp = slave.r.rresp;
+  master.r.rlast = slave.r.rlast;
+  master.b.bvalid = slave.b.bvalid;
+  master.b.bid = slave.b.bid;
+  master.b.bresp = slave.b.bresp;
+}
+
+void drive_axi_slave_inputs(const sim_ddr::SimDDR_IO_t &master,
+                            sim_ddr::SimDDR_IO_t &slave) {
+  slave.ar.arvalid = master.ar.arvalid;
+  slave.ar.arid = master.ar.arid;
+  slave.ar.araddr = master.ar.araddr;
+  slave.ar.arlen = master.ar.arlen;
+  slave.ar.arsize = master.ar.arsize;
+  slave.ar.arburst = master.ar.arburst;
+  slave.aw.awvalid = master.aw.awvalid;
+  slave.aw.awid = master.aw.awid;
+  slave.aw.awaddr = master.aw.awaddr;
+  slave.aw.awlen = master.aw.awlen;
+  slave.aw.awsize = master.aw.awsize;
+  slave.aw.awburst = master.aw.awburst;
+  slave.w.wvalid = master.w.wvalid;
+  slave.w.wdata = master.w.wdata;
+  slave.w.wstrb = master.w.wstrb;
+  slave.w.wlast = master.w.wlast;
+  slave.r.rready = master.r.rready;
+  slave.b.bready = master.b.bready;
+}
 } // namespace
 #else
 #define AXI_KIT_HEADERS_AVAILABLE 0
@@ -961,7 +998,6 @@ void MemSubsystem::comb() {
   if (internal_axi_runtime_active_) {
     auto &interconnect = axi_kit_runtime->interconnect;
     auto &ddr = axi_kit_runtime->ddr;
-    auto &router = axi_kit_runtime->router;
     auto &mmio = axi_kit_runtime->mmio;
 
     // Internal icache-only runtime is optional. When shared LLC is driven by
@@ -971,7 +1007,8 @@ void MemSubsystem::comb() {
     interconnect.set_llc_lookup_in(llc_lookup_in());
     ddr.comb_outputs();
     mmio.comb_outputs();
-    router.comb_outputs(interconnect.axi_io, ddr.io, mmio.io);
+    sample_axi_slave_outputs(interconnect.axi_ddr_io, ddr.io);
+    sample_axi_slave_outputs(interconnect.axi_mmio_io, mmio.io);
     interconnect.comb_outputs();
   }
 #endif
@@ -1237,7 +1274,6 @@ void MemSubsystem::comb() {
   if (internal_axi_runtime_active_) {
     auto &interconnect = axi_kit_runtime->interconnect;
     auto &ddr = axi_kit_runtime->ddr;
-    auto &router = axi_kit_runtime->router;
     auto &mmio = axi_kit_runtime->mmio;
 
     for (int i = 0; i < axi_interconnect::NUM_READ_MASTERS; i++) {
@@ -1264,7 +1300,8 @@ void MemSubsystem::comb() {
 
     // AXI-kit phase-2 combinational inputs.
     interconnect.comb_inputs();
-    router.comb_inputs(interconnect.axi_io, ddr.io, mmio.io);
+    drive_axi_slave_inputs(interconnect.axi_ddr_io, ddr.io);
+    drive_axi_slave_inputs(interconnect.axi_mmio_io, mmio.io);
     ddr.comb_inputs();
     mmio.comb_inputs();
   }
@@ -1286,9 +1323,6 @@ void MemSubsystem::seq() {
   if (internal_axi_runtime_active_) {
     axi_kit_runtime->ddr.seq();
     axi_kit_runtime->mmio.seq();
-    axi_kit_runtime->router.seq(axi_kit_runtime->interconnect.axi_io,
-                                axi_kit_runtime->ddr.io,
-                                axi_kit_runtime->mmio.io);
     llc_seq(axi_kit_runtime->interconnect.get_llc_table_out(),
             axi_kit_runtime->interconnect.get_llc_perf_counters());
     axi_kit_runtime->interconnect.seq();
