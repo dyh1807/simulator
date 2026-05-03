@@ -131,6 +131,10 @@ inline int alloc_free_txid(const ICache_regs_t &regs) {
   }
   return -1;
 }
+
+inline uint32_t icache_line_base_addr(uint32_t ppn, uint32_t index) {
+  return (ppn << 12) | (index << icache_module_n::ICACHE_V1_OFFSET_BITS);
+}
 } // namespace
 
 ICache::ICache() {
@@ -148,6 +152,13 @@ ICache::ICache() {
   io.regs.miss_txid_valid_r = false;
   io.regs.miss_txid_r = 0;
   io.regs.miss_ready_seen_r = false;
+  io.regs.dcache_probe_inflight_r = false;
+  io.regs.dcache_probe_done_r = false;
+  io.regs.dcache_probe_hit_r = false;
+  io.regs.dcache_probe_word_r = 0;
+  for (uint32_t word = 0; word < word_num; ++word) {
+    io.regs.dcache_probe_data_r[word] = 0;
+  }
   for (int i = 0; i < 16; ++i) {
     io.regs.txid_inflight_r[i] = false;
     io.regs.txid_canceled_r[i] = false;
@@ -181,6 +192,13 @@ void ICache::reset() {
   io.regs.miss_txid_valid_r = false;
   io.regs.miss_txid_r = 0;
   io.regs.miss_ready_seen_r = false;
+  io.regs.dcache_probe_inflight_r = false;
+  io.regs.dcache_probe_done_r = false;
+  io.regs.dcache_probe_hit_r = false;
+  io.regs.dcache_probe_word_r = 0;
+  for (uint32_t word = 0; word < word_num; ++word) {
+    io.regs.dcache_probe_data_r[word] = 0;
+  }
   for (int i = 0; i < 16; ++i) {
     io.regs.txid_inflight_r[i] = false;
     io.regs.txid_canceled_r[i] = false;
@@ -425,6 +443,8 @@ void ICache::eval_state_machine() {
   io.out.ppn_ready = false;
   io.out.mem_resp_ready = false;
   io.out.mem_req_valid = false;
+  io.out.dcache_req_valid = false;
+  io.out.dcache_req_addr = 0;
   io.out.ifu_resp_valid = false;
   io.out.lookup_data_req_valid = false;
   io.out.lookup_data_req_index = 0;
@@ -462,6 +482,107 @@ void ICache::eval_state_machine() {
     io.reg_write.txid_canceled_r[resp_id] = false;
     io.reg_write.txid_inflight_r[resp_id] = false;
   }
+
+  auto reset_dcache_probe_regs = [&]() {
+    io.reg_write.dcache_probe_inflight_r = false;
+    io.reg_write.dcache_probe_done_r = false;
+    io.reg_write.dcache_probe_hit_r = false;
+    io.reg_write.dcache_probe_word_r = 0;
+    for (uint32_t word = 0; word < word_num; ++word) {
+      io.reg_write.dcache_probe_data_r[word] = 0;
+    }
+  };
+
+  struct DcacheProbeStep {
+    bool done = false;
+    bool hit = false;
+    uint32_t line[ICACHE_LINE_SIZE / 4] = {0};
+  };
+
+  auto step_dcache_probe = [&]() {
+    DcacheProbeStep step;
+    step.done = io.regs.dcache_probe_done_r;
+    step.hit = io.regs.dcache_probe_hit_r;
+    for (uint32_t word = 0; word < word_num; ++word) {
+      step.line[word] = io.regs.dcache_probe_data_r[word];
+    }
+
+    const uint32_t word_idx = io.regs.dcache_probe_word_r;
+    if (!io.regs.dcache_probe_done_r &&
+        !io.regs.dcache_probe_inflight_r &&
+        word_idx < word_num &&
+        io.regs.req_valid_r) {
+      io.out.dcache_req_valid = true;
+      io.out.dcache_req_addr =
+          icache_line_base_addr(io.regs.ppn_r, io.regs.req_index_r) +
+          (word_idx * 4u);
+      // The collaborator ICacheMemPort request has no ready signal; req_valid is
+      // treated as an accepted one-cycle request.
+      io.reg_write.dcache_probe_inflight_r = true;
+    }
+
+    if (io.regs.dcache_probe_inflight_r && io.in.dcache_resp_valid) {
+      io.reg_write.dcache_probe_inflight_r = false;
+      if (io.in.dcache_resp_miss) {
+        step.done = true;
+        step.hit = false;
+        io.reg_write.dcache_probe_done_r = true;
+        io.reg_write.dcache_probe_hit_r = false;
+      } else {
+        step.hit = true;
+        step.line[word_idx] = io.in.dcache_resp_data;
+        io.reg_write.dcache_probe_hit_r = true;
+        io.reg_write.dcache_probe_data_r[word_idx] = io.in.dcache_resp_data;
+        if (word_idx + 1u >= word_num) {
+          step.done = true;
+          io.reg_write.dcache_probe_done_r = true;
+        } else {
+          io.reg_write.dcache_probe_word_r = word_idx + 1u;
+        }
+      }
+    }
+    return step;
+  };
+
+  auto finish_refill = [&](const uint32_t *line_words, uint32_t replace_way,
+                           const char *debug_tag) {
+    state_next = IDLE;
+    mem_axi_state_next = AXI_IDLE;
+    if (io.regs.miss_txid_valid_r) {
+      io.reg_write.txid_inflight_r[io.regs.miss_txid_r & 0xF] = false;
+    }
+    io.reg_write.miss_txid_valid_r = false;
+    io.reg_write.miss_ready_seen_r = false;
+    reset_dcache_probe_regs();
+    perf_state_next.miss_penalty_active = false;
+    perf_state_next.miss_penalty_start_cycle = 0;
+    perf_state_next.axi_read_active = false;
+    perf_state_next.axi_read_start_cycle = 0;
+
+    if (!io.in.flush) {
+      io.table_write.we = true;
+      io.table_write.index = io.regs.req_index_r;
+      io.table_write.way = replace_way;
+      for (uint32_t word = 0; word < word_num; ++word) {
+        io.table_write.data[word] = line_words[word];
+      }
+      io.table_write.tag = io.regs.ppn_r;
+      io.table_write.valid = true;
+    }
+
+    if (!io.in.refetch && !io.in.flush) {
+      io.out.ifu_resp_valid = true;
+      for (uint32_t word = 0; word < word_num; ++word) {
+        io.out.rd_data[word] = line_words[word];
+      }
+      if (SIM_DEBUG_PRINT_ACTIVE &&
+          icache_trace_pc(io.out.ifu_resp_pc, sim_time)) {
+        dump_icache_module_line(debug_tag, sim_time, io, mem_gnt,
+                                io.out.rd_data);
+      }
+    }
+    req_ready_w = true;
+  };
 
   switch (state) {
   case IDLE:
@@ -587,6 +708,13 @@ void ICache::eval_state_machine() {
           // context. Latching it here avoids issuing the next-cycle AXI read
           // with the previous request's stale ppn_r under redirect pressure.
           io.reg_write.ppn_r = io.in.ppn;
+          io.reg_write.dcache_probe_inflight_r = false;
+          io.reg_write.dcache_probe_done_r = false;
+          io.reg_write.dcache_probe_hit_r = false;
+          io.reg_write.dcache_probe_word_r = 0;
+          for (uint32_t word = 0; word < word_num; ++word) {
+            io.reg_write.dcache_probe_data_r[word] = 0;
+          }
           io.reg_write.miss_txid_valid_r = true;
           io.reg_write.miss_txid_r = static_cast<uint8_t>(txid & 0xF);
           io.reg_write.miss_ready_seen_r = false;
@@ -612,6 +740,7 @@ void ICache::eval_state_machine() {
 
   case SWAP_IN:
     {
+    DcacheProbeStep dcache_step = step_dcache_probe();
     const bool req_ready_seen_now =
         (mem_axi_state == AXI_IDLE) && io.in.mem_req_ready &&
         io.regs.miss_txid_valid_r;
@@ -653,6 +782,7 @@ void ICache::eval_state_machine() {
         mem_axi_state_next = AXI_IDLE;
         io.reg_write.miss_txid_valid_r = false;
         io.reg_write.miss_ready_seen_r = false;
+        reset_dcache_probe_regs();
         perf_state_next.miss_penalty_active = false;
         perf_state_next.miss_penalty_start_cycle = 0;
         perf_state_next.axi_read_active = false;
@@ -661,6 +791,7 @@ void ICache::eval_state_machine() {
       } else if (req_waiting_accept) {
         state_next = CANCEL_WAIT_ACCEPT;
         mem_axi_state_next = AXI_IDLE;
+        reset_dcache_probe_regs();
         req_ready_w = false;
       } else {
         (void)req_may_complete_later;
@@ -668,6 +799,7 @@ void ICache::eval_state_machine() {
         mem_axi_state_next = AXI_IDLE;
         io.reg_write.miss_txid_valid_r = false;
         io.reg_write.miss_ready_seen_r = false;
+        reset_dcache_probe_regs();
         perf_state_next.miss_penalty_active = false;
         perf_state_next.miss_penalty_start_cycle = 0;
         perf_state_next.axi_read_active = false;
@@ -735,40 +867,56 @@ void ICache::eval_state_machine() {
         io.reg_write.txid_inflight_r[io.regs.miss_txid_r & 0xF] = false;
         io.reg_write.miss_txid_valid_r = false;
         io.reg_write.miss_ready_seen_r = false;
-        perf_state_next.miss_penalty_active = false;
-        perf_state_next.miss_penalty_start_cycle = 0;
         perf_state_next.axi_read_active = false;
         perf_state_next.axi_read_start_cycle = 0;
 
-        if (!io.in.flush) {
-          io.table_write.we = true;
-          io.table_write.index = io.regs.req_index_r;
-          io.table_write.way = replace_idx_next;
-          for (uint32_t word = 0; word < word_num; ++word) {
-            io.table_write.data[word] = mem_resp_data_w[word];
-          }
-          io.table_write.tag = io.regs.ppn_r;
-          io.table_write.valid = true;
+        if (!dcache_step.done) {
+          state_next = WAIT_DCACHE_AFTER_MEM;
+          req_ready_w = false;
+          break;
         }
-
-        if (!io.in.refetch && !io.in.flush) {
-          io.out.ifu_resp_valid = true;
-          for (uint32_t word = 0; word < word_num; ++word) {
-            io.out.rd_data[word] = mem_resp_data_w[word];
-          }
-          if (SIM_DEBUG_PRINT_ACTIVE &&
-              icache_trace_pc(io.out.ifu_resp_pc, sim_time)) {
-            dump_icache_module_line("SWAP_MEM_GNT", sim_time, io, mem_gnt,
-                                    io.out.rd_data);
-          }
-          req_ready_w = true;
-        } else {
-          req_ready_w = true;
-        }
+        finish_refill(dcache_step.hit ? dcache_step.line : mem_resp_data_w,
+                      replace_idx_next,
+                      dcache_step.hit ? "SWAP_DCACHE_HIT" : "SWAP_MEM_GNT");
       }
     }
     break;
     }
+
+  case WAIT_DCACHE_AFTER_MEM:
+    if (kill_pipe) {
+      state_next = IDLE;
+      mem_axi_state_next = AXI_IDLE;
+      io.reg_write.miss_txid_valid_r = false;
+      io.reg_write.miss_ready_seen_r = false;
+      reset_dcache_probe_regs();
+      perf_state_next.miss_penalty_active = false;
+      perf_state_next.miss_penalty_start_cycle = 0;
+      perf_state_next.axi_read_active = false;
+      perf_state_next.axi_read_start_cycle = 0;
+      req_ready_w = true;
+      break;
+    }
+    {
+      DcacheProbeStep dcache_step = step_dcache_probe();
+      if (!dcache_step.done) {
+        state_next = WAIT_DCACHE_AFTER_MEM;
+        req_ready_w = false;
+        break;
+      }
+      if (perf_state.miss_penalty_active &&
+          static_cast<uint64_t>(sim_time) >= perf_state.miss_penalty_start_cycle) {
+        perf.miss_penalty_valid = true;
+        perf.miss_penalty_cycles =
+            static_cast<uint64_t>(sim_time) - perf_state.miss_penalty_start_cycle;
+      }
+      finish_refill(dcache_step.hit ? dcache_step.line
+                                    : io.regs.mem_resp_data_r,
+                    io.regs.replace_idx,
+                    dcache_step.hit ? "DCACHE_HIT_AFTER_MEM"
+                                    : "MEM_GNT_AFTER_DCACHE_MISS");
+    }
+    break;
 
   case CANCEL_WAIT_ACCEPT:
     io.out.mem_req_valid = false;
@@ -783,6 +931,7 @@ void ICache::eval_state_machine() {
     mem_axi_state_next = AXI_IDLE;
     io.reg_write.miss_txid_valid_r = false;
     io.reg_write.miss_ready_seen_r = false;
+    reset_dcache_probe_regs();
     perf_state_next.miss_penalty_active = false;
     perf_state_next.miss_penalty_start_cycle = 0;
     perf_state_next.axi_read_active = false;
@@ -796,6 +945,7 @@ void ICache::eval_state_machine() {
       mem_axi_state_next = AXI_IDLE;
       io.reg_write.miss_txid_valid_r = false;
       io.reg_write.miss_ready_seen_r = false;
+      reset_dcache_probe_regs();
       perf_state_next.miss_penalty_active = false;
       perf_state_next.miss_penalty_start_cycle = 0;
       perf_state_next.axi_read_active = false;
@@ -816,6 +966,7 @@ void ICache::eval_state_machine() {
         io.reg_write.miss_txid_valid_r = false;
       }
       io.reg_write.miss_ready_seen_r = false;
+      reset_dcache_probe_regs();
       perf_state_next.miss_penalty_active = false;
       perf_state_next.miss_penalty_start_cycle = 0;
       perf_state_next.axi_read_active = false;
@@ -866,6 +1017,9 @@ void ICache::log_state() {
   case SWAP_IN:
     std::cout << "SWAP_IN";
     break;
+  case WAIT_DCACHE_AFTER_MEM:
+    std::cout << "WAIT_DCACHE_AFTER_MEM";
+    break;
   case CANCEL_WAIT_ACCEPT:
     std::cout << "CANCEL_WAIT_ACCEPT";
     break;
@@ -883,6 +1037,9 @@ void ICache::log_state() {
     break;
   case SWAP_IN:
     std::cout << "SWAP_IN";
+    break;
+  case WAIT_DCACHE_AFTER_MEM:
+    std::cout << "WAIT_DCACHE_AFTER_MEM";
     break;
   case CANCEL_WAIT_ACCEPT:
     std::cout << "CANCEL_WAIT_ACCEPT";
